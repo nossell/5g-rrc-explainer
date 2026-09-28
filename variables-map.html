@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UE 变量地图 · RRC 讲解器</title>
+<link rel="stylesheet" href="assets/site.css">
+<style>
+.vm-wrap{max-width:1080px;margin:0 auto;padding:34px 26px 70px}
+.vm-hero h1{font-size:26px;font-weight:800;letter-spacing:-.4px}
+.vm-hero .sub{color:var(--tx2);font-size:14px;margin-top:8px;line-height:1.7}
+.vm-statebar{display:flex;gap:0;margin-top:26px;border:1px solid var(--bd);border-radius:14px;overflow:hidden;background:var(--panel)}
+.vm-statebar>div{flex:1;padding:16px 18px;border-left:1px solid var(--bd)}
+.vm-statebar>div:first-child{border-left:none}
+.vm-st-name{font:800 15px var(--sans)}
+.vm-st-desc{font-size:12px;color:var(--tx2);margin-top:4px;line-height:1.6}
+.vm-st-vars{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
+.vm-chip{font:700 11px var(--mono);padding:3px 9px;border-radius:6px;background:var(--accent-bg);color:var(--accent-deep);cursor:pointer;border:1px solid transparent}
+.vm-chip:hover{border-color:var(--accent)}
+.vm-sweep{margin-top:16px;border:1px dashed var(--bd);border-radius:12px;padding:14px 18px;background:var(--inset);font-size:13px;color:var(--tx2);line-height:1.75}
+.vm-sweep b{color:var(--tx1)}
+.vm-group{margin-top:34px}
+.vm-group>h2{font-size:18px;font-weight:800;letter-spacing:-.2px}
+.vm-group>.gsub{color:var(--tx2);font-size:13px;margin-top:3px}
+.vm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;margin-top:14px}
+.vm-card{border:1px solid var(--bd);border-radius:12px;background:var(--panel);padding:15px 17px;cursor:pointer;transition:border-color .15s}
+.vm-card:hover{border-color:var(--accent)}
+.vm-card.open{border-color:var(--accent);box-shadow:var(--shadow-card)}
+.vm-top{display:flex;align-items:baseline;gap:10px}
+.vm-name{font:800 14px var(--mono);color:var(--tx1);overflow-wrap:anywhere}
+.vm-tag{font:700 10.5px var(--sans);color:var(--tx3);background:var(--inset);border-radius:5px;padding:2px 8px;flex:none}
+.vm-one{font-size:13px;color:var(--tx2);margin-top:6px;line-height:1.65}
+.vm-detail{display:none;margin-top:12px;border-top:1px dashed var(--bd);padding-top:10px}
+.vm-card.open .vm-detail{display:block}
+.vm-row{display:flex;gap:8px;margin-top:7px;font-size:12.5px;line-height:1.65}
+.vm-row b{flex:none;font-weight:800;color:var(--tx1);width:52px}
+.vm-row span{color:var(--tx2)}
+.vm-links{margin-top:10px;display:flex;gap:7px;flex-wrap:wrap}
+.vm-links a{font:700 11px var(--mono);text-decoration:none;color:var(--nas);background:#F5F0FE;border:1px solid #DDD3F5;border-radius:6px;padding:2px 9px}
+.vm-links a:hover{background:#EDE4FC}
+.vm-note{margin-top:26px;font-size:12.5px;color:var(--tx3);line-height:1.7;border-top:1px solid var(--bd);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="vm-wrap">
+  <header class="top" style="margin:-34px -26px 0;padding:0 26px">
+  <a class="brand" href="index.html">
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 15 L7.5 15 L10 8 L13 18 L15.5 12 L17.5 15 L21 15" stroke="#18A34A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="15" r="1.6" fill="#18A34A"/></svg>
+    RRC 讲解器
+  </a>
+  <nav class="topnav">
+    <a class="navlink" href="index.html">目录</a>
+    <a class="navlink" href="app.html">课程</a>
+    <a class="navlink" href="dict.html">词典</a>
+    <a class="navlink" href="anim.html">动画</a>
+    <a class="navlink" href="timer-net.html">定时器网</a>
+    <a class="navlink on" href="variables-map.html">变量地图</a>
+    <a class="navlink" href="log-detective.html">日志侦探</a>
+  </nav>
+  </header>
+  <section class="vm-hero">
+    <h1>UE 变量地图——协议在我身上留下的记忆</h1>
+    <p class="sub">定时器网看 RRC 的<b>心跳</b>（行为），这张图看它的<b>记忆</b>（变量）。协议文本里散落各章的 UE 变量，在这里摆成一张按状态分栏的地图。<b>每个变量回答三个问题：谁写我、谁读我、何时被清空</b>——UE 不是无状态的傻瓜终端，它带着一柜子档案在三种状态间搬家。</p>
+  </section>
+
+  <div class="vm-statebar" id="vm-statebar"></div>
+  <div class="vm-sweep" id="vm-sweep"></div>
+  <div id="vm-groups"></div>
+
+  <p class="vm-note">内容纪律：变量行为为自写讲解（含条款号锚点，正式定义见 TS 38.331 §7.4"UE variables"），不搬运规范原文；全部条目可与课程字段树互证。姊妹篇：定时器交互网（timer-net.html）管"什么时候做"，本页管"记住了什么"。</p>
+</div>
+
+<footer style="border-top:1px solid var(--bd);padding:18px 0;text-align:center;color:var(--tx3);font-size:12.5px">
+  <div class="wrap" style="max-width:1080px;margin:0 auto;padding:0 26px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div class="flinks"><a href="index.html">目录</a><a href="app.html">课程</a><a href="dict.html">词典</a><a href="timer-net.html">定时器网</a></div>
+    <div>RRC 讲解器 · 内部视角组件 #2（UE 变量地图）</div>
+  </div>
+</footer>
+
+<script src="assets/engine.js"></script>
+<script src="assets/content/iedict.js"></script>
+<script>
+(function () {
+  'use strict';
+  /* 三问：write 谁写我 / read 谁读我 / clear 何时清空；fields 存什么 */
+  var VARS = [
+    /* ---------- 第一幕：跨态行李（三态都带走的档案） ---------- */
+    { id: 'VarMobilityHistoryReport', group: 'luggage', tag: '履历本', one: '我去过哪些小区、各待了多久——网络自优化（SON）最爱读的一手资料。',
+      write: '每次更换服务小区时追加一条 VisitedCellList（含小区标识+驻留时长）', read: '网络发 UEInformationRequest 来借（5.7.9.3），随 UEInformationResponse 交出',
+      clear: '按网络指示清除；写满上限（maxCellReported）滚动丢弃最旧条目', fields: 'VisitedCellList：CGI/PCI + 时间戳',
+      links: [['Xn 课 · UE History Information（对端也在收集）', 'app.html#mx'], ['切换课', 'app.html#m4']], ref: '38.331 §5.7.9.2/§5.7.9.3/§7.4' },
+    { id: 'VarRLF-Report', group: 'luggage', tag: '事故报告', one: '无线链路失败/切换失败的现场记录——摔了跤要写清楚在哪摔的。',
+      write: 'RLF、切换失败、重建失败发生时记录现场（失败小区/时间/此前最后一次测量）', read: '重建成功后网络来取（5.3.7.3）；换小区成功进连接后也可来取',
+      clear: '上报后清除；超时（T330 门限）作废', fields: '失败位置与时间、最近测量结果（measResultLastServCell 等）',
+      links: [['动画 · 链路重建（事故现场回放）', 'anim.html'], ['切换课 · 失败幕', 'app.html#m4']], ref: '38.331 §5.3.10.x/§5.3.7.3/§7.4' },
+    { id: 'VarConnEstFailReport', group: 'luggage', tag: '接入小票', one: '上次接入失败的小票（失败小区+当时信号）——下次敲门时主动上交。',
+      write: 'T300 超时/接入尝试失败时记录（失败小区测量 measResultFailedCell）；Rel-17 起支持多张小票（+List）', read: '下次 RRCSetupComplete / RRCReconfigurationComplete / ResumeRequest 流程中捎给网络（5.3.3.4）',
+      clear: '已上报即清；RPLMN/注册 SNPN 与记录时不符则丢弃（票据过期）', fields: '失败小区标识+当时测量',
+      links: [['接入课 · T300 超时', 'app.html#ma'], ['定时器网 · T300', 'timer-net.html']], ref: '38.331 §5.3.3.7/§5.3.3.4/§7.4' },
+    { id: 'VarLogMeasReport', group: 'luggage', tag: '行车记录仪', one: '记录式 MDT 的日志缓存——睡眠状态下也在默默录像，醒来交给网络。',
+      write: 'IDLE/INACTIVE 期间按网络预配置持续记录（覆盖/时间/位置样本）', read: '下次进连接，网络用 UEInformationRequest 来取',
+      clear: '上报后清除；记录超期（日志时长上限）作废', fields: 'Logged measurement 样本序列',
+      links: [['定时器网（记录期与各定时器的纠缠）', 'timer-net.html']], ref: '38.331 §5.5a/§7.4' },
+    /* ---------- 第二幕：CONNECTED 工作记忆 ---------- */
+    { id: 'VarMeasConfig', group: 'connected', tag: '任务书', one: '当前生效的测量配置全集——测什么、怎么滤波、何时报告，全在这一册。',
+      write: 'RRCReconfiguration 的 measConfig 增删改后更新（5.3.5.3）——M4 测量课那张 66 行大树的最终归宿', read: '每个测量判定动作都要查它（5.5.1/5.5.2.x）',
+      clear: 'measConfig 释放（release 字段）；离开 CONNECTED（回 IDLE/INACTIVE）随大扫除释放', fields: '测量对象/报告配置/量距/门限/滤波系数/测量缺口',
+      links: [['测量课 · measConfig 全链', 'app.html#m3'], ['词条：measConfig', 'dict.html#k=measConfig']], ref: '38.331 §5.3.5.3/§5.5.1/§7.4' },
+    { id: 'VarMeasReportList', group: 'connected', tag: '成绩册', one: '每个 measId 一页：对象+报告配置配成对，触发条件一满足就翻到那页抄答案。',
+      write: 'measObject 与 reportConfig 绑定生效时建条目；触发报告时记录数量与最佳小区', read: '发 MeasurementReport 时按 measId 取数',
+      clear: '对应测量对象/报告配置删除时移除条目', fields: 'measId → 数量/最佳小区/次佳小区',
+      links: [['测量课 · MeasurementReport', 'app.html#m3']], ref: '38.331 §5.5.1/§5.5.2.x/§7.4' },
+    { id: 'VarConditionalReconfig', group: 'connected', tag: '备用方案夹', one: 'CHO/CPC 候选配置清单——网络预先发的 N 套搬家方案，条件一到自己挑一套执行。',
+      write: 'RRCReconfiguration 的 condReconfigToAddMod 逐条存入（MCG/SCG 各一本，5.3.5.3）', read: '执行条件满足时取出对应候选配置执行（5.3.5.13.x，T316 沙漏同时启动）',
+      clear: '候选执行后清该条；condReconfigToRemove 删除；SCG 释放/回 IDLE 时全部清空（5.3.5.4/§5.3.11）', fields: 'condReconfigId → 执行条件 + 完整 RRCReconfiguration',
+      links: [['切换课 · CHO 第四场景', 'app.html#m4'], ['定时器网 · T316', 'timer-net.html']], ref: '38.331 §5.3.5.3/§5.3.5.13.x/§7.4' },
+    { id: 'VarServingSecurityCellSetID', group: 'connected', tag: '安全区标', one: 'CHO 候选的安全域标记——哪片候选小区能用同一把备用钥匙（sk-Counter）。',
+      write: '候选配置带 securityCellSetId 时记入（5.3.5.13.1）', read: '候选执行时据此选 sk-Counter 做密钥更新（5.3.5.13.8）',
+      clear: '随 VarConditionalReconfig 条目同进退', fields: 'securityCellSetId → sk-CounterList',
+      links: [['切换课 · CHO', 'app.html#m4'], ['Xn 课 · SK-counter（对端账本）', 'app.html#mx']], ref: '38.331 §5.3.5.13.1/§5.3.5.13.8' },
+    { id: 'VarShortMAC-Input', group: 'connected', tag: '重建防伪章原料', one: '重建时算 shortMAC-I 的原料（源/目标 PCI+C-RNTI）——求救信上的火漆。',
+      write: '由当前服务配置导出（源小区 PCI、目标小区 PCI、C-RNTI 等，5.3.7.4 使用时构造）', read: '发 RRCReestablishmentRequest 时对 ASN.1 编码算 16bit shortMAC-I',
+      clear: '重建流程结束（成功恢复连接或失败回 IDLE）', fields: 'PCI×2 + C-RNTI + 完整性保护算法',
+      links: [['切换课 · 重建请求', 'app.html#m4'], ['动画 · 链路重建', 'anim.html']], ref: '38.331 §5.3.7.4/§7.4' },
+    /* ---------- 第三幕：INACTIVE 睡眠记忆 ---------- */
+    { id: 'UE Inactive AS 上下文', group: 'inactive', tag: '行李箱', one: '挂起时的全部家当——收到 suspendConfig 的那一刻打包封存，醒来原样取出。',
+      write: 'RRCRelease 带 suspendConfig 时存储（I-RNTI/t380/RNA/密钥计数+当前全套配置，5.3.8.3）', read: 'Resume 流程中恢复 SRB/DRB 配置、续用测量配置（5.3.13.4：restore masterCellGroup 等）',
+      clear: '回到 RRC_IDLE 时 discard（§5.3.11 大扫除第 1 条）；Resume 成功开箱后同样 discard（5.3.13.4）', fields: 'I-RNTI/t380/ran-PagingCycle/RNA 配置 + 挂起前全套 AS 配置',
+      links: [['INACTIVE 课 · 挂起六件套', 'app.html#m6'], ['Xn 课 · RETRIEVE（对站移交的就是它的镜像）', 'app.html#mx']], ref: '38.331 §5.3.8.3/§5.3.13.4/§5.3.11' },
+    { id: 'VarResumeMAC-Input', group: 'inactive', tag: '恢复防伪章原料', one: '醒来后证明"行李是我的"的原料——和重建的防伪章同款设计，两套变量。',
+      write: '进入 INACTIVE 时随行李箱一起封存（源小区配置导出，随 5.3.8.3 的上下文存储）', read: '发 RRCResumeRequest 时对 ASN.1 编码算 16bit resumeMAC-I（5.3.13.3）',
+      clear: '离开 INACTIVE（成功恢复→开箱转入连接态变量体系；失败回 IDLE→随行李箱丢弃）', fields: '源小区 PCI+C-RNTI+完整性算法+目标小区标识',
+      links: [['INACTIVE 课 · 恢复请求', 'app.html#m6'], ['Xn 课 · Integrity protection（凭据跨接口接力）', 'app.html#mx']], ref: '38.331 §5.3.8.3/§5.3.13.3/§7.4' },
+    /* ---------- 第四幕：IDLE 生存技能 ---------- */
+    { id: 'VarMeasReselectionConfig', group: 'idle', tag: '重选攻略', one: 'IDLE/INACTIVE 态的生存法则——测哪些频点、按什么优先级换小区。',
+      write: '离开连接态时从广播 SIB 与专用信令汇编（5.3.8.3/5.3.13.4）；含广播版与增强版（VarMeasIdleConfig 族）', read: '小区重选判定全程查它（5.7.8.x：R 准则/S 准则/同频异频规则）',
+      clear: '进入连接态时释放；专用优先级另有 T320 保质期，到期回归广播默认值', fields: '频点优先级/门限/迟滞等重选参数',
+      links: [['定时器网 · T320（优先级保质期）', 'timer-net.html'], ['系统消息课', 'app.html#m1']], ref: '38.331 §5.3.8.3/§5.7.8.x' },
+    { id: 'VarSuccessHO-Report 族', group: 'connected', tag: '成功样本', one: '成功切换/PSCell 变更也要留样——自优化不只研究失败，也研究成功（避免切早了/切晚了）。',
+      write: '切换成功（VarSuccessHO-Report）/PSCell 变更成功（VarSuccessPSCell-Report）后记录（5.7.10.6/5.7.10.7）', read: '网络发 UEInformationRequest 来取（5.7.10.3）',
+      clear: '上报后清除', fields: '切换时机/源目标小区/当时条件',
+      links: [['切换课 · 成功侧的故事', 'app.html#m4']], ref: '38.331 §5.7.10.6/§5.7.10.7' }
+  ];
+
+  var GROUPS = {
+    luggage: ['第一幕 · 跨态行李', '履历、事故报告、接入小票——三种状态搬家都带着，见到网络随时上交'],
+    connected: ['第二幕 · CONNECTED 工作记忆', '任务书、成绩册、备用方案夹——连接态的高频读写区'],
+    inactive: ['第三幕 · INACTIVE 睡眠记忆', '行李箱与防伪章——"寄存行李"买来的快速恢复'],
+    idle: ['第四幕 · IDLE 生存技能', '重选攻略——没人管的时候自己找路']
+  };
+  var STATES = [
+    { name: 'RRC_IDLE', desc: '深度睡眠 · 周期醒来看寻呼', t: ['VarMeasReselectionConfig', 'VarMobilityHistoryReport', 'VarLogMeasReport', 'VarRLF-Report', 'VarConnEstFailReport'] },
+    { name: 'RRC_INACTIVE', desc: '浅睡 · 行李箱随身（五件套）', t: ['UE Inactive AS 上下文', 'VarResumeMAC-Input', 'VarMeasReselectionConfig', 'VarMobilityHistoryReport', 'VarLogMeasReport'] },
+    { name: 'RRC_CONNECTED', desc: '全连接 · 工作记忆满载', t: ['VarMeasConfig', 'VarMeasReportList', 'VarConditionalReconfig', 'VarShortMAC-Input'] },
+    { name: '跨态行李柜', desc: '三态都带 · 见网络就交', t: ['VarMobilityHistoryReport', 'VarRLF-Report', 'VarConnEstFailReport', 'VarLogMeasReport'] }
+  ];
+  var SWEEP = '<b>§5.3.11 · 回 IDLE 的大扫除（读源码数出来的清单）</b>：discard <b>UE Inactive AS 上下文</b>、release suspendConfig → remove 所有 <b>VarConditionalReconfig</b> 条目 → 丢弃 <b>KgNB/S-KgNB/KRRCenc/KRRCint/KUPint/KUPenc 全部密钥</b> → 丢弃 VarCSI-LogMeasReport 条目与未发完的分段消息。一张清单看懂"哪些记忆不许过夜"——安全记忆零残留，履历记忆保留。';
+
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function card(t) {
+    return '<div class="vm-card" data-t="' + esc(t.id) + '">' +
+      '<div class="vm-top"><span class="vm-name">' + esc(t.id) + '</span><span class="vm-tag">' + esc(t.tag) + '</span></div>' +
+      '<div class="vm-one">' + esc(t.one) + '</div>' +
+      '<div class="vm-detail">' +
+      '<div class="vm-row"><b>谁写我</b><span>' + esc(t.write) + '</span></div>' +
+      '<div class="vm-row"><b>谁读我</b><span>' + esc(t.read) + '</span></div>' +
+      '<div class="vm-row"><b>何时清</b><span>' + esc(t.clear) + '</span></div>' +
+      '<div class="vm-row"><b>存什么</b><span>' + esc(t.fields) + '</span></div>' +
+      '<div class="vm-row"><b>出处</b><span>' + esc(t.ref) + '</span></div>' +
+      '<div class="vm-links">' + t.links.map(function (l) { return '<a href="' + l[1] + '">' + esc(l[0]) + '</a>'; }).join('') + '</div>' +
+      '</div></div>';
+  }
+
+  var sb = document.getElementById('vm-statebar');
+  sb.innerHTML = STATES.map(function (st) {
+    return '<div><div class="vm-st-name">' + esc(st.name) + '</div><div class="vm-st-desc">' + esc(st.desc) + '</div>' +
+      '<div class="vm-st-vars">' + st.t.map(function (id) {
+        return '<span class="vm-chip" data-jump="' + esc(id) + '">' + esc(id.length > 22 ? id.slice(0, 21) + '…' : id) + '</span>';
+      }).join('') + '</div></div>';
+  }).join('');
+
+  document.getElementById('vm-sweep').innerHTML = SWEEP;
+
+  var root = document.getElementById('vm-groups');
+  root.innerHTML = Object.keys(GROUPS).map(function (g) {
+    return '<div class="vm-group"><h2>' + esc(GROUPS[g][0]) + '</h2><div class="gsub">' + esc(GROUPS[g][1]) + '</div>' +
+      '<div class="vm-cards">' + VARS.filter(function (t) { return t.group === g; }).map(card).join('') + '</div></div>';
+  }).join('');
+
+  root.addEventListener('click', function (e) {
+    var c = e.target.closest('.vm-card');
+    if (c) c.classList.toggle('open');
+  });
+  sb.addEventListener('click', function (e) {
+    if (!e.target.dataset || !e.target.dataset.jump) return;
+    var id = e.target.dataset.jump;
+    var c = root.querySelector('.vm-card[data-t="' + id.replace(/"/g, '\\"') + '"]');
+    if (c) { c.classList.add('open'); c.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RRC 讲解器 — 交互式信令播放</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <a class="brand" href="index.html">
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 15 L7.5 15 L10 8 L13 18 L15.5 12 L17.5 15 L21 15" stroke="#18A34A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="15" r="1.6" fill="#18A34A"/></svg>
+    RRC 讲解器
+  </a>
+  <nav class="topnav">
+    <a class="navlink" href="index.html">目录</a>
+    <a class="navlink on" href="app.html">课程</a>
+    <a class="navlink" href="dict.html">词典</a>
+    <a class="navlink" href="anim.html">动画</a>
+    <a class="navlink" href="timer-net.html">定时器网</a>
+    <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink" href="log-detective.html">日志侦探</a>
+  </nav>
+</header>
+
+<div class="crumb">
+  <div class="path" id="crumb"></div>
+  <div class="modnav" id="modnav"></div>
+</div>
+<div class="verify-banner">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+  <span>本页讲解为项目自写内容（非 3GPP 规范原文），155 条论断已逐条与规范原文比对（点 §徽章可查看出处短引）——学习时仍请以 3GPP 正式文本为准。</span>
+</div>
+<div id="view"></div>
+</div>
+
+<footer>
+  <div class="flinks"><a href="index.html">模块目录</a></div>
+  <div><b>内容纪律：</b>全部文案与图示为本项目自写自绘，不复制 3GPP 规范原文（版权红线）。快捷键：<span class="mono">←</span> <span class="mono">→</span> 步进 · <span class="mono">Space</span> 播放/暂停。</div>
+</footer>
+
+<script src="assets/engine.js"></script>
+<script src="assets/player.js"></script>
+<script src="assets/content/iedict.js"></script>
+<script src="assets/content/ma.js"></script>
+<script src="assets/content/core.js"></script>
+<script src="assets/content/spec-quotes.js"></script>
+<script>
+(function () {
+  var store = RRC.Store();
+  var PAID = { m1:'M2 · 系统消息', m2:'M3 · 寻呼与 DRX', m3:'M4 · 测量事件', m4:'M5 · 切换全流程', m5:'M6 · 承载与重配置', m6:'M7 · RRC_INACTIVE', m7:'M8 · AS 安全激活', m8:'M9 · EN-DC 互操作', mi:'M10 · NG 接口课', mx:'M11 · Xn 接口课' };
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function currentId() {
+    var h = (location.hash || '#m0').slice(1);
+    if (RRC.get(h)) return h;
+    if (PAID[h]) return '__paid__' + h;
+    return 'm0';
+  }
+  function renderPaid(id) {
+    var label = PAID[id];
+    document.title = label + ' · 完整版 · RRC 讲解器';
+    document.getElementById('crumb').innerHTML = '<a href="index.html">目录</a><span>/</span><span class="cur">' + esc(label) + '</span><span>完整版模块</span>';
+    document.getElementById('modnav').innerHTML = '';
+    var view = document.getElementById('view');
+    if (window.RRCPlayer) { try { window.RRCPlayer.unmount(); } catch (e) {} }
+    view.innerHTML = '<div class="gate-wrap"><div class="gate">' +
+      '<div class="g-kicker">完整版模块 · 12 模块课程线</div>' +
+      '<h2>' + esc(label) + '</h2>' +
+      '<p class="g-sub">本站为免费层：M0 接入全流程、M1 连接建立两课与全部工具页开放体验</p>' +
+      '<ul><li>✓ 本模块含原表全量字段树 / 失败分支全集 / 决策点 / 结课测验</li>' +
+      '<li>✓ 全部 155 条论断已逐条比对 3GPP 原文，§徽章点开即见出处短引</li>' +
+      '<li>✓ 买断后浏览器本地永久离线可用</li></ul>' +
+      '<div class="g-price">完整版 12 模块 · 内测期全套 <b>¥99</b> / 单模块 <b>¥12</b></div>' +
+      '<div class="g-actions"><a class="btn primary" href="README.md#获取完整版">获取完整版</a>' +
+      '<a class="btn" href="#ma">← 回免费课继续</a></div></div></div>';
+  }
+  function render() {
+    var id = currentId();
+    if (id.indexOf('__paid__') === 0) { renderPaid(id.slice('__paid__'.length)); return; }
+    var m = RRC.get(id);
+    document.title = m.title + ' · RRC 讲解器';
+    var ids = RRC.order(), i = ids.indexOf(id);
+    var crumb = document.getElementById('crumb');
+    crumb.innerHTML = '<a href="index.html">目录</a><span>/</span><span class="cur">M' + m.num + ' · ' + m.title + '</span><span>' + (m.free ? '免费课' : '付费模块') + '（' + m.tech + '，' + m.minutes + ' 分钟）</span>';
+    var nav = document.getElementById('modnav');
+    nav.innerHTML = '';
+    if (i > 0) { var p = RRC.get(ids[i - 1]); nav.innerHTML += '<a class="btn sm" href="#' + ids[i - 1] + '">← M' + p.num + ' ' + p.title + '</a>'; }
+    if (i < ids.length - 1) { var n = RRC.get(ids[i + 1]); nav.innerHTML += '<a class="btn sm" href="#' + ids[i + 1] + '">M' + n.num + ' ' + n.title + ' →</a>'; }
+    var view = document.getElementById('view');
+    if (window.RRCPlayer) { try { window.RRCPlayer.unmount(); } catch (e) {} }
+    if (m.free || store.license().demo) {
+      RRC.mountPlayer(view, id, { store: store });
+    } else {
+      RRC.Gate.render(view, id, store, render);
+    }
+  }
+  window.addEventListener('hashchange', render);
+  render();
+})();
+</script>
+</body>
+</html>

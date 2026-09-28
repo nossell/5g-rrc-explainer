@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>流程动画资产库 — RRC 讲解器</title>
+<meta name="description" content="自绘 SVG 流程动画资产库：把 3GPP 流程讲成看得见的故事。第一件资产：接入全流程（注册/Attach）60 秒动画。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <a class="brand" href="index.html">
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 15 L7.5 15 L10 8 L13 18 L15.5 12 L17.5 15 L21 15" stroke="#18A34A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="15" r="1.6" fill="#18A34A"/></svg>
+    RRC 讲解器
+  </a>
+  <nav class="topnav">
+    <a class="navlink" href="index.html">目录</a>
+    <a class="navlink" href="app.html">课程</a>
+    <a class="navlink" href="dict.html">词典</a>
+    <a class="navlink on" href="anim.html">动画</a>
+    <a class="navlink" href="timer-net.html">定时器网</a>
+    <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink" href="log-detective.html">日志侦探</a>
+  </nav>
+</header>
+
+<section class="hero" style="padding-top:26px;max-width:760px">
+  <h1 style="font-size:25px">流程动画资产库</h1>
+  <p class="sub">每件动画都是<b>自绘矢量（SVG）+ 自写脚本</b>的私有资产：同一个动画引擎（时间轴/节拍/字幕/跳转），配上不同流程的"道具剧本"。现有三件——接入、切换、掉线救场——后续按模块持续追加。</p>
+</section>
+
+<section class="intro-sec">
+  <h2 class="sec">01 · 接入全流程（注册 / Attach）</h2>
+  <p class="sec-sub">九拍讲完一场"落户"：喊一嗓子 → 空中握手 → 捎带信件 → 验身 → 交钥匙 → 上锁 → 登记能力 → 装网卡 → 在线。点进度点可跳任意节拍。</p>
+  <div id="attach-anim"></div>
+  <div class="who-row" style="margin-top:14px">
+    <a class="btn primary" href="app.html#ma">进入第一课（逐帧交互版）</a>
+    <a class="btn" href="index.html#flow">回到导读页</a>
+  </div>
+</section>
+
+<section class="intro-sec">
+  <h2 class="sec">02 · 切换全流程（XN 站间）</h2>
+  <p class="sec-sub">十二拍讲完一场"搬家"：侦察报告 → 托运备房 → 搬家命令（T304 沙漏）→ 断旧迎新 → 交接账本 → 新家签收 → 数据改道 → 源站销户。源熄新明的全过程一镜到底。</p>
+  <div id="handover-anim"></div>
+  <div class="who-row" style="margin-top:14px">
+    <a class="btn primary" href="app.html#m4">进入切换课（四场景交互版）</a>
+    <a class="btn" href="timer-net.html">T304/T316 定时器对照</a>
+  </div>
+</section>
+
+<section class="intro-sec">
+  <h2 class="sec">03 · 掉线救场（RLF 与 RRC 重建）</h2>
+  <p class="sec-sub">八拍讲一场"断线自救"：连续失步（N310）→ T310 到期宣布失败 → 三件套求救信（C-RNTI+PCI+shortMAC-I 防伪章）→ 档案找回 → 链路重生续传。救场不成才回 IDLE。</p>
+  <div id="reestablish-anim"></div>
+  <div class="who-row" style="margin-top:14px">
+    <a class="btn primary" href="app.html#m4">切换课 · 失败幕与重建请求</a>
+    <a class="btn" href="app.html#m6">INACTIVE 课 · 恢复三件套对照</a>
+  </div>
+</section>
+
+<section class="intro-sec">
+  <h2 class="sec">资产规约（后续动画按此追加）</h2>
+  <div class="checklist">
+    <div class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg><span>引擎复用：RRC.FlowAnim.mount(root, scriptId)——时间轴、节拍字幕、进度点、跳转全部内置<i>· assets/flowanim.js</i></span></div>
+    <div class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg><span>剧本即资产：props（信封/钥匙/锁/卡/档案/问卷）+ beats（每拍一句白话）<i>· SCRIPTS 表追加</i></span></div>
+    <div class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg><span>零依赖矢量：file:// 离线可用，无第三方图库与字体依赖<i>· 版权干净</i></span></div>
+    <div class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg><span>内容纪律同课程：字幕只做比喻讲解，不搬运规范原文<i>· 挂课程锚点</i></span></div>
+  </div>
+</section>
+
+<footer>
+  <div class="flinks"><a href="index.html">目录</a></div>
+  <div><b>内容纪律：</b>全部动画为自写自绘矢量资产；剧情与讲解基于 3GPP 条款自写，不复制规范原文。</div>
+</footer>
+</div>
+
+<script src="assets/flowanim.js"></script>
+<script src="assets/flowanim2.js"></script>
+<script>
+RRC.FlowAnim.mount(document.getElementById('attach-anim'), 'attach', { autoplay: true });
+RRC.FlowAnim.mount(document.getElementById('handover-anim'), 'handover', { autoplay: false });
+RRC.FlowAnim.mount(document.getElementById('reestablish-anim'), 'reestablish', { autoplay: false });
+</script>
+</body>
+</html>

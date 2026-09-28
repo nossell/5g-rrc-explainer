@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>信令日志侦探 · RRC 讲解器</title>
+<link rel="stylesheet" href="assets/site.css">
+<style>
+.ld-wrap{max-width:1080px;margin:0 auto;padding:34px 26px 70px}
+.ld-hero h1{font-size:26px;font-weight:800;letter-spacing:-.4px}
+.ld-hero .sub{color:var(--tx2);font-size:14px;margin-top:8px;line-height:1.7}
+.ld-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.ld-meta span{font:700 11px var(--sans);color:var(--tx3);background:var(--inset);border-radius:5px;padding:3px 10px}
+.ld-tabs{display:flex;gap:8px;margin-top:22px;flex-wrap:wrap}
+.ld-tab{font:800 13px var(--sans);border:1px solid var(--bd);border-radius:9px;padding:9px 16px;cursor:pointer;background:var(--panel);color:var(--tx1)}
+.ld-tab small{display:block;font:600 10.5px var(--sans);color:var(--tx3);margin-top:2px}
+.ld-tab:hover{border-color:var(--accent)}
+.ld-tab.on{border-color:var(--accent);background:var(--accent-bg);color:var(--accent-deep)}
+.ld-brief{margin-top:14px;border:1px dashed var(--bd);border-radius:12px;padding:12px 18px;background:var(--inset);font-size:13px;color:var(--tx2);line-height:1.75}
+.ld-brief b{color:var(--tx1)}
+.ld-legend{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:18px}
+.ld-leg{border:1px solid var(--bd);border-radius:10px;background:var(--panel);padding:11px 14px;font-size:12.5px;line-height:1.6;color:var(--tx2)}
+.ld-leg b{display:block;font:800 12.5px var(--mono);color:var(--tx1);margin-bottom:3px}
+.ld-table{margin-top:20px;border:1px solid var(--bd);border-radius:12px;overflow:hidden;background:var(--panel)}
+.ld-row{display:flex;align-items:center;gap:10px;padding:8px 14px;border-top:1px solid var(--bd);font-size:12.5px}
+.ld-row:first-child{border-top:none}
+.ld-row:hover{background:var(--inset)}
+.ld-row.note{background:repeating-linear-gradient(45deg,transparent,transparent 8px,rgba(0,0,0,.02) 8px,rgba(0,0,0,.02) 16px)}
+.ld-ts{flex:none;font:700 11px var(--mono);color:var(--tx3);width:86px}
+.ld-if{flex:none;font:800 10.5px var(--mono);width:44px;text-align:center;border-radius:4px;padding:2px 0}
+.ld-if.uu{background:#E7F6EC;color:#18753C}
+.ld-if.xn{background:#FFF4E0;color:#92600A}
+.ld-if.ng{background:#F5F0FE;color:#6D3FBF}
+.ld-if.sctp{background:#EEF2F8;color:#3D5A80}
+.ld-if.note{background:#F0EDE6;color:#8A8578}
+.ld-dir{flex:none;font:700 11px var(--mono);color:var(--tx3);width:58px}
+.ld-msg{flex:1;min-width:0;font:700 12px var(--mono);color:var(--tx1);overflow-wrap:anywhere}
+.ld-ie{flex:none;max-width:32%;font:400 11.5px var(--mono);color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ld-row select{flex:none;font:700 11.5px var(--sans);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;background:#fff;color:var(--tx1);max-width:150px}
+.ld-row.right{background:#F0FAF3}
+.ld-row.right select{border-color:#18A34A;color:#18753C}
+.ld-row.wrong{background:#FDF1F1}
+.ld-row.wrong select{border-color:#C0392B;color:#C0392B}
+.ld-why{display:none;flex-basis:100%;font-size:12px;color:var(--tx2);line-height:1.65;padding:2px 0 6px 96px}
+.ld-row.judged .ld-why{display:block}
+.ld-actions{margin-top:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.ld-btn{font:800 13px var(--sans);border:none;border-radius:8px;padding:9px 20px;cursor:pointer;background:var(--accent,#18A34A);color:#fff}
+.ld-btn:hover{filter:brightness(.95)}
+.ld-btn.ghost{background:var(--inset);color:var(--tx1);border:1px solid var(--bd)}
+.ld-score{font:800 14px var(--sans);color:var(--tx1)}
+.ld-note{margin-top:26px;font-size:12.5px;color:var(--tx3);line-height:1.7;border-top:1px solid var(--bd);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="ld-wrap">
+  <header class="top" style="margin:-34px -26px 0;padding:0 26px">
+  <a class="brand" href="index.html">
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 15 L7.5 15 L10 8 L13 18 L15.5 12 L17.5 15 L21 15" stroke="#18A34A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="15" r="1.6" fill="#18A34A"/></svg>
+    RRC 讲解器
+  </a>
+  <nav class="topnav">
+    <a class="navlink" href="index.html">目录</a>
+    <a class="navlink" href="app.html">课程</a>
+    <a class="navlink" href="dict.html">词典</a>
+    <a class="navlink" href="anim.html">动画</a>
+    <a class="navlink" href="timer-net.html">定时器网</a>
+    <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink on" href="log-detective.html">日志侦探</a>
+  </nav>
+  </header>
+  <section class="ld-hero">
+    <h1>信令日志侦探——把课程知识变成查错能力</h1>
+    <p class="sub">网优/测试岗的日常：面对一屏日志，第一眼要看出<b>这是哪条流程的第几步、顺不顺、卡在哪</b>。下面是若干份<b>完全合成的脱敏案卷</b>，给你的任务：逐行标注它属于哪个故事段。选完交卷，逐行判分并给出正解推理。</p>
+    <div class="ld-meta"><span>四案卷 · 共 71 行 · 三接口（Uu / Xn-C / NG-C）</span><span>合成数据 · 与任何真实网络无关</span></div>
+  </section>
+
+  <div class="ld-tabs" id="ld-tabs"></div>
+  <div class="ld-brief" id="ld-brief"></div>
+  <div class="ld-legend" id="ld-legend"></div>
+  <div class="ld-table" id="ld-table"></div>
+
+  <div class="ld-actions">
+    <button class="ld-btn" id="ld-judge">交卷 · 逐行判分</button>
+    <button class="ld-btn ghost" id="ld-reset">清空重做</button>
+    <span class="ld-score" id="ld-score"></span>
+  </div>
+
+  <p class="ld-note">内容纪律：日志为自写合成样例（时间戳/ID/参数均虚构），用于训练"流程归属"的读日志方法论，不复制任何真实网络数据或 3GPP 原文。案件涉及流程的完整版见对应课程。候选新案卷：寻呼丢失定位（eDRX/PO 错过链）。</p>
+</div>
+
+<footer style="border-top:1px solid var(--bd);padding:18px 0;text-align:center;color:var(--tx3);font-size:12.5px">
+  <div class="wrap" style="max-width:1080px;margin:0 auto;padding:0 26px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div class="flinks"><a href="index.html">目录</a><a href="app.html">课程</a><a href="dict.html">词典</a><a href="variables-map.html">变量地图</a></div>
+    <div>RRC 讲解器 · P1 动手组件（信令日志侦探）</div>
+  </div>
+</footer>
+
+<script src="assets/engine.js"></script>
+<script>
+(function () {
+  'use strict';
+  /* 行格式：[ts, 接口, 方向, 消息, 关键IE, 答案类别, 正解推理]；接口 note=分析注记行 */
+  var CASES = [
+    {
+      id: 'c001', title: '案卷 001 · 新站开张的一天', sub: '建交 + 注册 + 溜达回来的老用户',
+      brief: '<b>案情</b>：新 gNB-A 开站——上午与邻居 B 建交（中途被拒一次），上午 10 点迎来第一位注册用户，中午 11 点一位 INACTIVE 老用户溜达进 B 家。<b>考点</b>：三段故事在一屏日志里交替出现，分得清才读得懂。',
+      cats: { setup: 'Xn 建交（开热线）', attach: 'attach 注册（UE 落户）', retrieve: '档案找回（INACTIVE 跨站恢复）', dc: '双连接（S-NODE 族）', trouble: '异常处理（被拒/失败族）' },
+      catCourse: { setup: 'Xn 接口课幕一', attach: '接入课（ma）19 帧', retrieve: 'Xn 课幕三 + INACTIVE 课', dc: 'Xn 课幕二 / EN-DC 课', trouble: 'Xn 课失败幕 / 各课失败清单' },
+      log: [
+        ['09:00:01.112', 'sctp', 'A→B', 'SCTP ASSOCIATE', 'streams=4 · multi-homing', 'setup',
+         '底座先通：Xn 上一切信令都骑 SCTP 专线——开站排障第一步查它（Xn 课第 1 帧）。'],
+        ['09:00:01.340', 'xn', 'A→B', 'XN SETUP REQUEST', 'GlobalID=460-00-A7 · TAIs=2', 'setup',
+         '建交申请：报家门+家底（TAI 清单+逐小区清单）——Xn 课第 2 帧。'],
+        ['09:00:01.398', 'xn', 'B→A', 'XN SETUP FAILURE', 'Cause=不兼容 · Oversize=true', 'trouble',
+         '被拒+超限通知：家底清单太大装不下，B 提醒分批——注意这个 Xn 特有拒因（Xn 课失败幕 mxf1）。'],
+        ['09:00:31.502', 'xn', 'A→B', 'XN SETUP REQUEST', 'PartialList=partial · cells=12', 'setup',
+         '按拒信提示分批重报：每载波至少一个小区——30 秒后重试成功在即（Time to Wait 冷静期）。'],
+        ['09:00:31.611', 'xn', 'B→A', 'XN SETUP RESPONSE', 'ServedCells=12', 'setup',
+         '建交批复=对家也亮家底：平辈互报，没有执照概念（Xn 课第 3 帧）。'],
+        ['10:12:05.880', 'uu', 'UE→A', 'RRCSetupRequest', 'cause=mo-Signalling · ID39bit', 'attach',
+         'UE 敲门第 3 帧（Msg3）：39bit 临时身份+来意——attach 课第 ③ 步，T300 同时启动。'],
+        ['10:12:05.901', 'uu', 'A→UE', 'RRCSetup', 'SRB1 建立', 'attach',
+         '录取通知（Msg4）：SRB1 随信点亮——attach 课第 ④ 步。'],
+        ['10:12:06.050', 'ng', 'A→AMF', 'INITIAL UE MESSAGE', 'NAS=RegistrationRequest · TAI', 'attach',
+         '核心网开档案：NAS 信封不拆原样上交——attach 课第 ⑥ 步（NG 课也讲了这一侧）。'],
+        ['10:12:06.410', 'ng', 'AMF→A', 'DOWNLINK NAS TRANSPORT', 'NAS=AuthenticationRequest', 'attach',
+         '鉴权挑战走 NG 直传下行——attach 课第 ⑧ 步。'],
+        ['10:12:06.655', 'uu', 'A→UE', 'DLInformationTransfer', '（NAS 专车皮）', 'attach',
+         '最后一公里 RRC 跑：这条消息几乎只有 NAS 信封一个字段——attach 课第 ⑨ 步。'],
+        ['10:12:06.980', 'uu', 'UE→A', 'ULInformationTransfer', 'NAS=AuthenticationResponse', 'attach',
+         'UE 的应答回程——attach 课第 ⑩ 步。'],
+        ['10:12:07.200', 'ng', 'A→AMF', 'UPLINK NAS TRANSPORT', 'RES* + 位置更新', 'attach',
+         '应答交还 AMF 验算，鉴权闭环——attach 课第 ⑪ 步。'],
+        ['10:12:07.850', 'ng', 'AMF→A', 'INITIAL CONTEXT SETUP REQ', 'SecurityKey · 会话清单', 'attach',
+         '交钥匙：gNB 从邮差变管家——attach 课第 ⑫ 步（★帧）。'],
+        ['10:12:08.001', 'uu', 'A→UE', 'SecurityModeCommand', '算法对（只完整性）', 'attach',
+         '钥匙立刻用，信令上锁——attach 课第 ⑬ 步。'],
+        ['10:12:08.120', 'uu', 'UE→A', 'SecurityModeComplete', '（带完整性验证）', 'attach',
+         '协议世界没有"发出即收到"——attach 课第 ⑭ 步。'],
+        ['10:12:08.300', 'uu', 'A→UE', 'RRCReconfiguration', 'SRB2+DRB · NAS=Accept', 'attach',
+         '装网卡：用户面资源一次装齐，注册批准搭车下行——attach 课第 ⑰ 步（★帧）。'],
+        ['10:12:08.470', 'uu', 'UE→A', 'RRCReconfigurationComplete', '（装机签收）', 'attach',
+         '装机单要签收：网络必须知道配置真的生效——attach 课第 ⑱ 步。'],
+        ['11:40:22.010', 'uu', 'UE→B', 'RRCResumeRequest', 'cause=rna-Update · MAC-I=0x3F2A', 'retrieve',
+         '换场景：INACTIVE 老用户溜达到 B 家，带防伪章敲门——Xn 课第 11 帧（M7 第 4 步同款消息）。'],
+        ['11:40:22.144', 'xn', 'B→A', 'RETRIEVE UE CONTEXT REQUEST', 'UEContextID=0x77A3 · IP=0x3F2A', 'retrieve',
+         '查档函：编号+凭据双因子（MAC-I 跨接口接力）——Xn 课第 12 帧。注意凭据与上一行相同：0x3F2A。'],
+        ['11:40:22.310', 'xn', 'A→B', 'RETRIEVE UE CONTEXT RESPONSE', 'UE Context Information 整包', 'retrieve',
+         '行李整包移交（含 NG 档案号+密钥材料）——Xn 课第 13 帧。'],
+        ['11:40:22.502', 'ng', 'B→AMF', 'PATH SWITCH REQUEST', 'NewCellID · 会话清单', 'retrieve',
+         '档案到手后去核心网"改户口"：换管辖是 NG 侧动作（切换课 NG 场景的亲戚）。'],
+        ['11:40:22.700', 'uu', 'B→UE', 'RRCResume', '（原样复活）', 'retrieve',
+         '开箱：SRB/DRB 原样复活直接回 CONNECTED——M7 第 4 步"寄存行李"买来的时间。']
+      ]
+    },
+    {
+      id: 'c002', title: '案卷 002 · 切换失败的一夜', sub: '准备被拒 → 执行超时 → 重建兜底 → 事后报告',
+      brief: '<b>案情</b>：深夜 22:41，UE 在 A 家信号变差触发切换——第一次准备就被 B 拒了；换目标 C 成功拿到命令，执行却超时（T304 到点没进门），UE 落回 A 邻区发起重建。<b>考点</b>：失败不是一条消息，而是一段"该来没来"的空窗——看你能不能从超时标记和重建动作反推现场。',
+      cats: { meas: '测量与判决', prep: '切换准备（含被拒）', exec: '切换执行（T304 窗口）', reest: '链路重建兜底', after: '事后报告与自优化' },
+      catCourse: { meas: '测量课（m3）', prep: '切换课 XN 场景 + Xn 课', exec: '切换课 m4s3 + 定时器网 T304', reest: '切换课失败幕 + 动画 #3', after: '变量地图 VarRLF-Report + 测量课' },
+      log: [
+        ['22:40:55.010', 'uu', 'UE→A', 'MeasurementReport', 'measId=1 · A2（服务差于门限）', 'meas',
+         '判决起点：A2 报"自家不行了"——网络开始考虑搬家（测量课事件族）。'],
+        ['22:40:57.880', 'uu', 'UE→A', 'MeasurementReport', 'measId=2 · A3（邻区 B 优）', 'meas',
+         'A3 报"隔壁更好"——两次报告凑齐"该走了"的证据链（测量课：A2+A3 组合判决）。'],
+        ['22:41:05.301', 'xn', 'A→B', 'HANDOVER REQUEST', 'Cause=时间紧迫 · UEContext 整包', 'prep',
+         '向 B 托运：切换准备第 1 条——UE 上下文整包+RRC 快照（切换课 XN 场景 m4x1）。'],
+        ['22:41:05.478', 'xn', 'B→A', 'HANDOVER PREPARATION FAILURE', 'Cause=无线资源不足', 'prep',
+         'B 家满了：准备阶段被拒——注意这是"准备失败"，还没到 UE 执行（切换课失败幕）。'],
+        ['22:41:06.900', 'xn', 'A→C', 'HANDOVER REQUEST', '（换目标重试）', 'prep',
+         '换邻居 C 再试：准备阶段失败不等于放弃，网络按邻居清单顺序再问。'],
+        ['22:41:07.010', 'xn', 'C→A', 'HANDOVER REQUEST ACKNOWLEDGE', 'HOCommand 容器 · Admission=OK', 'prep',
+         'C 收留：回执里装着给 UE 的"搬家命令"（CG-Config 容器）——准备完成（m4x2）。'],
+        ['22:41:07.150', 'uu', 'A→UE', 'RRCReconfiguration', 'reconfigurationWithSync · t304=ms500', 'exec',
+         '搬家命令下发：同步参数+T304 沙漏同时启动（切换课 m4s3，T304 共 8 档）。'],
+        ['22:41:07.760', 'note', '—', '（T304 到期标记）', '500ms 内未见 Complete', 'exec',
+         '关键的"空窗"：UE 没能在 500ms 内完成新小区接入——T304 到点即切换失败（定时器网 T304：到点=回滚）。'],
+        ['22:41:07.790', 'uu', 'UE→A', 'RRCReestablishmentRequest', 'shortMAC-I=0x81C4 · 重建原因', 'reest',
+         'UE 自己爬起来：向原网络求救（重建课/动画 #3 第 4 拍）——shortMAC-I 是防伪章，证明"我是刚才那条链路的 UE"。'],
+        ['22:41:08.100', 'uu', 'A→UE', 'RRCReestablishment', 'SRB1 续命 · 密钥更新', 'reest',
+         '原小区还在名单里：重建批复——SRB1 恢复+密钥换新（重建成功三条件：安全已激活+SRB2+DRB）。'],
+        ['22:41:08.250', 'uu', 'UE→A', 'RRCReestablishmentComplete', '（续命签收）', 'reest',
+         '链路续上：用户面承接恢复——切换失败但业务没断，这就是重建兜底的意义（动画 #3 完整回放）。'],
+        ['22:41:15.200', 'uu', 'A→UE', 'UEInformationRequest', '请求=RLF 报告', 'after',
+         '事后取证：网络来调"事故报告"（变量地图 VarRLF-Report：网络主动来读的变量）。'],
+        ['22:41:15.380', 'uu', 'UE→A', 'UEInformationResponse', '失败小区PCI · 时间 · 最后测量', 'after',
+         'UE 交出 RLF 报告：摔在哪、什么时刻、当时信号如何——SON 自优化的第一手材料（变量地图）。'],
+        ['22:41:30.000', 'note', '—', '（网管注记）', '迟滞 hys +1dB · T304 档位待评估', 'after',
+         '闭环：报告喂给自优化——调迟滞减少误判、评 T304 档位是否过紧。"读日志→定位→调参"的完整链路。'],
+        ['22:42:00.000', 'uu', 'UE→A', 'MeasurementReport', 'measId=1 · A1（服务恢复门限）', 'meas',
+         '尾声：A1 报"自家又行了"——事件成对出现（A2 走/A1 回），故事收口（测量课）。']
+      ]
+    },
+    {
+      id: 'c003', title: '案卷 003 · 双连接的一天', sub: 'EN-DC 收留被拒 → 降级 → 重试成功 → 拆腿再装',
+      brief: '<b>案情</b>：ng-eNB-A（主）与 gNB-B（辅）带一个 EN-DC UE——傍晚流量高峰第一次收留被拒，降级单连接；闲时三度尝试成功；深夜 B 节能请辞。<b>考点</b>：S-NODE 消息族的"加/改/放"在同一晚轮番上场，还要分得清 Uu 侧的配套动作。',
+      cats: { trig: '触发与判决', add: '收留（S-NODE 加）', fail: '失败与拆腿', report: '报告与日常' },
+      catCourse: { trig: '测量课 + EN-DC 课（m8）', add: 'Xn 课幕二 S-NODE 全家', fail: 'Xn 课幕二 + EN-DC 课 SCG 失败', report: 'Xn 课幕二长尾族' },
+      log: [
+        ['19:00:01.010', 'uu', 'UE→A', 'MeasurementReport', 'B1-NR（NR 邻区优）', 'trig',
+         'EN-DC 判决起点：B1 报"附近有 NR 腿可用"——MN 决定拉 gNB-B 入伙（EN-DC 课/测量课 B1）。'],
+        ['19:00:01.210', 'xn', 'A→B', 'S-NODE ADDITION REQUEST', 'S-key · S-AMBR · CG-ConfigInfo', 'add',
+         '收留申请三必带：辅站钥匙（主站派生）/闸门对半分/配置快照集装箱（Xn 课 mx5）。'],
+        ['19:00:01.330', 'xn', 'B→A', 'S-NODE ADDITION REQUEST REJECT', 'Cause=无线资源不足', 'fail',
+         '晚高峰 B 家满了：收留被拒——MN 拿着 Cause 降级处理（Xn 课失败族：双档案号+Cause+诊断三件套）。'],
+        ['19:00:01.500', 'note', '—', '（MN 决策注记）', '降级单连接 · 标记 B 为忙', 'fail',
+         '被拒的正确姿势：不是失败，是降级——UE 继续单腿跑，B 记入"忙名单"稍后再试。'],
+        ['19:02:00.010', 'uu', 'UE→A', 'MeasurementReport', 'B1-NR（仍满足）', 'trig',
+         '条件仍满足：测量继续报——触发类消息会重复出现，别当成异常。'],
+        ['19:02:00.200', 'xn', 'A→B', 'S-NODE ADDITION REQUEST', '（重试）', 'add',
+         '两分钟后重试：同款申请——注意与 19:00:01 那条的区别只在时间戳。'],
+        ['19:02:00.320', 'xn', 'B→A', 'S-NODE ADDITION REQUEST ACK', 'CG-Config · PSCell=PCI 441', 'add',
+         '收留回执：S→M 集装箱里是配好的 SCG 配置+选定的 PSCell（Xn 课 mx6）。'],
+        ['19:02:00.410', 'uu', 'A→UE', 'RRCReconfiguration', 'nr-SecondaryCellGroupConfig', 'add',
+         'Uu 侧落地：MN 把 SCG 配置包进重配发给 UE——EN-DC 课"LTE 信封里的 NR 盲盒"。'],
+        ['19:02:00.560', 'uu', 'UE→A', 'RRCReconfigurationComplete', 'scg-Response 套娃', 'add',
+         '签收有彩蛋：Complete 里套着给 SN 的 scg-Response（经 MN 转交）——EN-DC 课的"套娃"设计。'],
+        ['19:05:30.700', 'uu', 'UE→A', 'SCGFailureInformation', 'failureType=SCG 失步', 'fail',
+         '辅腿摔了：SCG 失败报告走 SRB1 给 MN（不是给 SN——UE 的信令只认主站，EN-DC 课失败隔离）。'],
+        ['19:05:30.820', 'xn', 'A→B', 'S-NODE MODIFICATION REQUEST', 'Cause=SCG失败 · 去SN承载', 'fail',
+         '一鱼三吃之一：改辅站资源——把 SN 承载撤掉（Xn 课 mx8：三清单骨架）。'],
+        ['19:05:30.940', 'xn', 'B→A', 'S-NODE MODIFICATION REQUEST ACK', 'NotAdmitted=空 · 转发清单', 'fail',
+         '改完回执：准许清单+数据转发清单（拆腿不断流，Xn 课 mx9）。'],
+        ['19:05:31.100', 'uu', 'A→UE', 'RRCReconfiguration', '（释放 SCG 配置）', 'fail',
+         'Uu 侧同步拆腿：主站重配去掉 SCG——MCG 不受影响，这就是失败隔离。'],
+        ['19:06:00.000', 'xn', 'B→A', 'SECONDARY RAT DATA USAGE REPORT', 'NR 侧用量统计', 'report',
+         '日常汇报：辅站报 NR 侧用量（计费/统计用）——Xn 课幕二长尾族，见到不慌。'],
+        ['19:10:00.200', 'xn', 'A→B', 'S-NODE ADDITION REQUEST', '（闲时三度尝试）', 'add',
+         '闲时再收留：流量回落 B 有余量——收留/请辞可以一天内多轮，看资源水位。'],
+        ['19:10:00.350', 'xn', 'B→A', 'S-NODE ADDITION REQUEST ACK', 'CG-Config · PSCell=PCI 441', 'add',
+         '又成了：结构与 19:02:00 完全同款——熟练后可秒判。'],
+        ['19:10:00.500', 'uu', 'A→UE', 'RRCReconfiguration', 'nr-SecondaryCellGroupConfig', 'add',
+         '再装辅腿：Uu 侧重配再走一遍——注意与 19:02:00.410 同构。'],
+        ['19:10:00.640', 'uu', 'UE→A', 'RRCReconfigurationComplete', 'scg-Response 套娃', 'add',
+         '双连接恢复：签收+套娃，一天里第二次见到就当复习。'],
+        ['23:50:00.000', 'xn', 'B→A', 'S-NODE RELEASE REQUIRED', 'Cause=节能 · SCG履历随单', 'fail',
+         '深夜请辞：SN 主动散伙（节能）——REQUIRED 由 B 发起，与 MN 下令的 REQUEST 相对（Xn 课 mx10）。'],
+        ['23:50:00.150', 'xn', 'A→B', 'S-NODE RELEASE CONFIRM', '（批准）', 'fail',
+         '主站批准：散伙闭环——UE 辅腿由 MN 重配收回（本章最后一条，与开场收留首尾呼应）。']
+      ]
+    },
+    {
+      id: 'c004', title: '案卷 004 · 注册风暴的一夜', sub: 'T300 反复超时 · 冷静期 · 接入小票的完整旅程',
+      brief: '<b>案情</b>：弱覆盖边缘的一台 UE，21:15 起连续敲门失败——第一次 T300 超时记下小票，换小区又被 RRCReject 按进 8 秒冷静期，冷静期后再试再超时，最终在第三个小区落户，顺手把两张小票上交。<b>考点</b>：接入失败不是一个点，是一条"超时空窗→小票→计数→冷静期→重选→上报"的链；UE 侧变量（VarConnEstFailReport/V300）第一次走到台前。',
+      cats: { attempt: '接入尝试与超时', control: '接入控制（Reject/冷静期）', recover: '换小区重试与落户', report: '小票与上报' },
+      catCourse: { attempt: '接入课 M1（T300）+ 定时器网', control: '定时器网 T302 + M10 失败族', recover: '接入课 Msg3-5 + 测量课（重选）', report: '变量地图 VarConnEstFailReport/V300' },
+      log: [
+        ['21:15:02.100', 'uu', 'UE→C1', 'RRCSetupRequest', 'cause=mo-Data · T300=ms2000', 'attempt',
+         '第一次敲门：Msg3 发出即启动 T300（接入课第 ③ 帧；八档里配了 2 秒的耐心）。'],
+        ['21:15:04.200', 'note', '—', '（T300 到期标记）', '2000ms 未见 RRCSetup/Reject', 'attempt',
+         '空窗即失败：T300 到点=本次接入尝试失败（定时器网 T300：跑完即判负，没有"差一点"）。'],
+        ['21:15:04.220', 'note', '—', '（UE 记接入小票）', 'VarConnEstFailReport += 失败小区测量', 'report',
+         '失败要留痕：接入失败信息（失败小区+当时信号）写进 VarConnEstFailReport——变量地图里"跨态行李"之一，下次进连接时上交。'],
+        ['21:15:05.100', 'uu', 'UE→C2', 'RRCSetupRequest', '（小区重选后换门）· V300++', 'recover',
+         '换个门再敲：T300 超时后 V300 计数+1，未到上限（N300）就重整旗鼓——重选到 C2 再发（§5.3.3.7）。'],
+        ['21:15:05.240', 'uu', 'C2→UE', 'RRCReject', 'waitTime=8s', 'control',
+         '网络明确说"稍后再来"：Reject 带 1..16s 的等待时间——T302 冷静期由此启动（M1 失败分支）。'],
+        ['21:15:05.260', 'note', '—', '（T302 冷静期）', '8s 内不再发起接入', 'control',
+         '按信守约：等待期内 UE 不再敲门——与 NG/Xn 的 Time to Wait 同款"优雅退避"哲学（M10/M11 失败族对照着记）。'],
+        ['21:15:13.500', 'uu', 'UE→C2', 'RRCSetupRequest', '（冷静期满 · 重试）', 'recover',
+         '冷静期到，第二次进 C2：注意时间戳差正好 8 秒+——UE 的纪律性就是排障的对表依据。'],
+        ['21:15:15.700', 'note', '—', '（T300 再次到期）', '2000ms 又无应答', 'attempt',
+         '又是空窗：C2 同样弱覆盖，第二次超时——连续空窗说明不是单点故障，是这片区域的问题。'],
+        ['21:15:15.720', 'note', '—', '（小票第二张）', 'V300=2 · 接近重试上限', 'report',
+         '第二张小票：V300 计数到 2——再失败就要回 IDLE 做更大范围重选了（计数器的悬崖设计）。'],
+        ['21:15:16.050', 'uu', 'UE→C3', 'RRCSetupRequest', '（重选至更优小区）', 'recover',
+         '第三个门：重选到信号更好的 C3——"重试+换目标"是接入风暴里的标准自救动作。'],
+        ['21:15:16.180', 'uu', 'C3→UE', 'RRCSetup', 'SRB1 建立', 'recover',
+         '终于开门：Msg4 录取通知，SRB1 点亮（接入课第 ④ 帧）。'],
+        ['21:15:16.420', 'uu', 'UE→C3', 'RRCSetupComplete', '注册请求 + 两张失败小票', 'report',
+         '落户时交小票：Complete 的扩展字段里捎上 connEstFailReport（§5.3.3.4）——网络第一次知道这片弱覆盖的实测情况。'],
+        ['21:15:16.700', 'ng', 'C3→AMF', 'INITIAL UE MESSAGE', 'NAS=RegistrationRequest · TAI(C3)', 'recover',
+         '注册起航：走完接入才有资格谈注册——attach 故事从这里接棒（接入课第 ⑥ 帧）。'],
+        ['21:15:40.000', 'note', '—', '（网管注记）', 'C1/C2 弱覆盖工单 · 接入成功率告警', 'report',
+         '闭环：两张小票+超时记录喂给网优——"UE 侧变量 → 网络侧工单"的完整数据链，这就是小票存在的意义。']
+      ]
+    }
+  ];
+
+  var cur = 0;
+
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+  var tabs = document.getElementById('ld-tabs');
+  tabs.innerHTML = CASES.map(function (c, i) {
+    return '<button class="ld-tab' + (i === cur ? ' on' : '') + '" data-i="' + i + '">' + esc(c.title) + '<small>' + esc(c.sub) + '</small></button>';
+  }).join('');
+
+  function options(sel, cats) {
+    return '<option value="">— 选故事段 —</option>' + Object.keys(cats).map(function (k) {
+      return '<option value="' + k + '"' + (sel === k ? ' selected' : '') + '>' + esc(cats[k]) + '</option>';
+    }).join('');
+  }
+
+  function render() {
+    var c = CASES[cur];
+    document.getElementById('ld-brief').innerHTML = c.brief;
+    document.getElementById('ld-legend').innerHTML = Object.keys(c.cats).map(function (k) {
+      return '<div class="ld-leg"><b>' + esc(c.cats[k]) + '</b>对应课程：' + esc(c.catCourse[k] || '—') + '</div>';
+    }).join('');
+    document.getElementById('ld-table').innerHTML = c.log.map(function (l, i) {
+      var ifCls = l[1] === 'note' ? 'note' : l[1];
+      var ifTxt = { uu: 'Uu', xn: 'Xn-C', ng: 'NG-C', sctp: 'SCTP', note: '注记' }[l[1]];
+      return '<div class="ld-row' + (l[1] === 'note' ? ' note' : '') + '" data-i="' + i + '">' +
+        '<span class="ld-ts">' + esc(l[0]) + '</span>' +
+        '<span class="ld-if ' + ifCls + '">' + ifTxt + '</span>' +
+        '<span class="ld-dir">' + esc(l[2]) + '</span>' +
+        '<span class="ld-msg">' + esc(l[3]) + '</span>' +
+        '<span class="ld-ie" title="' + esc(l[4]) + '">' + esc(l[4]) + '</span>' +
+        '<select aria-label="第 ' + (i + 1) + ' 行归属">' + options('', c.cats) + '</select>' +
+        '<div class="ld-why"></div>' +
+        '</div>';
+    }).join('');
+    document.getElementById('ld-score').textContent = '';
+  }
+  render();
+
+  tabs.addEventListener('click', function (e) {
+    var b = e.target.closest('.ld-tab');
+    if (!b) return;
+    cur = +b.dataset.i;
+    [].forEach.call(tabs.querySelectorAll('.ld-tab'), function (t, i) { t.classList.toggle('on', i === cur); });
+    render();
+    window.scrollTo({ top: tabs.offsetTop - 80, behavior: 'smooth' });
+  });
+
+  document.getElementById('ld-judge').addEventListener('click', function () {
+    var c = CASES[cur];
+    var rows = document.querySelectorAll('#ld-table .ld-row'), right = 0, blank = 0;
+    [].forEach.call(rows, function (r) {
+      var i = +r.dataset.i, sel = r.querySelector('select').value, log = c.log[i];
+      r.classList.add('judged');
+      r.classList.remove('right', 'wrong');
+      if (!sel) blank++;
+      if (sel === log[5]) { right++; r.classList.add('right'); }
+      else if (sel) r.classList.add('wrong');
+      r.querySelector('.ld-why').innerHTML = (sel === log[5] ? '<b style="color:#18753C">✓ </b>' : '<b style="color:#C0392B">✗ 正解：' + esc(c.cats[log[5]]) + ' · </b>') + esc(log[6]);
+    });
+    var verdict = right === c.log.length ? ' · 满分！你可以去值夜班了' : right >= c.log.length - 3 ? ' · 侦探见习期通过' : ' · 回课程把故事线再走一遍';
+    document.getElementById('ld-score').textContent = '得分 ' + right + ' / ' + c.log.length + (blank ? '（未答 ' + blank + ' 行）' : '') + verdict;
+  });
+  document.getElementById('ld-reset').addEventListener('click', render);
+})();
+</script>
+</body>
+</html>

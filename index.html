@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RRC 讲解器 — 把 5G 协议当成一场看得见的接力赛来学</title>
+<meta name="description" content="每次解锁手机，网络都在 13 步信令内办好"落户"。逐帧播放的信令图、每个字段配比喻、每句论断锚定 3GPP 条款——面向通信求职者与在校生的交互式协议课。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <a class="brand" href="index.html">
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 15 L7.5 15 L10 8 L13 18 L15.5 12 L17.5 15 L21 15" stroke="#18A34A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="15" r="1.6" fill="#18A34A"/></svg>
+    RRC 讲解器
+  </a>
+  <nav class="topnav">
+    <a class="navlink on" href="index.html">目录</a>
+    <a class="navlink" href="app.html">课程</a>
+    <a class="navlink" href="dict.html">词典</a>
+    <a class="navlink" href="anim.html">动画</a>
+    <a class="navlink" href="timer-net.html">定时器网</a>
+    <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink" href="log-detective.html">日志侦探</a>
+  </nav>
+</header>
+
+<!-- ============ 导读 Hero ============ -->
+<section class="hero intro-hero">
+  <div class="intro-kicker">写给准备进通信行业的你 —— 求职面试 · 在校补课 · 入行打底</div>
+  <h1>每次解锁手机，网络都在 <span class="hl">13 步信令</span>之内<br>为它办好"落户"</h1>
+  <p class="sub">而 5G 把这场接力写进了上千页的天书规范。我们把它拆成<b>逐帧可播放的信令图</b>——每条消息点得开、每个字段配白话和比喻、每句论断都挂着 3GPP 条款号。<b>学协议，从"看得见"开始。</b></p>
+  <div class="cta">
+    <a class="btn primary" href="app.html#ma">免费开始第一课 · 接入全流程（13 步）</a>
+    <a class="btn" href="#teaser">先做一道面试题（30 秒）</a>
+  </div>
+  <div class="meta">10 个模块 · 内容全部自写自绘 · 论断逐条锚定 3GPP 条款 · 浏览器即开即用</div>
+</section>
+
+<!-- ============ 四个"你遇到过"的瞬间 ============ -->
+<section class="intro-sec">
+  <h2 class="sec">四个你遇到过、却说不清为什么的瞬间</h2>
+  <p class="sec-sub">协议不在书里，在你口袋里那台手机每天的动作里。点开任何一个，回到它对应的信令现场。</p>
+  <div class="hook-grid">
+    <a class="hook" href="app.html#ma">
+      <div class="hook-q">开机后那几秒"无服务 → 满格"</div>
+      <div class="hook-a">一场 RRC / NGAP / NAS 三层接力在毫秒级跑完——从喊一嗓子（PRACH）到注册落账，整整 13 步。这就是第一课。</div>
+      <div class="hook-go">去看这场接力 →</div>
+    </a>
+    <a class="hook" href="app.html#m4">
+      <div class="hook-q">打着电话进电梯，出来电话还在</div>
+      <div class="hook-a">你以为断线了？网络已经在替你做"灾后重建"（RRC 重建），几条信令失而复得。切换失败的兜底，比切换本身更精妙。</div>
+      <div class="hook-go">去看失败分支 →</div>
+    </a>
+    <a class="hook" href="app.html#m3">
+      <div class="hook-q">演唱会现场，网速突然变慢</div>
+      <div class="hook-a">你的手机正被"限流、分流、请去邻区"——测量报告每毫秒都在上报，切换决策在你无感中完成。网络长着眼睛，眼睛就是 UE。</div>
+      <div class="hook-go">去看测量与切换 →</div>
+    </a>
+    <a class="hook" href="app.html#m0">
+      <div class="hook-q">面试官："讲讲 RRC 连接建立过程"</div>
+      <div class="hook-a">通信岗位面试出现率最高的问题之一。答得出 Msg3 带什么身份、T300 在哪起停，和答不出的人，在这题上就分成了两拨。</div>
+      <div class="hook-go">去把这题变成送分题 →</div>
+    </a>
+  </div>
+</section>
+
+<!-- ============ 60 秒动画版 ============ -->
+<section class="intro-sec" id="flow">
+  <h2 class="sec">60 秒动画版：一场"落户"的全程</h2>
+  <p class="sec-sub">信封是捎带的注册申请，钥匙是安全材料，盾牌是完整性保护——先看懂故事，再进第一课逐帧抠细节（可点进度点跳节拍）。</p>
+  <div id="attach-anim"></div>
+</section>
+
+<!-- ============ 为什么难学 → 换种学法 ============ -->
+<section class="intro-sec">
+  <h2 class="sec">协议难学不是你的问题，是学法的问题</h2>
+  <p class="sec-sub">四件传统学法绕不开的苦，我们逐件换掉了。</p>
+  <div class="vs-rows">
+    <div class="vs-row">
+      <div class="vs-old"><b>啃规范</b>1000+ 页英文 PDF，查一个字段像大海捞针</div>
+      <div class="vs-arrow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+      <div class="vs-new"><b>逐帧播放</b>信令图按 ▶ 一步步走，点任意消息直接切到那一步</div>
+    </div>
+    <div class="vs-row">
+      <div class="vs-old"><b>搜资料</b>博客东抄西抄，数字对不对没人担保</div>
+      <div class="vs-arrow"></div>
+      <div class="vs-new"><b>句句锚点</b>每句论断挂 §条款号，敢让你翻开 3GPP 原文对质</div>
+    </div>
+    <div class="vs-row">
+      <div class="vs-old"><b>背流程</b>今天背明天忘，一到面试全还给老师</div>
+      <div class="vs-arrow"></div>
+      <div class="vs-new"><b>做题学</b>"你就是 UE"决策点逼你先选再看，每步标面试考法，结课自测记分</div>
+    </div>
+    <div class="vs-row">
+      <div class="vs-old"><b>看字段</b>criticalExtensions？spare？每个词都认识，连起来是天书</div>
+      <div class="vs-arrow"></div>
+      <div class="vs-new"><b>配比喻</b>每个字段一句白话："托运单号""填充泡沫""加密钥匙"——先挂钩，再深挖</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 30 秒试一道 ============ -->
+<section class="intro-sec" id="teaser">
+  <h2 class="sec">不信手感？30 秒试一道真题</h2>
+  <p class="sec-sub">这是课程里上百道自测中的一道——真实面试的追问深度。点一个选项看看。</p>
+  <div class="teaser">
+    <div class="qtag">面试真题 · AS 安全</div>
+    <div class="qtext">5G 里，UE 对 SecurityModeCommand 的回执 SecurityModeComplete——这条消息加密吗？</div>
+    <div class="opts" id="teaser-opts">
+      <button class="opt" data-ok="0">加密 + 完整性保护</button>
+      <button class="opt" data-ok="1">不加密，但带完整性保护</button>
+      <button class="opt" data-ok="0">加密，不带完整性保护</button>
+      <button class="opt" data-ok="0">明文发送，无任何保护</button>
+    </div>
+    <div class="why" id="teaser-why"></div>
+  </div>
+  <p class="teaser-note">答对了也别骄傲——课程里会告诉你为什么"完整性立即生效、加密要等流程结束"：这个时序差，就是"真读过原文"和"背流程"的分界线（§5.3.4.3 原文为证）。</p>
+</section>
+
+<!-- ============ 面试高频题覆盖 ============ -->
+<section class="intro-sec">
+  <h2 class="sec">学完，这些高频面试题都是送分题</h2>
+  <p class="sec-sub">不是题库押题——是课程讲透之后，这些题自然就会了。括号内是对应模块。</p>
+  <div class="checklist">
+    <div class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg><span>"讲一下 RRC 连接建立过程"（Msg1-5 各自干什么）<i>· 第 0/1 课</i></span></div>
+    <div class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg><span>T300 / T304 / T310 分别管什么、何时起停<i>· 第 1/4/5 课</i></span></div>
+    <div class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg><span>切换分几种？Xn 与 NG 差在哪、各几条信令<i>· 第 5 课（三场景）</i></span></div>
+    <div class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg><span>RRC 重建的资格三条；网络找不到上下文怎么办<i>· 第 5 课失败分支</i></span></div>
+    <div class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg><span>SRB0 / SRB1 / SRB2 / SRB3 各跑什么、何时建立<i>· 第 1/6 课</i></span></div>
+    <div class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg><span>为什么 SecurityModeCommand 只做完整性保护<i>· 第 8 课</i></span></div>
+    <div class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg><span>RRC_INACTIVE 和 IDLE 的区别；恢复要几条信令<i>· 第 7 课</i></span></div>
+    <div class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg><span>UE 能力为什么要按频段过滤上报（band 组合爆炸）<i>· 第 0 课</i></span></div>
+  </div>
+  <div class="who-row">
+    <span class="who-cap">适合谁：</span>
+    <span class="chip">通信/电子专业在校生 —— 补上"课不讲、面试要考"的那块</span>
+    <span class="chip">求职者 —— 运营商 / 设备商 / 终端芯片的无线岗面试</span>
+    <span class="chip">新入行网优/测试 —— 把每天的工单翻译成协议行为</span>
+  </div>
+</section>
+
+<!-- ============ 模块墙（学习路径） ============ -->
+<div id="hub"></div>
+
+<!-- ============ 内部视角 & 动手组件 ============ -->
+<section class="intro-sec">
+  <h2 class="sec">不止看流程——钻进协议的里子，再上手断案</h2>
+  <p class="sec-sub">课程之外的四间工具房：两件"内部视角"看协议在 UE 身上留下的行为与记忆，一间词典房查信元，一间动手房拿真实工单的读法练手。</p>
+  <div class="trust-row tools">
+    <a class="trust" href="timer-net.html"><div class="trust-t">定时器交互网</div><div class="trust-d">11 个定时器的三问：何时开跑、什么让它停、超时发生什么。四幕摆开，配四状态条。</div></a>
+    <a class="trust" href="variables-map.html"><div class="trust-t">UE 变量地图</div><div class="trust-d">13 个 UE 变量的三问：谁写我、谁读我、何时清空。看"协议记住了什么"，附回 IDLE 大扫除清单。</div></a>
+    <a class="trust" href="dict.html"><div class="trust-t">信元词典</div><div class="trust-d">58 个跨消息复用信元的详解：是什么、为什么这样设计、字段树一键直达。</div></a>
+    <a class="trust" href="log-detective.html"><div class="trust-t">信令日志侦探</div><div class="trust-d">四份合成案卷共 71 行：逐行标注"这是哪条流程的第几步"，交卷判分——面试前的手感房。</div></a>
+  </div>
+</section>
+
+<!-- ============ 为什么可以信 ============ -->
+<section class="intro-sec">
+  <h2 class="sec">为什么可以信这里讲的东西</h2>
+  <p class="sec-sub">协议课最怕"讲得顺但讲错了"。我们给自己上了三道锁：</p>
+  <div class="trust-row">
+    <div class="trust"><div class="trust-t">机器校验</div><div class="trust-d">每句论断的条款号逐条对照 3GPP 条款树做存在性校验——引用错误过不了构建。</div></div>
+    <div class="trust"><div class="trust-t">独立复核</div><div class="trust-d">155 条论断已逐条与规范原文比对（4 类事实错误已修复销账），8 项跨规范论断已补 38.321/38.304/33.501/37.340/38.422 原文直证——报告可查。</div></div>
+    <div class="trust"><div class="trust-t">版权红线</div><div class="trust-d">讲解与图示全部自写自绘；规范引用只放条款号徽章+点击展开的自动截取短引（≤520 字符），不整章搬运原文。</div></div>
+    <div class="trust"><div class="trust-t">买断离线</div><div class="trust-d">浏览器即开即用，进度只存本机。内测价单模块 ¥12 / 全套 ¥99——厂商同类培训 $695 起。</div></div>
+  </div>
+</section>
+
+<!-- ============ 终版 CTA ============ -->
+<section class="cta-strip">
+  <div class="cta-strip-in">
+    <div class="cta-strip-t">第一课免费，13 步走完一场"落户"</div>
+    <div class="cta-strip-d">不用注册、不用安装——点开就是逐帧信令图。学不学得下去，30 分钟后你自己说了算。</div>
+    <a class="btn primary" href="app.html#ma">免费开始 · 接入全流程（注册）</a>
+  </div>
+</section>
+
+<footer>
+  <div class="flinks"><a href="README.md">工程说明</a></div>
+  <div><b>内容纪律：</b>全部文案与图示为本项目自写自绘，不复制 3GPP 规范原文（版权红线）；本评估版支付通道未接入，付费模块用"演示解锁"完整体验。进度与授权仅存于本机浏览器。</div>
+</footer>
+</div>
+
+<script src="assets/engine.js"></script>
+<script src="assets/player.js"></script>
+<script src="assets/flowanim.js"></script>
+<script src="assets/content/ma.js"></script>
+<script src="assets/content/core.js"></script>
+<script>
+RRC.Hub.render(document.getElementById('hub'), RRC.Store());
+RRC.FlowAnim.mount(document.getElementById('attach-anim'), 'attach', { autoplay: true });
+/* 导读试答：单题交互 */
+(function () {
+  var box = document.getElementById('teaser-opts');
+  var why = document.getElementById('teaser-why');
+  var done = false;
+  [].forEach.call(box.querySelectorAll('.opt'), function (b) {
+    b.addEventListener('click', function () {
+      if (done) return;
+      done = true;
+      var ok = b.getAttribute('data-ok') === '1';
+      [].forEach.call(box.querySelectorAll('.opt'), function (x) { x.disabled = true; });
+      if (ok) b.classList.add('correct');
+      else { b.classList.add('wrong'); box.querySelectorAll('.opt')[1].classList.add('correct'); }
+      why.classList.add('show');
+      why.innerHTML = ok ? '<b>答对了。</b>完整性保护立即生效（含这条消息自己）；加密要"过程结束后"才生效——所以它是明文（unciphered）但带完整性发送的。§5.3.4.3 原文两个生效时刻写得清清楚楚。'
+                         : '<b>不对，正确是 B。</b>完整性立即生效（含这条消息自己）；加密要"过程结束后"才生效——所以它是明文（unciphered）但带完整性发送的。去第 8 课看完整时序。';
+    });
+  });
+})();
+</script>
+</body>
+</html>

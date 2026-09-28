@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>定时器交互网 · RRC 讲解器</title>
+<link rel="stylesheet" href="assets/site.css">
+<style>
+.tn-wrap{max-width:1080px;margin:0 auto;padding:34px 26px 70px}
+.tn-hero h1{font-size:26px;font-weight:800;letter-spacing:-.4px}
+.tn-hero .sub{color:var(--tx2);font-size:14px;margin-top:8px;line-height:1.7}
+.tn-statebar{display:flex;gap:0;margin-top:26px;border:1px solid var(--bd);border-radius:14px;overflow:hidden;background:var(--panel)}
+.tn-statebar>div{flex:1;padding:16px 18px;border-left:1px solid var(--bd)}
+.tn-statebar>div:first-child{border-left:none}
+.tn-st-name{font:800 15px var(--sans)}
+.tn-st-desc{font-size:12px;color:var(--tx2);margin-top:4px;line-height:1.6}
+.tn-st-timers{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
+.tn-chip{font:700 11px var(--mono);padding:3px 9px;border-radius:6px;background:var(--accent-bg);color:var(--accent-deep);cursor:pointer;border:1px solid transparent}
+.tn-chip:hover{border-color:var(--accent)}
+.tn-group{margin-top:34px}
+.tn-group>h2{font-size:18px;font-weight:800;letter-spacing:-.2px}
+.tn-group>.gsub{color:var(--tx2);font-size:13px;margin-top:3px}
+.tn-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;margin-top:14px}
+.tn-card{border:1px solid var(--bd);border-radius:12px;background:var(--panel);padding:15px 17px;cursor:pointer;transition:border-color .15s}
+.tn-card:hover{border-color:var(--accent)}
+.tn-card.open{border-color:var(--accent);box-shadow:var(--shadow-card)}
+.tn-top{display:flex;align-items:baseline;gap:10px}
+.tn-name{font:800 15px var(--mono);color:var(--tx1)}
+.tn-tag{font:700 10.5px var(--sans);color:var(--tx3);background:var(--inset);border-radius:5px;padding:2px 8px}
+.tn-one{font-size:13px;color:var(--tx2);margin-top:6px;line-height:1.65}
+.tn-detail{display:none;margin-top:12px;border-top:1px dashed var(--bd);padding-top:10px}
+.tn-card.open .tn-detail{display:block}
+.tn-row{display:flex;gap:8px;margin-top:7px;font-size:12.5px;line-height:1.65}
+.tn-row b{flex:none;font-weight:800;color:var(--tx1)}
+.tn-row span{color:var(--tx2)}
+.tn-links{margin-top:10px;display:flex;gap:7px;flex-wrap:wrap}
+.tn-links a{font:700 11px var(--mono);text-decoration:none;color:var(--nas);background:#F5F0FE;border:1px solid #DDD3F5;border-radius:6px;padding:2px 9px}
+.tn-links a:hover{background:#EDE4FC}
+.tn-note{margin-top:26px;font-size:12.5px;color:var(--tx3);line-height:1.7;border-top:1px solid var(--bd);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="tn-wrap">
+  <header class="top" style="margin:-34px -26px 0;padding:0 26px">
+  <a class="brand" href="index.html">
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 15 L7.5 15 L10 8 L13 18 L15.5 12 L17.5 15 L21 15" stroke="#18A34A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="15" r="1.6" fill="#18A34A"/></svg>
+    RRC 讲解器
+  </a>
+  <nav class="topnav">
+    <a class="navlink" href="index.html">目录</a>
+    <a class="navlink" href="app.html">课程</a>
+    <a class="navlink" href="dict.html">词典</a>
+    <a class="navlink" href="anim.html">动画</a>
+    <a class="navlink on" href="timer-net.html">定时器网</a>
+    <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink" href="log-detective.html">日志侦探</a>
+  </nav>
+  </header>
+  <section class="tn-hero">
+    <h1>定时器交互网——RRC 的心跳与秒表</h1>
+    <p class="sub">协议文本里散落各章的定时器，在这里摆成一张网。<b>每个定时器回答三个问题：什么时候开始跑、什么事件让它停、跑到头会发生什么</b>——背下这三问，比背档位表有用。点卡片展开，再点收起。</p>
+  </section>
+
+  <div class="tn-statebar" id="tn-statebar"></div>
+  <div id="tn-groups"></div>
+
+  <p class="tn-note">内容纪律：档位与行为为自写讲解（含条款号锚点），不搬运 3GPP 规范原文；全部条目可与课程字段树互证（各消息里出现的定时器已挂词条）。T304/T316/T380 的完整档位表见切换课与 INACTIVE 课的字段树。另注：按需 SI 请求（RRCSystemInfoRequest）没有对应标准定时器，重试节奏由 UE 实现决定；CONNECTED 态按需 SIB 才另有 T350 抑制计时（§5.2.2.3.5）。</p>
+</div>
+
+<footer style="border-top:1px solid var(--bd);padding:18px 0;text-align:center;color:var(--tx3);font-size:12.5px">
+  <div class="wrap" style="max-width:1080px;margin:0 auto;padding:0 26px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div class="flinks"><a href="index.html">目录</a><a href="app.html">课程</a><a href="dict.html">词典</a><a href="anim.html">动画资产</a></div>
+    <div>RRC 讲解器 · 内部视角组件 #1（定时器交互网）</div>
+  </div>
+</footer>
+
+<script src="assets/engine.js"></script>
+<script src="assets/content/iedict.js"></script>
+<script>
+(function () {
+  'use strict';
+  var TIMERS = [
+    /* ---------- 第一幕：接入 ---------- */
+    { id: 'T300', group: 'access', tag: '首敲门', one: '发 RRCSetupRequest 后等录取通知——网络不回话的耐心值。',
+      start: '发送 RRCSetupRequest（Msg3）时启动', stop: '收到 RRCSetup / RRCReject / 小区重选 / 上层中止时停止',
+      expiry: '超时：重置发送计数——未超上限就换小区再试（V300++），超了回 RRC_IDLE',
+      dials: 'ms100 / ms200 / ms400 / ms600 / ms1000 / ms1500 / ms2000（SIB1 配置）', vars: '配套变量 V300（重试计数）、N300（重发上限）',
+      links: [['接入课 · Msg3', 'app.html#ma'], ['词条：rrc-TransactionIdentifier', 'dict.html#k=rrc-TransactionIdentifier']], ref: '38.331 §5.3.3.2/§6.3.2' },
+    { id: 'T302', group: 'access', tag: '冷静期', one: '被 RRCReject 拒后的冷静期——期间不许再发起接入。',
+      start: '收到 RRCReject（waitTime 1..16s 由网络指定）时启动', stop: '到点自然停止；收到 RRCRelease/连接成功也停',
+      expiry: '超时：重新允许发起接入（配合统一接入控制 UAC 的禁止判定）',
+      dials: '1..16 秒（网络在 Reject 里指定，不是 UE 自己定）', vars: '与 T390（接入类别维度）配合构成两层禁止',
+      links: [['NG 接口课 · Time to Wait（同款退避哲学）', 'app.html#mi']], ref: '38.331 §5.3.14' },
+    { id: 'T390', group: 'access', tag: '类别禁令', one: '统一接入控制（UAC）的按类别禁止计时——它跑着的时候，该接入类别的尝试一律判 barred。',
+      start: '接入尝试被 UAC 判为禁止时启动（按接入类别，值=(0.7+0.6×rand)×uac-BarringTime）', stop: '收到 RRCSetup / RRCRelease、或小区重选时停止（对全部类别）',
+      expiry: '超时或停止：该类别的禁止解除（barring alleviated），可再发起接入',
+      dials: '非固定档：由 SIB1 的 uac-BarringInfoSet 算出（uac-BarringTime 为因子）', vars: '与 T302 分工：T302 是被拒后的全局冷静期，T390 是按类别的临时禁令',
+      links: [['接入课 · 统一接入控制', 'app.html#ma']], ref: '38.331 §5.3.14.2/§5.3.14.4/§5.3.14.5' },
+    /* ---------- 第二幕：连接保持 ---------- */
+    { id: 'T310', group: 'keep', tag: '失步沙漏', one: '物理层连续报失步后开始跑——跑完还没同步回来就宣布无线链路失败。',
+      start: '连续 N310 次下行失步指示后启动', stop: '连续 N311 次同步指示后停止（虚惊一场）',
+      expiry: '超时：宣布 RLF → 发起重建（T301）或回 IDLE',
+      dials: '0ms（关）/ 50 / 100 / 200 / 500 / 1000 / 2000 ms（SIB1 或专用配置）', vars: 'N310（失步计数门槛）/ N311（恢复门槛）是它的两道闸',
+      links: [['切换课 · 失败幕', 'app.html#m4']], ref: '38.331 §4.2 / §5.3.11' },
+    /* ---------- 第三幕：移动性 ---------- */
+    { id: 'T304', group: 'mob', tag: '搬家限时', one: '收到切换命令后限时接入新小区——到点没进门就宣布切换失败；CHO 执行也用它。',
+      start: '收到含 reconfigurationWithSync 的重配时启动（CHO：执行条件满足时起跑同一枚表）', stop: '新小区随机接入成功（竞争解决完成）时停止',
+      expiry: '超时：回滚——发起重建 / 回 IDLE 重选',
+      dials: 'ms50 / ms100 / ms150 / ms200 / ms500 / ms1000 / ms2000 / ms10000（字段树可展开）', vars: '字段树见切换课 m4s3（含 8 档 vals）',
+      links: [['切换课 · HO 命令', 'app.html#m4'], ['词条：t304', 'dict.html#k=t304']], ref: '38.331 §5.3.5.5' },
+    { id: 'T316', group: 'keep', tag: 'MCG 快速救援', one: 'MR-DC 双连接里主小区组（MCG）出故障时的快速恢复沙漏——配了拆分 SRB1/SRB3 与 t316 才启用：报故障等救援，而不是直接重建。',
+      start: '检测到 MCG 无线链路失败（且配置了 t316）时启动，同时走 MCG 失败信息过程向网络求援', stop: '收到重配同步消息并成功接入 / 收到 RRCRelease 时停止',
+      expiry: '超时：失败原因记为 t316-Expiry（存 VarRLF-Report），发起 RRC 重建',
+      dials: 'ms50 / ms100 / ms200 / ms300 / ms400 / ms500 / ms600 / ms1000 / ms1500 / ms2000（十档）', vars: '与 CHO 无关——CHO 的执行限时是 T304；elapsedTimeT316 进失败报告供网管取证',
+      links: [['EN-DC 课 · 双连接故障', 'app.html#m8']], ref: '38.331 §5.7.3b/§5.3.7.2' },
+    /* ---------- 第四幕：INACTIVE / IDLE ---------- */
+    { id: 'T319', group: 'inactive', tag: '恢复等待', one: '发 RRCResumeRequest 后等恢复批复——INACTIVE 醒来的第一声"到"。',
+      start: '发送 RRCResumeRequest 时启动', stop: '收到 RRCResume / RRCRelease / RRCReject / RRCSetup 时停止',
+      expiry: '超时：恢复失败——失败信息记入 VarConnEstFailReport，回 RRC_IDLE（release cause "RRC Resume failure"）',
+      dials: 'SIB1 / 专用配置', vars: '成功后 T380（周期签到）开始值班',
+      links: [['INACTIVE 课 · 恢复', 'app.html#m6']], ref: '38.331 §5.3.13.5' },
+    { id: 'T380', group: 'inactive', tag: '签到铃', one: 'INACTIVE 态的定期报到——到点主动发起 RNA 更新，证明"我还在活动区域"。',
+      start: '进入 RRC_INACTIVE 时启动（ran-PagingCycle 周期内计时）', stop: '每次 RNA 更新完成 / 收到 RRCRelease / 进入连接态时停止',
+      expiry: '超时：发起 RRCResumeRequest（resumeCause=rna-Update）；反复失败则回 IDLE',
+      dials: 'min5 / min10 / min20 / min30 / min60 / min120 / min360 / min720（八档，字段树可展开）', vars: 'suspendConfig 里随单下发',
+      links: [['INACTIVE 课 · 挂起六件套', 'app.html#m6']], ref: '38.331 §5.3.13.8 / §6.3.2' },
+    { id: 'T320', group: 'inactive', tag: '优先级保质期', one: '专用信令下发的小区重选优先级有效期——到期回归广播默认优先级。',
+      start: '收到带 cellReselectionPriorities+t320 的 RRCRelease 时启动（广播优先级不启动它）', stop: '进入连接态 / 收到新优先级 / NAS 要求时停止',
+      expiry: '超时：丢弃专用优先级，回归 SIB 默认值',
+      dials: 'min5 / min10 / min20 / min30 / min60 / min120 / min180（分钟档枚举）', vars: 'IDLE 态省电与驻留策略的"时效阀门"',
+      links: [['INACTIVE 课 · RRCRelease 随行优先级', 'app.html#m6']], ref: '38.331 §5.3.8.3/§6.2.2' },
+    { id: 'T301', group: 'keep', tag: '求救等待', one: '发 RRCReestablishmentRequest 后等原小区链路的续接批复。',
+      start: '发送 RRCReestablishmentRequest 时启动', stop: '收到 RRCReestablishment / RRCReject / 重选时停止',
+      expiry: '超时：回 IDLE（脱网重选）',
+      dials: '与 T300 同族配置', vars: 'V301/N301 配套；shortMAC-I 防伪章保证求救者身份',
+      links: [['切换课 · 重建请求', 'app.html#m4']], ref: '38.331 §5.3.7' },
+    { id: 'N310/N311', group: 'keep', tag: '失步/恢复闸', one: 'T310 的两道闸门：连续 N310 次失步开表、连续 N311 次同步关表。',
+      start: '物理层每个"失步/同步"指示计一次', stop: '计数达到门槛即触发 T310 的启停',
+      expiry: '门槛值由 SIB1/专用配置（n1..n20 档）',
+      dials: 'n1 / n2 / n3 / n4 / n6 / n8 / n10 / n20', vars: '与 T310 构成"确认式失步判定"——防单次抖动误杀连接',
+      links: [['测量课 · 服务区质量', 'app.html#m3']], ref: '38.331 §4.2' }
+  ];
+
+  var GROUPS = {
+    access: ['第一幕 · 接入', '第一次敲门：建立请求的等待、被拒的冷静期、按类别的禁令'],
+    keep: ['第二幕 · 连接保持', '通话中的心跳监测：失步判定、链路求救与 MCG 快速救援'],
+    mob: ['第三幕 · 移动性', '搬家限时一表两用：网络命令切换与 CHO 执行共用 T304（起跑时刻不同）'],
+    inactive: ['第四幕 · INACTIVE 与 IDLE', '睡眠态的纪律：恢复等待、定期签到、优先级保质期']
+  };
+  var STATES = [
+    { name: 'RRC_IDLE', desc: '深度睡眠 · 周期醒来看寻呼', t: [] },
+    { name: 'RRC_INACTIVE', desc: '浅睡 · 保留 AS 上下文（五件套）', t: ['T319', 'T380', 'T320'] },
+    { name: 'RRC_CONNECTED', desc: '全连接 · 信令与业务满速', t: ['T310', 'T304', 'T316', 'T301'] },
+    { name: '接入中（IDLE→CONNECTED）', desc: '敲门进行时', t: ['T300', 'T302', 'T390'] }
+  ];
+
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function card(t) {
+    return '<div class="tn-card" data-t="' + t.id + '">' +
+      '<div class="tn-top"><span class="tn-name">' + esc(t.id) + '</span><span class="tn-tag">' + esc(t.tag) + '</span></div>' +
+      '<div class="tn-one">' + esc(t.one) + '</div>' +
+      '<div class="tn-detail">' +
+      '<div class="tn-row"><b>开始</b><span>' + esc(t.start) + '</span></div>' +
+      '<div class="tn-row"><b>停止</b><span>' + esc(t.stop) + '</span></div>' +
+      '<div class="tn-row"><b>超时</b><span>' + esc(t.expiry) + '</span></div>' +
+      '<div class="tn-row"><b>档位</b><span>' + esc(t.dials) + '</span></div>' +
+      '<div class="tn-row"><b>配套</b><span>' + esc(t.vars) + '</span></div>' +
+      '<div class="tn-row"><b>出处</b><span>' + esc(t.ref) + '</span></div>' +
+      '<div class="tn-links">' + t.links.map(function (l) { return '<a href="' + l[1] + '">' + esc(l[0]) + '</a>'; }).join('') + '</div>' +
+      '</div></div>';
+  }
+
+  var sb = document.getElementById('tn-statebar');
+  sb.innerHTML = STATES.map(function (st) {
+    return '<div><div class="tn-st-name">' + esc(st.name) + '</div><div class="tn-st-desc">' + esc(st.desc) + '</div>' +
+      '<div class="tn-st-timers">' + st.t.map(function (id) {
+        var t = TIMERS.filter(function (x) { return x.id === id; })[0];
+        return '<span class="tn-chip" data-jump="' + id + '">' + id + '</span>';
+      }).join('') + '</div></div>';
+  }).join('');
+
+  var root = document.getElementById('tn-groups');
+  root.innerHTML = Object.keys(GROUPS).map(function (g) {
+    return '<div class="tn-group"><h2>' + esc(GROUPS[g][0]) + '</h2><div class="gsub">' + esc(GROUPS[g][1]) + '</div>' +
+      '<div class="tn-cards">' + TIMERS.filter(function (t) { return t.group === g; }).map(card).join('') + '</div></div>';
+  }).join('');
+
+  root.addEventListener('click', function (e) {
+    var c = e.target.closest('.tn-card');
+    if (c) c.classList.toggle('open');
+  });
+  sb.addEventListener('click', function (e) {
+    if (!e.target.dataset || !e.target.dataset.jump) return;
+    var id = e.target.dataset.jump;
+    var c = root.querySelector('.tn-card[data-t="' + id + '"]');
+    if (c) { c.classList.add('open'); c.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  });
+})();
+</script>
+</body>
+</html>

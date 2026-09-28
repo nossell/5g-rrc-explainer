@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>信元词典 — RRC 讲解器</title>
+<meta name="description" content="跨消息复用的信元知识库：每个信元的简介、详解、条款锚点与关联信元。消息字段树可一键跳转过来。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <a class="brand" href="index.html">
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 15 L7.5 15 L10 8 L13 18 L15.5 12 L17.5 15 L21 15" stroke="#18A34A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="15" r="1.6" fill="#18A34A"/></svg>
+    RRC 讲解器
+  </a>
+  <nav class="topnav">
+    <a class="navlink" href="index.html">目录</a>
+    <a class="navlink" href="app.html">课程</a>
+    <a class="navlink on" href="dict.html">词典</a>
+    <a class="navlink" href="anim.html">动画</a>
+    <a class="navlink" href="timer-net.html">定时器网</a>
+    <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink" href="log-detective.html">日志侦探</a>
+  </nav>
+</header>
+
+<section class="hero" style="padding-top:26px;max-width:760px">
+  <h1 style="font-size:25px">信元词典</h1>
+  <p class="sub">消息字段树里点"词典详解"就到这里。同一个信元（如 NAS-PDU、Security Key）会在很多消息里出现——<b>写一次，处处引用</b>；每条都挂条款锚点与关联信元。</p>
+</section>
+
+<div class="hub-tools" style="margin-top:18px">
+  <div class="filter"><input id="dict-q" placeholder="搜信元名 / 关键词（如：钥匙、能力、AMBR）…"></div>
+</div>
+<div id="dict-list"></div>
+
+<footer>
+  <div class="flinks"><a href="index.html">目录</a><a href="anim.html">动画资产</a><a href="timer-net.html">定时器网</a></div>
+  <div><b>内容纪律：</b>词典详解为自写讲解（含条款号引用），不复制 3GPP 规范原文；条目随课程模块滚动扩充。</div>
+</footer>
+</div>
+
+<script src="assets/engine.js"></script>
+<script src="assets/content/iedict.js"></script>
+<script src="assets/content/spec-quotes.js"></script>
+<script>
+(function () {
+  var list = document.getElementById('dict-list');
+  var inp = document.getElementById('dict-q');
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  /* 与 player.js 的 mdBold 同款：内容里的 **强调** → <strong>（esc 之后转换，标签安全） */
+  function mdBold(s) { return String(s).replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>'); }
+  function card(it) {
+    var refs = (it.refs || []).map(function (r) {
+      return '<span class="ref-badge" title="条款锚点">§' + r + '</span>';
+    }).join(' ');
+    var see = (it.seeAlso || []).map(function (k) {
+      var t = RRC.IEDict.get(k);
+      return t ? '<a class="chip" style="text-decoration:none" href="#k=' + encodeURIComponent(k) + '">' + t.term.split('（')[0] + '</a>' : '';
+    }).join(' ');
+    return '<div class="dict-card" id="k-' + it.k + '">' +
+      '<div class="dc-top"><span class="dc-term">' + esc(it.term) + '</span><span class="dc-spec">' + esc(it.spec || '') + '</span></div>' +
+      '<div class="dc-brief">' + mdBold(esc(it.brief)) + '</div>' +
+      '<div class="dc-full">' + mdBold(esc(it.full)) + '</div>' +
+      '<div class="dc-foot">' + refs + (see ? '<span class="dc-see-cap">关联：</span>' + see : '') + '</div>' +
+      '</div>';
+  }
+  function render() {
+    var kw = (inp.value || '').trim().toLowerCase();
+    var ks = RRC.IEDict.keys().filter(function (k) {
+      if (!kw) return true;
+      var it = RRC.IEDict.get(k);
+      return (it.term + it.brief + it.full).toLowerCase().indexOf(kw) >= 0;
+    });
+    list.innerHTML = ks.length ? ks.map(function (k) { return card(RRC.IEDict.get(k)); }).join('')
+      : '<p class="sec-sub">没有匹配的信元。</p>';
+  }
+  inp.oninput = render;
+  render();
+  /* 锚点直达：dict.html#k=key */
+  if (location.hash.indexOf('#k=') === 0) {
+    var k = decodeURIComponent(location.hash.slice(3));
+    var el = document.getElementById('k-' + k);
+    if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('hit'); }
+    else list.insertAdjacentHTML('afterbegin', '<p class="sec-sub">词典暂无条目：' + k.replace(/</g, '&lt;') + '</p>');
+  }
+})();
+</script>
+</body>
+</html>
