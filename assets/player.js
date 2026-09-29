@@ -557,7 +557,7 @@
         '每步大白话讲解 + 面试考法标注 + 结课自测',
         '买一次，浏览器本地永久离线可用'
       ];
-      var price = gate.price || '完整版 12 模块（M0–M11）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
+      var price = gate.price || '完整版 16 模块（M0–M15）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
       root.innerHTML = '';
       var w = el('div', 'gate-wrap');
       var c = el('div', 'gate');
@@ -570,7 +570,7 @@
         '<div class="g-actions">' +
         '<button class="btn primary" data-act="unlock">完整版解锁码</button>' +
         '<a class="btn" href="index.html">返回目录</a></div>' +
-        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M11 共 10 个模块属完整版，获取方式见仓库 README。</p>';
+        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M15 共 14 个模块属完整版，获取方式见仓库 README。</p>';
       w.appendChild(c); root.appendChild(w);
       c.querySelector('[data-act="unlock"]').onclick = function () {
         store.setLicense({ demo: true });
@@ -606,7 +606,7 @@
       function renderLic() {
         lic = store.license();
         licCard.innerHTML =
-          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0/M1 与全部工具页；完整版（M2–M11）获取方式见 README。</div></div>' +
+          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0/M1 与全部工具页；完整版（M2–M15）获取方式见 README。</div></div>' +
           '<div style="display:flex;gap:8px;align-items:center">' +
           '<span class="license-state' + (lic.demo ? ' on' : '') + '">' + (lic.demo ? '完整版用户' : '免费层') + '</span>' +
           (lic.demo
@@ -619,7 +619,7 @@
       }
       renderLic();
       root.appendChild(el('h2', 'sec', '模块目录'));
-      root.appendChild(el('p', 'sec-sub', '免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M11 属完整版。建议按序号顺序学习。'));
+      root.appendChild(el('p', 'sec-sub', '免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M15 属完整版。建议按序号顺序学习。'));
       root.appendChild(tools);
 
       /* 总进度 */

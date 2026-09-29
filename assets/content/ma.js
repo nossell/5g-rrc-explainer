@@ -159,7 +159,7 @@ ies: [
       maa6: {
         title: 'INITIAL UE MESSAGE（NGAP 首帧）', dir: 'nas', from: 1, to: 2,
         label: 'INITIAL UE MESSAGE', chan: 'NG-C（38.413 §8.6.1）· gNB→AMF · 登记开档',
-        narr: '**为什么有它**：AMF 面前有成千上万个 UE，谁来"开档案"？这条 NGAP 首帧做三件事：分配 **RAN UE NGAP ID**（此后 NG 侧信令的号牌）；把 **NAS-PDU 原样上交**（§8.6.1.2 原话 "transferred without interpretation"——gNB 是邮差不拆信）；报上 **TAI 与用户位置**（AMF 据此选路管辖）。**没有它，注册请求永远停在基站**。',
+        narr: '**为什么有它**：AMF 面前有成千上万个 UE，谁来"开档案"？这条 NGAP 首帧做三件事：分配 **RAN UE NGAP ID**（此后 NG 侧信令的号牌）；把 **NAS-PDU 原样上交**（§8.6.1.2 原话 "transferred without interpretation"——gNB 是邮差不拆信）；报上 **TAI 与用户位置**（AMF 据此选路管辖）。**没有它，注册请求永远停在基站**。\n\n**信封进了 AMF 之后呢**：AMF 可不会自己拆——它叫 SMF 管会话、找 AUSF 验身、请 UDM 查档案。柜台后面的这套服务化调用流水线，**M14《5GC 流程课》（23.502/23.501）带你走进核心网办公区**。',
         refs: ['38.413#8.6.1'],
 ies: [
           {"name": "Message Type", "type": "Message Type（9.3.1.1）", "pres": "M", "meta": "信种戳——机器先看它才知道这封信怎么读", "sem": "消息类型标识", "ref": "38.413#9.2.5.1", "focus": "extra"},

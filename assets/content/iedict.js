@@ -253,6 +253,36 @@
     { k: 'xn-benefit', term: 'Xn Benefit Value（邻居关系值不值）', spec: 'TS 38.423',
       brief: '留在 Xn 接口上的收益度量——低于阈值就体面绝交（XN REMOVAL）。',
       full: '邻居关系不是白养的：SCTP 关联心跳、配置同步、内存都有开销。Xn Benefit 把"这条邻居线带来的切换/双连接收益"量化，XN REMOVAL REQUEST 里的 Xn Removal Threshold 字段把这笔账摆上桌面——话务少、切换少的邻居按阈值主动拆除接口实例，省下的资源养更值的邻居。超大规模组网时还可经 Xn-GW 间接互联，用"朋友的朋友"换邻居关系数。这是协议里少见的"经济学字段"：绝交不撕脸，账本说话。',
-      refs: ['38.423#9.1.3.13'], seeAlso: ['global-ran-node-id'] }
+      refs: ['38.423#9.1.3.13'], seeAlso: ['global-ran-node-id'] },
+    /* ---------- 5GC 流程课（T5 · 23.501/23.502） ---------- */
+    { k: 'qfi', term: 'QFI（QoS Flow ID）', spec: 'TS 23.501',
+      brief: 'QoS 流的车牌号——同一会话内同牌号的包享受同等待遇。',
+      full: '5G QoS 模型的最小分粒度是 **QoS Flow**，QFI 是它在一条 PDU 会话内的唯一编号（可动态分配，也可直接取 5QI 值）。QFI 装在 **N3/N9 的封装头（GTP-U）**里，不碰端到端业务包头——RAN 与 UPF 按它映射调度与转发待遇，业务包本身毫无感知。上行方向 UE 按 QoS 规则给包打 QFI，下行方向 UPF 打——**双向对账的依据都是 QoS 规则/规则集**。反射式 QoS（Reflective QoS）让 UE 从下行包的 QFI 反推出上行规则，省一条专用信令。',
+      refs: ['23.501#5.7.1.1', '23.501#5.7.1.5'], seeAlso: ['snssai', '5qi'] },
+    { k: '5qi', term: '5QI（5G QoS Identifier）', spec: 'TS 23.501',
+      brief: 'QoS 待遇的缩写代码——一个数字代表一整套时延/误码/优先级组合。',
+      full: '5QI 是标量索引，一对一映射到 **5G QoS characteristics**（优先级、包时延预算 PDB、包误码率 PER、 averaging window 等转发处理参数）。**标准化 5QI**（表 5.7.4-1）不随信令传特性、只传编号：1=会话式语音（GBR/100ms/10⁻²）、4=缓冲视频（Non-GBR/300ms）、5=IMS 信令（Non-GBR/100ms）、6=TCP 上网（Non-GBR/300ms）、75=V2X…；动态 5QI 则把整套特性随 QoS Profile 显式下发。QoS Profile 里 5QI+ARP 必选，GBR 流再加 GFBR/MFBR 保底与上限。',
+      refs: ['23.501#5.7.2.1', '23.501#5.7.1.2'], seeAlso: ['qfi'] },
+    { k: 'dnn', term: 'DNN（Data Network Name）', spec: 'TS 23.501',
+      brief: '会话要访问哪个数据网——5GC 里的 APN，换个名字接着用。',
+      full: 'DNN 与 4G 的 APN 等价（23.003 定义同名同义）。三大用途：**选 SMF/UPF**（DNN+切片是选择函数的主输入）、**选 N6 出口**、**定策略**（PCF 按 DNN 出政策）。订阅里有 Subscribed DNN 清单+一个 default DNN，还有 **wildcard DNN**（万能通行证：该切片下任何 DNN 都放行）。UE 不填 DNN 时 AMF 按订阅补默认值——"没填也能上网"的机制就在这。',
+      refs: ['23.501#5.9.6', '23.501#5.6.1'], seeAlso: ['snssai'] },
+    { k: 'n4-rules', term: 'N4 四件套（PDR/FAR/QER/URR）', spec: 'TS 23.501 / 29.244',
+      brief: 'UPF 的可编程路标——SMF 用四类规则把转发机调教到位。',
+      full: 'UPF 是台可编程转发机，SMF 经 N4 会话管理（建立/修改/释放）给它装规则：**PDR**（Packet Detection Rule）认包——方向、来源接口、UE IP、隧道信息、包过滤器集都是指纹，按优先级排队匹配；**FAR**（Forwarding Action Rule）定处置——转发去哪个隧道、缓冲还是丢弃；**QER**（QoS Enforcement Rule）管待遇——闸门开关、限速/保底、往 GTP-U 头里印 QFI；**URR**（Usage Reporting Rule）记账——用量统计与上报。PDR 引用其余三类的 ID：认出来→交给谁→按什么待遇→记谁的账，一条龙。', 
+      refs: ['23.501#5.8.5.1', '23.501#5.8.5.3', '23.502#4.4.1.2'], seeAlso: ['qfi'] },
+    /* ---------- 用户面协议栈课（T4 · 38.323/38.322/37.324） ---------- */
+    { k: 'pdcp-count', term: 'COUNT（PDCP 计数）', spec: 'TS 38.323',
+      brief: 'PDCP 的 32 位总账号——SN 是明面、HFN 是暗账，安全运算的 IV 全靠它。',
+      full: 'COUNT = **HFN + PDCP SN**（32bit；SN 12/18bit，HFN 占其余高位），发送侧每发一条 SDU 关联 COUNT=TX_NEXT 再加一。**双重身份**：既是排序/防重放的坐标系，又是**加密与完整性保护的 IV 输入**——同一 COUNT 永不复用，密钥流才不复用（COUNT does not wrap around）。接收侧按窗口规则**推断** HFN（SN 落窗口下远→HFN+1，上远→HFN−1），配合"丢弃 <RX_DELIV 与重复 COUNT"双底线实现防重放。**HFN 从不显式传**——省一个字段换来重放攻击在数学上失效。',
+      refs: ['38.323#6.3.5', '38.323#5.2.2', '38.323#6.3.2'], seeAlso: ['rohc', 'rqi'] },
+    { k: 'rohc', term: 'ROHC（鲁棒头压缩）', spec: 'TS 38.323 / RFC 5795',
+      brief: '元数据瘦身师——40 字节的 IP/UDP/RTP 头压到 1-2 字节。',
+      full: 'VoNR 语音包载荷 ~30B 而协议头 40B——不压头一半带宽喂元数据。ROHC 在 PDCP 内对**用户面 DRB**（SRB 不配）做头压缩：流首包全量发（IR 初始化状态），此后只发变化字段，静态字段缩成"上下文号"代词。38.323 只管 profile 清单（表 5.7.1-1）与配置，框架实现看 RFC 5795。**顺序纪律**：发送五连里压缩在完整性保护与加密**之前**——密文压不动。姊妹件 EHC（以太网头，TSC 场景）与 UDC（上行字典压缩）独立配置。',
+      refs: ['38.323#5.7', '38.323#5.7.1', '38.323#5.2.1'], seeAlso: ['pdcp-count'] },
+    { k: 'rqi', term: 'RQI（Reflective QoS Indication）', spec: 'TS 37.324',
+      brief: 'SDAP 头里的小旗子——通知 NAS"业务流到 QoS 流的映射规则变了"。',
+      full: 'SDAP 下行头的 1bit 指示（D/C 1bit + QFI 6bit + RQI 1bit + RDI 1bit 的家族成员）。**RQI=1 时 UE 的 SDAP 要通知 NAS**：SDF（业务数据流）到 QoS flow 的映射更新了——这是 5GC URSP 体系（M14 课）在空口侧的感知触点，终端据此校准 URSP 认知。**别与 RDI 混淆**：RDI（Reflective QoS to DRB mapping Indication）管的下一层——QoS flow→DRB 映射规则的更新。两个"规则更新"一面朝天（NAS）一面朝地（SDAP 自己）。',
+      refs: ['37.324#6.3.6', '37.324#5.4', '37.324#6.3.7'], seeAlso: ['qfi'] }
   ]);
 })(typeof window !== 'undefined' ? window : globalThis);
