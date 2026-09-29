@@ -96,6 +96,11 @@
       expiry: '超时或停止：该类别的禁止解除（barring alleviated），可再发起接入',
       dials: '非固定档：由 SIB1 的 uac-BarringInfoSet 算出（uac-BarringTime 为因子）', vars: '与 T302 分工：T302 是被拒后的全局冷静期，T390 是按类别的临时禁令',
       links: [['接入课 · 统一接入控制', 'app.html#ma']], ref: '38.331 §5.3.14.2/§5.3.14.4/§5.3.14.5' },
+    { id: 'TCR', group: 'access', tag: '裁决限时', one: 'ra-ContentionResolutionTimer——Msg3 发出后"对暗号"的限时：等网络用临时工牌（TC-RNTI）点名并回声验证身份。',
+      start: '每次 Msg3 发送（含 HARQ 重传）结束的首个符号起跑，反复重启', stop: '竞争解决成功（回声匹配 / C-RNTI PDCCH 调度）即停',
+      expiry: '超时：丢弃 TC-RNTI 判竞争解决失败——计数+1、随机退避后重选资源（MAC 课失败幕）',
+      dials: 'sf8 / sf16 / sf24 / sf32 / sf40 / sf48 / sf56 / sf64（=8..64ms 八档）', vars: '分工：ra-ResponseWindow 等 RAR（等回信）、TCR 等裁决（对暗号）；两者连跑构成接入时延主体',
+      links: [['MAC 随机接入课 · 竞争解决', 'app.html#mc']], ref: '38.321 §5.1.5 / 38.331 §6.3.2' },
     /* ---------- 第二幕：连接保持 ---------- */
     { id: 'T310', group: 'keep', tag: '失步沙漏', one: '物理层连续报失步后开始跑——跑完还没同步回来就宣布无线链路失败。',
       start: '连续 N310 次下行失步指示后启动', stop: '连续 N311 次同步指示后停止（虚惊一场）',
@@ -151,7 +156,7 @@
     { name: 'RRC_IDLE', desc: '深度睡眠 · 周期醒来看寻呼', t: [] },
     { name: 'RRC_INACTIVE', desc: '浅睡 · 保留 AS 上下文（五件套）', t: ['T319', 'T380', 'T320'] },
     { name: 'RRC_CONNECTED', desc: '全连接 · 信令与业务满速', t: ['T310', 'T304', 'T316', 'T301'] },
-    { name: '接入中（IDLE→CONNECTED）', desc: '敲门进行时', t: ['T300', 'T302', 'T390'] }
+    { name: '接入中（IDLE→CONNECTED）', desc: '敲门进行时', t: ['T300', 'T302', 'T390', 'TCR'] }
   ];
 
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
