@@ -18,7 +18,8 @@
     free: true, tech: '5G NR · SA', minutes: 22, prereq: [],
     intro: {
       title: '场景：手机开机后的第一次"落户"，19 帧信令',
-      narr: '网优工程师拿到信令跟踪，第一条看的就是**初始注册（Attach）流程**。学它的正确姿势不是背顺序，而是问**每一条消息：为什么一定要有它？没有它会怎样？**——本模块 19 帧，每一帧的讲解都从这个问题开始。\n\n三层接力看清分工：**RRC 层**（UE↔gNB，无线通道）、**NGAP 层**（gNB↔AMF，登记与交接）、**NAS 层**（UE↔核心网，注册/鉴权——自己不发电报，全程搭前两层的车）。\n\n注意成对出现的"请求-响应"：安全命令必有 Complete 证明校验通过；能力问询必有 Information 交答卷；重配置必有 Complete 回执；核心网的上下文建立 REQUEST 必有 RESPONSE 收尾——**协议世界里没有"发出去就当收到"这回事**。'
+      narr: '网优工程师拿到信令跟踪，第一条看的就是**初始注册（Attach）流程**。学它的正确姿势不是背顺序，而是问**每一条消息：为什么一定要有它？没有它会怎样？**——本模块 19 帧，每一帧的讲解都从这个问题开始。\n\n三层接力看清分工：**RRC 层**（UE↔gNB，无线通道）、**NGAP 层**（gNB↔AMF，登记与交接）、**NAS 层**（UE↔核心网，注册/鉴权——自己不发电报，全程搭前两层的车）。\n\n注意成对出现的"请求-响应"：安全命令必有 Complete 证明校验通过；能力问询必有 Information 交答卷；重配置必有 Complete 回执；核心网的上下文建立 REQUEST 必有 RESPONSE 收尾——**协议世界里没有"发出去就当收到"这回事**。',
+      plain: '这门课把手机开机后第一次注册网络的整串信令逐帧拆开，每一步都追问同一件事：这条消息为什么缺它不可？看懂它，你就明白手机、基站、核心网三层是怎么接力把一次注册办成的。',
     },
     actors: [
       { x: 160, label: 'UE', sub: '你的手机' },
@@ -38,6 +39,7 @@
         title: 'PRACH 前导（Msg1）', dir: 'ul', from: 0, to: 1,
         label: 'PRACH 前导（Msg1）', chan: '物理层 · 竞争接入的敲门',
         narr: '**为什么有它**：UE 还没有任何专属资源，连"能发数据的通道"都没有——唯一的机会是公共的物理随机接入信道：挑一个前导码喊一嗓子，赌基站听见。没有这一步，后面的一切都无从谈起。\n\n细节：前导码从竞争池里随机挑（所以叫"竞争接入"，可能撞车）；这一段在 MAC/PHY 地界（TS 38.321/38.213），RRC 从下一条 Msg3 才接手。**拆开这段引擎盖：M12《MAC 随机接入课》（38.321）专讲前导怎么选、功率怎么爬、RA-RNTI 怎么算**。',
+        plain: '手机想联系基站，可连一条能发言的通道都没有，只能去公共的随机接入信道，从一串候选暗号里随机挑一个喊一嗓子——赌基站听得见，也冒着跟别人撞车的风险。',
         refs: ['5.3.3.3'],
         ies: [],
         exam: '"注册流程从哪条信令算起？"——工程师视角从 PRACH 前导算起；协议 RRC 视角从 Msg3。两个口径都答才周全。'
@@ -46,6 +48,7 @@
         title: '随机接入响应 RAR（Msg2）', dir: 'dl', from: 1, to: 0,
         label: 'RAR（Msg2）', chan: '物理层 · TA+上行授权',
         narr: '**为什么有它**：基站听见了敲门声，接下来要还 UE 两样东西。\n\n**第一样：校表（TA，定时提前量）**。UE 离基站有远有近，电波跑一个来回花的时间就不同——如果人人"同一时刻开口"，基站在同一时刻收到的是一片前后错开的杂音，谁的话都听不完整。解法是**让远的早开口**：基站在 RAR 里带回一个**定时提前量 TA（Timing Advance）**——按"你离我多远"算出来的提前量，远的多提前、近的少提前；每人按自己的提前量发送，所有信号就恰好**同时到达基站**，好比老师喊"后排同学提前起跑"，全班才能同时冲线。从此 UE 每次上行都带着这个提前量发（距离变了基站会随发随调）。\n\n**第二样：发言席位（上行授权 UL Grant）**。RAR 指定一块时频资源——你在哪个时刻、哪些频率上发下一条消息（Msg3）。有了席位才轮得到你说话：**没有 RAR，Msg3 就是无人指挥的乱喊**。MAC RAR 的逐字段拆解（E/T/RAPID 子头 + TA 12bit / UL Grant 27bit / TC-RNTI 16bit + 退避指示）在 **M12《MAC 随机接入课》第四幕**。',
+        plain: '基站听见敲门声后回话，附两样见面礼：一是校表时间——按你离基站的远近，告诉你该提前多少开口，远近不同的人才能同时到站；二是发言席位——指定你下一条消息用哪一小段无线资源说。',
         refs: ['5.3.3.3'],
         ies: [],
         exam: '"RAR 里最关键的两个东西？"——① **TA（定时提前量）**：按 UE 与基站的距离算出的"提前开口量"，让远近不同的 UE 信号同时到达基站；② **上行授权**：给 Msg3 专用的时频资源（何时发、在哪段频率发）。都是 MAC 层机制，与 RRC 时间线咬合。'
@@ -54,6 +57,7 @@
         title: 'RRCSetupRequest（Msg3）', dir: 'ul', from: 0, to: 1,
         label: 'RRCSetupRequest（Msg3）', chan: 'CCCH · SRB0/TM · 启动 T300',
         narr: '**为什么有它**：物理层通了，但 UE 和网络之间还没有任何"RRC 意义上的关系"——这条消息是 UE 的自我介绍：我是谁（39bit 身份）、来干什么（建立原因）。同时 T300 开始计时：网络不回话就有限次重试，超限回 IDLE。**字段树点开看**：establishmentCause 是个枚举，每个来由都有白话。\n\n**读树心法**：RRC 消息没有 NGAP 那层"信元容器"外壳——信纸本身就是 ASN.1 结构体：第一层是 criticalExtensions 版格外壳，信纸本体在选中的分支里（rrcSetupRequest），再往里才是三个字段。**树形比 NGAP 深，是两种协议的真实形状差异**，不是谁少画了层。',
+        plain: '手机递上自我介绍信：报上 39 位身份号、写明这次来干什么；同时开始计时——网络要是一直不回话，重试几轮超限就得回待机。',
         refs: ['5.3.3.3'],
 ies: [
         { name: 'criticalExtensions', type: 'CHOICE { rrcSetupRequest, criticalExtensionsFuture }', pres: 'M', dict: 'criticalExtensions', meta: '版本信封——每条 RRC 消息的标准外套，信纸夹在选定的分支里', sem: '公共外壳（详见词典）；接收方按分支名对版本', ref: '6.2.2', children: [
@@ -86,6 +90,7 @@ ies: [
         title: 'RRCSetup（Msg4）', dir: 'dl', from: 1, to: 0,
         label: 'RRCSetup（Msg4）', chan: 'CCCH · 建 SRB1 · 竞争解决 · 停 T300',
         narr: '**为什么有它**：网络的"录取通知"——SRB1 的配置随信下发（从此有专用信令通道），MAC 竞争解决同帧完成（TC-RNTI 转正），T300 停表，UE 进 RRC_CONNECTED。**注意：只是"能通话"，还没"落户"**——核心网还不知道你是谁。masterCellGroup 是字节串封装的 MAC/PHY 布置图（整箱转交，两域各改各的）。',
+        plain: '基站的录取通知到了：随信附上专用信令通道的配置单，手机从此有了和基站单独对话的专线；不过此刻只算能通话，核心网那边还没登记你的户口。',
         refs: ['5.3.3.4'],
 ies: [
         { name: 'rrc-TransactionIdentifier', type: 'RRC-TransactionIdentifier (0..3)', pres: 'M', dict: 'rrc-TransactionIdentifier', meta: '柜台小票号——Setup 与 SetupComplete 凭它配对', sem: '事务标识（详见词典）', ref: '6.2.2' },
@@ -118,6 +123,7 @@ ies: [
         title: 'RRCSetupComplete ★捎带注册请求', dir: 'ul', from: 0, to: 1,
         label: 'RRCSetupComplete', chan: 'DCCH · SRB1/AM · 车上带着 Registration Request',
         narr: '**为什么有它**：双职责。其一，向网络确认"SRB1 装好了、配置生效了"（RRC 建立的收尾）；其二，**捎带 NAS 的注册请求**——5GC 注册流程从这一刻搭上 RRC 的顺风车，不必等任何专用承载。身份拼图也在这里完成：Msg3 带了 S-TMSI 前 39 位，这里补后 9 位。RLC 已切 AM 模式：从此信令有重传确认。',
+        plain: '手机签收回执，确认新通道装好、配置生效，还顺手把给核心网的注册申请信塞进同一封信捎上去——注册流程从这一刻搭上顺风车，不必另等专车。',
         refs: ['5.3.3.4', '6.2.2'],
 ies: [
         { name: 'rrc-TransactionIdentifier', type: 'RRC-TransactionIdentifier (0..3)', pres: 'M', dict: 'rrc-TransactionIdentifier', meta: '柜台小票号——与 Setup 的号一致，表示"这单我接了"', sem: '事务标识（详见词典）', ref: '6.2.2' },
@@ -160,6 +166,7 @@ ies: [
         title: 'INITIAL UE MESSAGE（NGAP 首帧）', dir: 'nas', from: 1, to: 2,
         label: 'INITIAL UE MESSAGE', chan: 'NG-C（38.413 §8.6.1）· gNB→AMF · 登记开档',
         narr: '**为什么有它**：AMF 面前有成千上万个 UE，谁来"开档案"？这条 NGAP 首帧做三件事：分配 **RAN UE NGAP ID**（此后 NG 侧信令的号牌）；把 **NAS-PDU 原样上交**（§8.6.1.2 原话 "transferred without interpretation"——gNB 是邮差不拆信）；报上 **TAI 与用户位置**（AMF 据此选路管辖）。**没有它，注册请求永远停在基站**。\n\n**信封进了 AMF 之后呢**：AMF 可不会自己拆——它叫 SMF 管会话、找 AUSF 验身、请 UDM 查档案。柜台后面的这套服务化调用流水线，**M14《5GC 流程课》（23.502/23.501）带你走进核心网办公区**。',
+        plain: '基站把这封注册信原封不动转交核心网登记台：给这单往来编个号牌、报上用户所在区域，此后两边凭号牌对话——少了这一步，注册申请永远停在基站手里。',
         refs: ['38.413#8.6.1'],
 ies: [
           {"name": "Message Type", "type": "Message Type（9.3.1.1）", "pres": "M", "meta": "信种戳——机器先看它才知道这封信怎么读", "sem": "消息类型标识", "ref": "38.413#9.2.5.1", "focus": "extra"},
@@ -195,6 +202,7 @@ ies: [
         title: 'AMF 验身：取鉴权向量（5G-AKA）', dir: 'int', from: 2, to: 2,
         label: 'AMF · SBA 取鉴权向量', chan: '核心网内部 · AUSF/UDM（33.501 地界）',
         narr: '**为什么有它**：能发 Msg3 的不一定是真卡——克隆卡/伪终端都能喊一嗓子。AMF 收到注册请求后第一件事是验身：经服务化接口（SBA）找 **AUSF/UDM** 取鉴权向量（5G-AKA 或 EAP-AKA\'），产出根密钥材料 **K_AMF**——它不出核心网，后续 AS 安全的 KgNB 由 gNB 从它派生。鉴权本体的算法与流程在 TS 33.501/29.50x 地界，本图画到"AMF 拿到结果"为止。',
+        plain: '登记台不轻信来客——万一敲门的是克隆卡呢？它先去后台验证部门调一套出题材料，准备考一考这张卡是真是假，顺便拿到后续加密要用的根钥匙材料。',
         refs: ['38.413#8.6.1'],
         ies: [],
         exam: '层次题："鉴权在哪层做？"——NAS 层（UE↔AMF↔AUSF/UDM），RRC/NGAP 只当邮差。'
@@ -203,6 +211,7 @@ ies: [
         title: 'DOWNLINK NAS TRANSPORT（带鉴权挑战）', dir: 'nas', from: 2, to: 1,
         label: 'DOWNLINK NAS TRANSPORT', chan: 'NG-C（38.413 §8.6.2/§9.2.5.2）· AMF→gNB',
         narr: '**为什么有它**：AMF 要把鉴权挑战发给 UE，但 AMF 没有无线通道——NGAP 的**下行 NAS 直传**就是那条"转发单"：挂上双号牌（AMF/RAN UE NGAP ID 配对完成），NAS-PDU 装着 Authentication Request。**注意安全悖论**：此刻 SRB1 上无任何保护（AS 安全未激活、NAS 加密未生效），鉴权消息明文跑——安全性靠 5G-AKA 挑战-应答自身的防重放（RAND/AUTN）保证，这是流程时序的必然而非漏洞。',
+        plain: '核心网没有无线通道，身份考题只能请基站代转——这条消息就是一张转发单：封面写着双方号牌，信封里装着发给手机的鉴权考题。',
         refs: ['38.413#8.6.2'],
 ies: [
           {"name": "Message Type", "type": "Message Type", "pres": "M", "meta": "信种戳", "sem": "消息类型", "ref": "38.413#9.2.5.2", "focus": "extra"},
@@ -236,6 +245,7 @@ ies: [
         title: 'DLInformationTransfer（RRC 当邮差）', dir: 'dl', from: 1, to: 0,
         label: 'DLInformationTransfer', chan: 'DCCH · SRB1 · §5.7.1',
         narr: '**为什么有它**：NG-C 只把信送到 gNB，"最后一公里"到 UE 得 RRC 来跑——DLInformationTransfer 的消息体几乎只有 dedicatedNAS-Message 一个字段（§5.7.1：NAS 直传）。**它和上一步是一枚硬币的两面**：NGAP 下行 NAS 直传 + RRC 下行信息直传，合起来才是"AMF→UE"的完整邮路。',
+        plain: '转发单只把信送到基站，最后一公里还得基站亲手递给手机——这条消息就是代投的信封，里面原样装着核心网给手机的内容，一个字不改。',
         refs: ['5.7.1'],
         ies: [
         { name: 'rrc-TransactionIdentifier', type: 'RRC-TransactionIdentifier (0..3)', pres: 'M', dict: 'rrc-TransactionIdentifier', meta: '柜台小票号', sem: '事务标识（详见词典）', ref: '6.2.2' },
@@ -262,6 +272,7 @@ ies: [
         title: 'ULInformationTransfer（鉴权应答）', dir: 'ul', from: 0, to: 1,
         label: 'ULInformationTransfer', chan: 'DCCH · SRB1 · §5.7.2',
         narr: '**为什么有它**：UE 算出应答（RES*）要送回 AMF——空口段的上行邮差专列。信封里装着 Authentication Response，到 gNB 后转乘下一步的 NGAP 上行直传。**还是那个设计**：NAS 永远不自己发电报。',
+        plain: '手机算出考卷答案要交回核心网，可自己够不着那么远，只能把答卷装进信封交给基站，请它继续往上传。',
         refs: ['5.7.2'],
         ies: [
         { name: 'criticalExtensions', type: 'CHOICE { ulInformationTransfer, criticalExtensionsFuture }', pres: 'M', dict: 'criticalExtensions', meta: '版本信封——注意这条没有事务号：它不是"命令-回执"型，无需配对', sem: '公共外壳（详见词典）', ref: '6.2.2', children: [
@@ -282,6 +293,7 @@ ies: [
         title: 'UPLINK NAS TRANSPORT（应答上呈）', dir: 'nas', from: 1, to: 2,
         label: 'UPLINK NAS TRANSPORT', chan: 'NG-C（38.413 §8.6.3/§9.2.5.3）· gNB→AMF',
         narr: '**为什么有它**：把 UE 的鉴权应答交还 AMF 验算，同时报上**用户位置信息**（M 级字段——AMF 的档案里位置是必填项）。AMF 核对 RES* 通过 → 鉴权完成、K_AMF 就位。接下来核心网要把"开张材料"整包交给 gNB——第二幕的高潮（下一步）。',
+        plain: '基站把手机的答卷转交登记台验算，随卷附上用户当前的位置信息；核对通过，身份验证就此通过。',
         refs: ['38.413#8.6.3'],
 ies: [
           {"name": "Message Type", "type": "Message Type", "pres": "M", "meta": "信种戳", "sem": "消息类型", "ref": "38.413#9.2.5.3", "focus": "extra"},
@@ -299,6 +311,7 @@ ies: [
         title: 'INITIAL CONTEXT SETUP REQUEST ★交钥匙', dir: 'nas', from: 2, to: 1,
         label: 'INITIAL CONTEXT SETUP REQ', chan: 'NG-C（38.413 §8.3.1/§9.2.2.1）· AMF→gNB · 档案整包交接',
         narr: '**为什么有它**：到目前为止 gNB 只是"邮差"——不认识这个 UE。这条消息让 gNB 从邮差变成管家：安全钥匙（派生 KgNB 的材料）、安全能力、速率闸门（UE-AMBR）、（有会话时）待建资源清单、还捎着 **NAS 的安全命令**（§8.3.1.2："pass it transparently towards the UE"——核心网连保安都搭这条车）。**本流程最厚的一条消息（原表 50+ 信元一字未并，全部在此）**：字段树默认亮重点，点"展开全部字段"看全量；PDU 会话清单里还有对 AMF 透明的传输容器（UPF 隧道/QoS 流配置，逐层展开四层）。\n\n**读树心法（为什么第一层是"平"的）**：NGAP 每条消息在 ASN.1 里就是一个信元容器（ProtocolIE-Container），56 个信元**平级排队**，每项自带三张标签——信元号 / 关键度（reject·ignore）/ **在场性 Presence（mandatory·optional·conditional）**。你在解码工具里看到的"另一层包裹"，是每个信元外面统一套的 ProtocolIE-Field{id, criticality, value} 外壳，不是信元本身的层级；真正的层级只存在于复合信元内部（如本条的 PDU 会话清单→传输容器→QoS 流清单，已逐层展开）。所以这张表第一层长、子孙少——**长得平是协议的真实形状**。对比：RRC 消息（如本流程第 ③④⑤ 帧）没有这层容器，信纸直接是 ASN.1 结构体，criticalExtensions 版格外壳下层层嵌套，树形自然更深。',
+        plain: '验身通过，核心网把整包开张材料交给基站：安全钥匙、限速额度、该建的资源清单一应俱全——基站从只管传信的邮差，升级成掌管这台手机事务的管家。',
         refs: ['38.413#8.3.1', '38.413#9.2.2.1', '38.413#9.3.4.1'],
         ies: [
           {"name": "Message Type", "type": "Message Type（9.3.1.1）", "pres": "M", "meta": "信种戳", "sem": "消息类型", "ref": "38.413#9.2.2.1", "focus": "extra"},
@@ -365,6 +378,7 @@ ies: [
         title: 'SecurityModeCommand（AS 安全激活）', dir: 'dl', from: 1, to: 0,
         label: 'SecurityModeCommand', chan: 'DCCH · SRB1 · 仅完整性保护',
         narr: '**为什么有它**：钥匙到手了要立刻用——从这条消息起，信令通道要上锁（防篡改）。gNB 从 UE 能力里挑定算法对下发。**为什么只做完整性不加密**：加密此刻还没生效，但算法配置绝不能被篡改——"用已通电的完整性，锁住还没通电的加密配置"，鸡蛋问题被时序拆解。',
+        plain: '钥匙到手立刻用上：基站下发指令，指定此后信令防篡改用哪套算法——指令本身先带防伪校验，免得有人半路偷改这套安全设置。',
         refs: ['5.3.4.3'],
 ies: [
         { name: 'rrc-TransactionIdentifier', type: 'RRC-TransactionIdentifier (0..3)', pres: 'M', dict: 'rrc-TransactionIdentifier', meta: '柜台小票号', sem: '事务标识（详见词典）', ref: '6.2.2' },
@@ -388,6 +402,7 @@ ies: [
         title: 'SecurityModeComplete（校验回执）', dir: 'ul', from: 0, to: 1,
         label: 'SecurityModeComplete', chan: 'DCCH · SRB1 · 明文但带完整性保护',
         narr: '**为什么必须有它**：协议世界没有"发出去就当收到"——gNB 必须拿到 UE 的证明："你选的算法+钥匙，我验算通过了"。这条回执**明文（unciphered）发送但带完整性保护**：完整性立即生效（含本消息自己），加密要"过程结束后"才生效——两个生效时刻的时序差是本流程最精妙的细节。从下一条起 SRB1 进入双保护时代。（NAS 侧的 Security Mode Complete 随后经 UPLINK NAS TRANSPORT 上行，同理必须回执。）',
+        plain: '手机回执：你选的算法和钥匙我验算通过了。这条回执本身已带防伪保护，而加密要再等一步才生效——两层保护分两步到位，时序拿捏得很精。',
         refs: ['5.3.4.3'],
 ies: [
         { name: 'rrc-TransactionIdentifier', type: 'RRC-TransactionIdentifier (0..3)', pres: 'M', dict: 'rrc-TransactionIdentifier', meta: '柜台小票号——与 SMC 同号', sem: '事务标识（详见词典）', ref: '6.2.2' },
@@ -405,6 +420,7 @@ ies: [
         title: 'UECapabilityEnquiry（能力问询）', dir: 'dl', from: 1, to: 0,
         label: 'UECapabilityEnquiry', chan: 'DCCH · SRB1（已双保护）· §5.6.1',
         narr: '**为什么有它**：网络要为你定制配置（CA 组合、特性开关），得先知道你会什么——但只在**没有存档**时才问（核心网若在 ICS 里带过 UE Radio Capability，这步直接跳过："网络记性好，UE 就少说话"）。问的时候还带**频段过滤**（frequencyBandListFilter）：按口径问、按口径缓存，避免 band 组合爆炸的巨型消息。',
+        plain: '基站要给手机定制配置，先得摸清底细：支持什么频段、有哪些本事——若核心网存过它的档案，这一问还能直接省掉。',
         refs: ['5.6.1', '5.6.1.4'],
 ies: [
         { name: 'rrc-TransactionIdentifier', type: 'RRC-TransactionIdentifier (0..3)', pres: 'M', dict: 'rrc-TransactionIdentifier', meta: '柜台小票号', sem: '事务标识（详见词典）', ref: '6.2.2' },
@@ -440,6 +456,7 @@ ies: [
         title: 'UECapabilityInformation（能力答卷）', dir: 'ul', from: 0, to: 1,
         label: 'UECapabilityInformation', chan: 'DCCH · SRB1 · 逐制式容器 + 过滤口径声明',
         narr: '**为什么必须有它**：问了一定要有答，网络等的就是这份答卷——逐制式的能力容器，还要**声明实际采用的过滤口径**（appliedFreqBandListFilter）：网络要拿它对账（与缓存口径一致才命中）。答卷太大时走 UL RRC 分段（多条拼装，M1 讲过那个指示位）。此后网络的定制配置全以这份档案为底。',
+        plain: '手机交上能力答卷，注明这是按基站指定的口径答的题，好让网络对得上账——此后所有定制配置，都以这份档案为底。',
         refs: ['5.6.1', '5.6.1.4'],
 ies: [
         { name: 'rrc-TransactionIdentifier', type: 'RRC-TransactionIdentifier (0..3)', pres: 'M', dict: 'rrc-TransactionIdentifier', meta: '柜台小票号——与问询同号', sem: '事务标识（详见词典）', ref: '6.2.2' },
@@ -466,6 +483,7 @@ ies: [
         title: 'RRCReconfiguration（装 SRB2/DRB + 捎带 Accept）', dir: 'dl', from: 1, to: 0,
         label: 'RRCReconfiguration', chan: 'DCCH · SRB1 · 建承载 · 带 Registration Accept',
         narr: '**为什么有它**：验完身、登完记，该发"装备"了——SRB2（NAS 专用信令通道）和 DRB（数据承载）一次装齐。**为什么此刻才装**：它们承载的内容必须加密（KUPenc 依赖安全激活）——顺序是结构不是建议。**NAS 的 Registration Accept 也搭这条车下行**。这条消息是 RRC 的"瑞士军刀"（M6 深讲：建/改/释承载、测量、切换都是它）。',
+        plain: '该发装备了：专跑信令的第二条通道和真正运数据的承载一次配齐——之前不发不是怠慢，是这些内容必须等加密生效才准上路；注册通过的批复也搭这趟车下来。',
         refs: ['5.3.5.6', '5.3.5.1'],
 ies: [
         { name: 'rrc-TransactionIdentifier', type: 'RRC-TransactionIdentifier (0..3)', pres: 'M', dict: 'rrc-TransactionIdentifier', meta: '柜台小票号——重配也要回执（下一条 Complete 凭它配对）', sem: '事务标识（详见词典）', ref: '6.2.2' },
@@ -543,6 +561,7 @@ ies: [
         title: 'RRCReconfigurationComplete（+注册完成捎带）', dir: 'ul', from: 0, to: 1,
         label: 'RRCReconfigurationComplete', chan: 'DCCH · SRB1 · 配置生效回执 + Registration Complete',
         narr: '**为什么必须有它**：装机单签收——网络必须知道配置真的生效了（否则资源状态两边对不上账）。回执里再捎一封 **Registration Complete**（NAS）：注册流程的收尾确认。注意回执仍走 SRB1——"装新网卡的回执不必等新网卡"。',
+        plain: '手机在装机单上签字：新装备全部装好生效；并顺手捎上给核心网的注册完结确认——两边账本这才对得上。',
         refs: ['5.3.5.3'],
 ies: [
         { name: 'rrc-TransactionIdentifier', type: 'RRC-TransactionIdentifier (0..3)', pres: 'M', dict: 'rrc-TransactionIdentifier', meta: '柜台小票号——与重配同号', sem: '事务标识（详见词典）', ref: '6.2.2' },
@@ -569,6 +588,7 @@ ies: [
         title: 'INITIAL CONTEXT SETUP RESPONSE（交接收尾）', dir: 'nas', from: 1, to: 2,
         label: 'INITIAL CONTEXT SETUP RESP', chan: 'NG-C（38.413 §8.3.1/§9.2.2.2）· gNB→AMF',
         narr: '**为什么必须有它**：与第 12 步的 REQUEST 配对收尾——gNB 向 AMF 报"档案建好了、资源就位了"：建成的 DRB 与 NG-U 隧道信息逐会话回填（AMF 转交 UPF 开通下行路径）。至此**19 帧、三层接力闭环**：无线通道（RRC）、核心网档案（NGAP）、注册与鉴权（NAS）全部就位——此后的一切（测量/切换/挂起）都跑在这张已铺好的网上。',
+        plain: '基站向核心网交差：档案建好、资源就位，建成的数据通道信息逐项回填——核心网据此开通数据下行的路，整场注册至此全线闭环。',
         refs: ['38.413#8.3.1', '38.413#9.2.2.2'],
 ies: [
           {"name": "Message Type", "type": "Message Type", "pres": "M", "meta": "信种戳", "sem": "消息类型", "ref": "38.413#9.2.2.2", "focus": "extra"},
@@ -584,6 +604,7 @@ ies: [
         title: '鉴权/安全失败 → 注册被拒', dir: 'warn', from: 0, to: 0,
         label: '鉴权失败 …', chan: 'MAC 失败 / 完整性校验失败 · Registration Reject',
         narr: '验身不通过的两种典型：**鉴权 MAC 比对失败**（网络回 Registration Reject 带原因值——卡机不匹配/向量异常）；或 **AS 安全完整性校验失败**（UE 回 SecurityModeFailure，网络重配算法或释放连接——协议给 UE 的说"不"通道）。用户视角"无服务/仅限紧急呼叫"，现场最常见根因是 SIM 与网络密钥体系不匹配。',
+        plain: '验身不过流程就走不下去：或核心网验出考卷不对、直接拒绝注册；或手机校验安全指令失败、主动报失败——用户看到的常是无服务，最常见根因是 SIM 卡和网络的密钥体系对不上。',
         refs: ['5.3.4.3'],
         ies: [],
         exam: '"UE 收到 SMC 校验不过会硬吞吗？"——不会：回 SecurityModeFailure 带失败原因，网络可换算法重试。'
@@ -592,6 +613,7 @@ ies: [
         title: '注册受限与重试', dir: 'warn', from: 0, to: 1,
         label: '拒绝 → 退避重试', chan: 'Reject(带 backoff) / UAC 限行 · 定时退避',
         narr: '另一族失败：**Registration Reject 带退避时间**（拥塞/漫游限制——退避期内不再尝试）；或接入层就被 **UAC 门禁拦下**（M3 门禁字段课）。失败不是终点：退避到点重试、换 PLMN、换小区——接入成功率的分子分母就从这些分支里来。演示结束：关闭失败开关回看成功路径。',
+        plain: '另一类拒绝自带冷静期：网络说现在太挤，退避时间内别再试；手机便掐表等冷却，到点再试，或换别家网络、别的小区。',
         refs: ['5.3.15.2'],
         ies: [],
         exam: '把"鉴权失败 vs 拒绝退避"分两类讲（验身不过 vs 名额不够），排障立刻清晰：前者查卡与密钥，后者查拥塞与权限。'

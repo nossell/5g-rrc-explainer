@@ -283,6 +283,10 @@
     { k: 'rqi', term: 'RQI（Reflective QoS Indication）', spec: 'TS 37.324',
       brief: 'SDAP 头里的小旗子——通知 NAS"业务流到 QoS 流的映射规则变了"。',
       full: 'SDAP 下行头的 1bit 指示（D/C 1bit + QFI 6bit + RQI 1bit + RDI 1bit 的家族成员）。**RQI=1 时 UE 的 SDAP 要通知 NAS**：SDF（业务数据流）到 QoS flow 的映射更新了——这是 5GC URSP 体系（M14 课）在空口侧的感知触点，终端据此校准 URSP 认知。**别与 RDI 混淆**：RDI（Reflective QoS to DRB mapping Indication）管的下一层——QoS flow→DRB 映射规则的更新。两个"规则更新"一面朝天（NAS）一面朝地（SDAP 自己）。',
-      refs: ['37.324#6.3.6', '37.324#5.4', '37.324#6.3.7'], seeAlso: ['qfi'] }
+      refs: ['37.324#6.3.6', '37.324#5.4', '37.324#6.3.7'], seeAlso: ['qfi'] },
+    { k: 'prach-configuration-index', term: 'prach-ConfigurationIndex（PRACH 配置索引）', spec: 'TS 38.331',
+      brief: '随机接入的"班表总开关"：一个 0..255 的索引，查表还原前导格式与全部时频位置。',
+      full: 'SIB1 里指向 38.211 两张表（表 6.3.3.2-2/4，按频段与双工方式选）的 8bit 索引——**一格数字换一整页配置**：前导格式（长/短序列、子载波间隔）、RO（RACH Occasion，可发前导的时频窗口）的周期/起点/频域位置、与 SSB 的对应关系全由查表结果决定。**设计动机是带宽自适应**：不同小区接入负载与频段差异巨大，规范不逐一广播几十个参数，只发一个索引让 UE 自己查表——SIB1 省下的每一个比特都是广播开销。排障视角：两格相邻索引的 RO 密度可能差数倍，"接入拥塞调一格索引"是常用的优化手段（mc 课 mcr2 讲过这张班表怎么用）。',
+      refs: ['6.3.2'], seeAlso: [] }
   ]);
 })(typeof window !== 'undefined' ? window : globalThis);

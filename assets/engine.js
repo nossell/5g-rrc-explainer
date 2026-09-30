@@ -94,6 +94,7 @@
         if (!isStr(s.label)) e.push('step ' + k + '.label 不能为空');
         if (!isStr(s.chan)) e.push('step ' + k + '.chan 不能为空');
         if (!isStr(s.narr)) e.push('step ' + k + '.narr 不能为空');
+        if (s.plain != null && !(isStr(s.plain) && s.plain.length >= 20 && s.plain.length <= 240)) e.push('step ' + k + '.plain 若填须为 20–240 字的白话版');
         if (DIRS.indexOf(s.dir) < 0) e.push('step ' + k + ' dir 非法: ' + s.dir);
         if (m.actors && m.actors.length) {
           if (!isInt(s.from) || s.from < 0 || s.from >= m.actors.length) e.push('step ' + k + '.from 越界');

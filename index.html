@@ -20,6 +20,7 @@
   <nav class="topnav">
     <a class="navlink on" href="index.html">目录</a>
     <a class="navlink" href="app.html">课程</a>
+    <a class="navlink" href="interview.html">面试</a>
     <a class="navlink" href="dict.html">词典</a>
     <a class="navlink" href="anim.html">动画</a>
     <a class="navlink" href="timer-net.html">定时器网</a>
@@ -35,9 +36,9 @@
   <p class="sub">而 5G 把这场接力写进了上千页的天书规范。我们把它拆成<b>逐帧可播放的信令图</b>——每条消息点得开、每个字段配白话和比喻、每句论断都挂着 3GPP 条款号。<b>学协议，从"看得见"开始。</b></p>
   <div class="cta">
     <a class="btn primary" href="app.html#ma">免费开始第一课 · 接入全流程（13 步）</a>
-    <a class="btn" href="#teaser">先做一道面试题（30 秒）</a>
+    <a class="btn" href="interview.html">先做一套模拟面试</a>
   </div>
-  <div class="meta">10 个模块 · 内容全部自写自绘 · 论断逐条锚定 3GPP 条款 · 浏览器即开即用</div>
+  <div class="meta">21 门课 · 六大学习域 · 内容全部自写自绘 · 411 条论断逐条锚定 3GPP 条款 · 浏览器即开即用</div>
 </section>
 
 <!-- ============ 四个"你遇到过"的瞬间 ============ -->
@@ -192,7 +193,7 @@
 <script src="assets/content/core.js"></script>
 <script>
 RRC.Hub.render(document.getElementById('hub'), RRC.Store());
-RRC.FlowAnim.mount(document.getElementById('attach-anim'), 'attach', { autoplay: true });
+RRC.FlowAnim.mount(document.getElementById('attach-anim'), 'attach', { autoplay: true, rate: 0.72 });
 /* 导读试答：单题交互 */
 (function () {
   var box = document.getElementById('teaser-opts');

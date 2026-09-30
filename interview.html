@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>面试模式 — RRC 讲解器</title>
+<meta name="description" content="跨模块模拟面试：按学习域抽卷、计时作答、交卷出分，错题自动留本并一键跳回对应课程帧重学。每道题挂 3GPP 条款锚点，经独立复核。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <a class="brand" href="index.html">
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 15 L7.5 15 L10 8 L13 18 L15.5 12 L17.5 15 L21 15" stroke="#18A34A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="15" r="1.6" fill="#18A34A"/></svg>
+    RRC 讲解器
+  </a>
+  <nav class="topnav">
+    <a class="navlink" href="index.html">目录</a>
+    <a class="navlink" href="app.html">课程</a>
+    <a class="navlink on" href="interview.html">面试</a>
+    <a class="navlink" href="dict.html">词典</a>
+    <a class="navlink" href="anim.html">动画</a>
+    <a class="navlink" href="timer-net.html">定时器网</a>
+    <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink" href="log-detective.html">日志侦探</a>
+  </nav>
+</header>
+
+<section class="hero" style="padding-top:26px;max-width:760px">
+  <h1 style="font-size:25px">面试模式</h1>
+  <p class="sub">20 门课的测验与课内决策点合成一个题池：<b>随机抽卷、选项洗牌、计时作答</b>，交卷即出分与逐题解析；答错的题自动进错题本，一键跳回对应课程帧重学。每道题都挂条款锚点——本产品全部 391 条论断经独立复核。</p>
+</section>
+
+<div id="iv-root"></div>
+
+<footer>
+  <div class="flinks"><a href="index.html">目录</a><a href="app.html">课程</a><a href="dict.html">词典</a><a href="timer-net.html">定时器网</a></div>
+  <div><b>内容纪律：</b>题目与解析均为自写（含条款号引用），不复制 3GPP 规范原文；判分与错题本仅存本机浏览器。</div>
+</footer>
+</div>
+
+<script src="assets/engine.js"></script>
+<script src="assets/content/ma.js"></script>
+<script src="assets/content/core.js"></script>
+<script src="assets/player.js"></script>
+<script src="assets/interview.js"></script>
+<script>
+RRC.Interview.mount(document.getElementById('iv-root'), RRC.Store());
+</script>
+</body>
+</html>

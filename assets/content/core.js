@@ -16,7 +16,8 @@
     free: true, tech: '5G NR · SA', minutes: 8, prereq: [],
     intro: {
       title: '场景：从 IDLE 到"能打电话"的第一步',
-      narr: 'UE 已开机，完成小区搜索与驻留，读完了 MIB/SIB1——其中就包括本模块的主角之一：定时器 T300 的取值（SIB1 里 ue-TimersAndConstants 配置，规范给了 100ms 到 2000ms 共 8 档，§6.3.2）。UE 停在 RRC_IDLE：只听寻呼、没有专用通道。用户此刻点开一个网页——NAS 层向 AS 层请求建立 RRC 连接，整个"入住登记"流程由此展开：敲门（随机接入）、递表（RRCSetupRequest）、拿房卡（RRCSetup）、签字（RRCSetupComplete）。本模块同时把这趟旅程的**全部四种失败出口**讲透——成功只是故事的一半，失败才是面试和网优排障的分水岭。'
+      narr: 'UE 已开机，完成小区搜索与驻留，读完了 MIB/SIB1——其中就包括本模块的主角之一：定时器 T300 的取值（SIB1 里 ue-TimersAndConstants 配置，规范给了 100ms 到 2000ms 共 8 档，§6.3.2）。UE 停在 RRC_IDLE：只听寻呼、没有专用通道。用户此刻点开一个网页——NAS 层向 AS 层请求建立 RRC 连接，整个"入住登记"流程由此展开：敲门（随机接入）、递表（RRCSetupRequest）、拿房卡（RRCSetup）、签字（RRCSetupComplete）。本模块同时把这趟旅程的**全部四种失败出口**讲透——成功只是故事的一半，失败才是面试和网优排障的分水岭。',
+      plain: '这门课演手机从待机到能上网的第一段路：敲门、递申请、拿房卡、签字，四步入住登记步步看透——还把这趟路的失败出口一并讲清，因为排障时失败路径比成功路径更常走。',
     },
     actors: [
       { x: 150, label: 'UE', sub: '你的手机' },
@@ -36,6 +37,7 @@
         title: 'Msg1 · PRACH 前导码', dir: 'ul', from: 0, to: 1,
         label: 'Msg1 · PRACH 前导码', chan: 'PRACH · 物理层过程（非 RRC 消息）',
         narr: 'UE 还没有任何上行通道，只能用"公共敲门砖"PRACH 发一个前导码：一是完成上行同步（跟基站对表），二是申请资源。相当于在大堂喊一嗓子："有人吗，我要办入住！"\n\n**RRC 视角的准备工作**（§5.3.3.2）：喊这一嗓子之前，RRC 发起建立时要先过三道关——①确认已拿到 essential 系统信息（MIB/SIB1）；②做统一接入控制（UAC）检查：若被 barred，过程当场结束，连 Msg1 都不发；③应用默认 L1/MAC/CCCH 配置（SRB0 走 CCCH 的配置就来自这里），然后启动 T300。PRACH 前导码本身的机制（preamble 选择、功率爬坡）属 TS 38.321 的随机接入过程。',
+        plain: '手机还没有任何能说话的通道，只能拿公共敲门砖喊一嗓子：有人吗，我要办入住——喊之前还得先过门禁检查，被拦的话连这一嗓子都不许喊。',
         refs: ['5.3.3.2'],
         ies: [],
         exam: '面试常问"RRC 建立之前发生了什么"——标准答案链：读系统信息 → UAC 检查 → 应用默认配置 + 启动 T300 → 随机接入（PRACH/RAR 属物理层/MAC 过程，不是 RRC 消息）。能分清这层关系很加分。'
@@ -44,6 +46,7 @@
         title: 'Msg2 · 随机接入响应 RAR', dir: 'dl', from: 1, to: 0,
         label: 'Msg2 · 随机接入响应 RAR', chan: 'PDCCH（RA-RNTI）+ PDSCH · TA / TC-RNTI / UL grant',
         narr: '基站回话："听到了，你是 X 号。"RAR 带三样东西——上行定时提前量 TA（对表用，纠正传播时延）、临时身份 TC-RNTI（后续 Msg3 重传时的身份标识）、上行授权 UL grant（在哪个时频资源上发 Msg3）。UE 从此有资格开口说话。\n\n**身份的接力棒**：TC-RNTI 是"临时工牌"，等 Msg4 竞争解决后转正为 C-RNTI，成为 CONNECTED 态的正式身份——这个接力（随机值 → TC-RNTI → C-RNTI）是理解整个建立流程身份管理的主线。TA/TC-RNTI/UL grant 的机制细节在 TS 38.321。',
+        plain: '基站应门，一次递来三样：对表用的提前量、一块临时工牌、下一条消息该用哪段无线资源的指定——手机从此有资格正式开口。',
         refs: ['5.3.3.2'],
         ies: [],
         exam: 'RAR 是用 RA-RNTI 加扰的 PDCCH 调度的；TA 是上行同步关键词，答对这两个词面试官就知道你真看过流程。追问"TC-RNTI 后来去哪了"——竞争解决后转正为 C-RNTI。'
@@ -52,6 +55,7 @@
         title: 'Msg3 · RRCSetupRequest', dir: 'ul', from: 0, to: 1,
         label: 'Msg3 · RRCSetupRequest', chan: 'CCCH · SRB0 · 发送起启动 T300',
         narr: '第一条真正的 RRC 消息，走 CCCH（SRB0，RLC 用 TM 模式——不重传不确认，丢了就靠 T300 兜底）。消息只带两个有效字段：ue-Identity 和 establishmentCause。\n\n**ue-Identity 的两种填法**（§5.3.3.3）：上层提供了 5G-S-TMSI（UE 在本跟踪区注册过）就用 ng-5G-S-TMSI-Part1（S-TMSI 的前 39 bit）；否则抽一个 0..2³⁹-1 的随机值。两种都占 39 bit——随机值只用于 Msg4 竞争解决时的比对，S-TMSI 还能帮网络"想起你是谁"。\n\n**establishmentCause** 按上层给的来由填：emergency（紧急呼叫）、mt-Access（被叫）、mo-Signalling/mo-Data/mo-VoiceCall/mo-VideoCall/mo-SMS（主叫各类）、mps/mcs-PriorityAccess（优先级服务）。它影响接入优先级——紧急呼叫和被叫可以"插队"。\n\n从过程发起这一刻起，T300 已在计时（§5.3.3.2 在 initiation 动作里启动它）。等待期间 UE 仍继续小区重选测量——若重选条件满足，直接转投别的小区，本次建立就地终止（§5.3.3.6，详见失败分支卡）。',
+        plain: '入住申请表只有两栏：我是谁、来干什么——紧急呼叫这类来由还能插队；这张表走的通道不重传，丢了全靠后面的计时器兜底。',
         refs: ['5.3.3.3', '6.2.2'],
         ies: [
         { name: 'criticalExtensions', type: 'CHOICE { rrcSetupRequest, criticalExtensionsFuture }', pres: 'M', dict: 'criticalExtensions', meta: '版本信封——每条 RRC 消息的标准外套，信纸夹在选定的分支里', sem: '公共外壳（详见词典）；接收方按分支名对版本', ref: '6.2.2', children: [
@@ -84,6 +88,7 @@
         title: 'Msg4 · RRCSetup', dir: 'dl', from: 1, to: 0,
         label: 'Msg4 · RRCSetup', chan: 'CCCH · 携带 SRB1 配置 · 停 T300 → 转 CONNECTED',
         narr: '录取通知书到了——同样走 CCCH（SRB0/TM）。UE 收到后的**动作顺序**（§5.3.3.4）：先按 masterCellGroup 执行小区组配置、按 radioBearerConfig 执行无线承载配置（SRB1 在这一步建立），然后停掉 T300（连同 T301/T319 等一串定时器），**进入 RRC_CONNECTED**、停小区重选、把当前小区定为 PCell。\n\n注意 masterCellGroup 的形态：OCTET STRING (CONTAINING CellGroupConfig)——字节串里封着完整的 CellGroupConfig 结构。为什么这么包？因为 CellGroupConfig 是 MAC/PHY 侧的配置树，RRC 直接整体转交，避免逐字段翻译。\n\n**竞争解决**也在这一步发生（Msg4 的 MAC CE 携带竞争解决身份，与 Msg3 的 39 bit 比对，成功后 TC-RNTI 转正为 C-RNTI）——这是 MAC 层机制，但时间点与 RRCSetup 重合，面试常混在一起问。',
+        plain: '录取通知书到手：手机照单装好专属信令通道，停掉计时表，从待机正式转入连接状态；同一步还顺带核对身份，临时工牌转正。',
         refs: ['5.3.3.4', '6.2.2'],
         ies: [
         { name: 'rrc-TransactionIdentifier', type: 'RRC-TransactionIdentifier (0..3)', pres: 'M', dict: 'rrc-TransactionIdentifier', meta: '柜台小票号——Setup 与 SetupComplete 凭它配对', sem: '事务标识（详见词典）', ref: '6.2.2' },
@@ -116,6 +121,7 @@
         title: 'RRCSetupComplete', dir: 'ul', from: 0, to: 1,
         label: 'RRCSetupComplete', chan: 'DCCH · SRB1 · 捎带 NAS 注册请求',
         narr: 'UE 在**新建的 SRB1**（DCCH，RLC 切到 AM 模式——从此信令有重传确认）上发确认。这条消息的精髓在"捎带"（piggyback）：dedicatedNAS-Message 里装着 NAS 层的注册请求——**5GC 注册流程从这一刻搭上了 RRC 的顺风车**，不用等专用承载建好。\n\n**身份的最后一块拼图**：若 UE 注册过，ng-5G-S-TMSI-Value 填 Part2（后 9 bit）——与 Msg3 里的 Part1（前 39 bit）拼成完整的 48 bit 5G-S-TMSI（AMF Set ID 10 + AMF Pointer 6 + TMSI 32）。网络由此能把这条连接路由到 UE 之前注册的旧 AMF，免走全套注册。selectedPLMN-Identity 在多 PLMN 共享小区时声明"我选的是哪家运营商"。\n\nComplete 发出，RRC 连接建立过程即告结束（§5.3.3.4：submit 之后 the procedure ends）。',
+        plain: '手机在新通道上签字确认，顺手把核心网注册申请捎进同一封信——注册流程不用等专线建好就能搭车先走；这封回执一出，无线侧手续全部办完。',
         refs: ['5.3.3.4', '6.2.2'],
         ies: [
         { name: 'rrc-TransactionIdentifier', type: 'RRC-TransactionIdentifier (0..3)', pres: 'M', dict: 'rrc-TransactionIdentifier', meta: '柜台小票号——与 Setup 的号一致，表示"这单我接了"', sem: '事务标识（详见词典）', ref: '6.2.2' },
@@ -158,6 +164,7 @@
         title: '移交核心网 · RRC 的边界', dir: 'nas', from: 1, to: 2,
         label: 'Initial UE Message（NGAP）', chan: 'NGAP · 已离开 RRC 层 · NAS 透传',
         narr: 'gNB 收到 Complete，把 dedicatedNAS-Message 里的注册请求原封不动装进 NGAP 的 Initial UE Message 交给 AMF（若有 S-TMSI，顺带路由线索）。注意：这已经不属于 RRC——**RRC 只管 UE↔基站这段空口，它的职责到"把 NAS 消息如实上交/下发"为止**（§5.3.3.1：本过程的使命之一就是传输初始 NAS 信息）。后面还有鉴权、AS 安全激活、UECapability 询问、SRB2/DRB 建立，分别在 M6/M8 模块讲。',
+        plain: '基站把注册信原样上交核心网登记台——到这一步无线侧的使命完成：它只管手机到基站这一段，再往后就是核心网的戏份。',
         refs: ['5.3.3.1', '5.3.3.4'],
         ies: [
           {"name": "Message Type", "type": "Message Type（9.3.1.1）", "pres": "M", "meta": "信种戳——机器先看它才知道这封信怎么读", "sem": "消息类型标识", "ref": "38.413#9.2.5.1", "focus": "extra"},
@@ -193,6 +200,7 @@
         title: '等待 · T300 计时中', dir: 'warn', from: 0, to: 0,
         label: '等待 RRCSetup …', chan: 'T300 计时中 · RRC 没有否定应答',
         narr: 'RRCSetupRequest 丢了（SRB0 是 TM 模式，不重传），或小区拥塞没被调度。UE 并不知道发生了什么——RRC 没有否定应答（NACK），它只能守着 T300 干等（取值由 SIB1 配置，规范枚举 100/200/300/400/600/1000/1500/2000 ms 八档）。\n\n**等待不等于静止**（§5.3.3.3）：UE 仍持续做小区重选测量与评估——若重选条件满足，直接切换目标小区，**本次建立就地终止**：按 §5.3.3.6 以 cause \'RRC connection failure\' 走"回 IDLE"动作，到新小区一切从头再来。真实网络里，这段等待是"RRC 建立时延"的直接组成部分。',
+        plain: '申请表石沉大海——协议没有拒收回执这回事，手机只能掐着计时器干等；等待中若发现更合适的小区，索性终止这次尝试，换一家从头再来。',
         refs: ['5.3.3.2', '5.3.3.3', '5.3.3.6'],
         ies: [],
         exam: '"UE 怎么发现请求失败了？"——只靠定时器超时；没有 NACK、没有重传指示，这是异步系统设计的通识考点。追问"等待期间 UE 在干嘛"——仍在做重选测量，满足条件就"跳船"。'
@@ -201,6 +209,7 @@
         title: 'T300 超时 · 回到 IDLE', dir: 'warn', from: 0, to: 0,
         label: 'T300 超时 → 回 RRC_IDLE', chan: '建立失败 KPI +1 · 可重选/重试',
         narr: 'T300 到期，本次建立宣告失败（§5.3.3.7）。UE 的收尾动作一板一眼：**复位 MAC、释放 MAC 配置、为已建立的所有 RB 重建 RLC**（广播 MRB 除外）——把这次尝试的痕迹清干净；然后**告知上层失败**，自己留在 RRC_IDLE，之后可能重选小区或再次发起。\n\n**连续失败的惩罚机制**：若同一小区连续失败达到 SIB1 里 connEstFailureControl 配置的门限 connEstFailCount，UE 会在一段有效期（connEstFailOffsetValidity）内把该小区的临时偏移 connEstFailOffset 当作 Qoffsettemp 用——小区选择/重选时给它降权重，"这家店总拒客，先降降分"。同时 UE 会把失败小区的测量结果存进 VarConnEstFailReport 变量，下次连接成功时通过 connEstFailInfoAvailable 告诉网络——供 MRO（移动性鲁棒优化）分析。\n\n基站的"RRC 建立成功率"KPI 统计的就是这类失败——网优每天盯的指标。演示结束：关闭失败开关或点重播，回到成功路径。',
+        plain: '计时到点，这次入住宣告失败：手机把尝试的痕迹清理干净，回待机等下次再试；要是同一家总拒客，以后选小区时还会给它降降分。',
         refs: ['5.3.3.7'],
         ies: [],
         exam: 'T300 超时→回 IDLE；连续失败触发 connEstFailOffset 临时偏移（小区降权）。注意把它和"随机接入失败"（Msg1/Msg2 阶段，根本走不到 RRC 消息）区分开——两段失败的 KPI 与排障思路完全不同。'

@@ -105,7 +105,67 @@ h2.sec{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-top:48px}
 .canvas-hint.off{opacity:0}
 
 /* svg 消息（数据语义色已在 JS 内联，文本/编号在此） */
-.msg{transition:opacity .35s;cursor:pointer}
+.msg{transition:opacity .5s;cursor:pointer}
+
+/* ---------- 讲解面板：一句话版（初学模式，2026-09-30） ---------- */
+.plain-toggle{display:inline-flex;align-items:center;gap:6px;font:700 11.5px var(--sans);color:var(--tx3);
+  cursor:pointer;text-transform:none;letter-spacing:0;margin-left:auto;flex:none;user-select:none}
+.plain-toggle input{display:none}
+.pt-track{width:28px;height:16px;border-radius:999px;background:var(--bd);position:relative;transition:background .2s;flex:none}
+.pt-knob{position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#FFFFFF;
+  transition:left .2s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.plain-toggle input:checked + .pt-track{background:var(--accent)}
+.plain-toggle input:checked + .pt-track .pt-knob{left:14px}
+.plain-box{margin:10px 0 2px;padding:10px 14px 11px;background:var(--accent-bg);border:1px solid var(--bd2);
+  border-left:3px solid var(--accent);border-radius:10px}
+.plain-box .pb-cap{display:block;font:800 10.5px var(--mono);letter-spacing:1.5px;color:var(--accent-deep);margin-bottom:3px}
+.plain-box p{margin:0;font-size:14px;line-height:1.72;color:var(--tx1);font-weight:500}
+
+/* ---------- 面试模式（2026-10-01） ---------- */
+.iv-tabs{display:flex;gap:8px;margin-top:20px}
+.iv-tabs button{background:#FFFFFF;border:1px solid var(--bd2);border-bottom-width:3px;border-radius:12px;
+  color:var(--tx2);font:700 13.5px var(--sans);padding:9px 18px;transition:all .15s}
+.iv-tabs button.on{background:var(--accent);border-color:var(--accent-deep);color:#FFFFFF}
+.iv-config,.iv-exam,.iv-result,.iv-wb{margin-top:16px;background:var(--panel);border:1px solid var(--bd);
+  border-radius:16px;box-shadow:var(--shadow-card);padding:20px 24px}
+.iv-row{display:flex;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap}
+.iv-cap{font:800 12px var(--mono);color:var(--tx3);width:44px;flex:none}
+.iv-scope{background:#FFFFFF;border:1px solid var(--bd2);border-radius:10px;color:var(--tx1);
+  font:500 14px var(--sans);padding:9px 12px;min-width:220px}
+.iv-seg{display:flex;border:1px solid var(--bd2);border-radius:10px;overflow:hidden;background:#FFFFFF}
+.iv-seg button{border:0;background:transparent;color:var(--tx2);font:700 13px var(--sans);padding:8px 16px;transition:all .15s}
+.iv-seg button.on{background:var(--accent);color:#FFFFFF}
+.iv-meta{font-size:13px;color:var(--tx2);margin-top:14px;line-height:1.7}
+.iv-meta b{color:var(--accent-deep)}
+.iv-actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+.iv-top{display:flex;justify-content:space-between;align-items:center}
+.iv-prog{font:800 13px var(--mono);color:var(--tx2)}
+.iv-timer{font:800 15px var(--mono);color:var(--accent-deep);background:var(--accent-bg);
+  border-radius:10px;padding:4px 12px}
+.iv-top .progressbar{display:none}
+.iv-qmeta{margin-top:14px;font:600 12.5px var(--mono);color:var(--tx3);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.iv-q{font-weight:800;font-size:16.5px;line-height:1.65;margin-top:10px;letter-spacing:-.2px}
+.iv-opts{display:flex;flex-direction:column;gap:9px;margin-top:14px}
+.iv-opt{text-align:left;background:#FFFFFF;border:1px solid var(--bd2);border-radius:12px;
+  color:var(--tx1);font:500 14px/1.6 var(--sans);padding:11px 15px;transition:all .15s}
+.iv-opt:hover:not(:disabled){border-color:var(--accent)}
+.iv-opt.correct{border-color:var(--ok);background:#EFFAF3;box-shadow:inset 0 0 0 1px var(--ok)}
+.iv-opt.wrong{border-color:var(--danger);background:#FDF1F0}
+.iv-opt:disabled{cursor:default;color:var(--tx2)}
+.iv-feed{margin-top:14px;padding:12px 16px;border-radius:12px;font-size:13.5px;line-height:1.7}
+.iv-feed.good{background:#EFFAF3;border:1px solid var(--ok)}
+.iv-feed.bad{background:#FDF1F0;border:1px solid var(--danger)}
+.iv-feed b{font-weight:800}
+.iv-result .iv-score{font-size:15px;color:var(--tx2)}
+.iv-result .iv-score b{font:800 34px var(--mono);color:var(--accent-deep);display:block;margin-bottom:4px}
+.iv-domains{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.iv-wrong{border:1px solid var(--bd);border-radius:12px;padding:13px 16px;margin-top:11px;background:var(--bg)}
+.ivw-q{font-weight:700;font-size:13.5px;line-height:1.65}
+.ivw-a{font-size:13px;color:var(--tx2);margin-top:6px;line-height:1.65}
+.ivw-a .bad{color:var(--danger)}
+.ivw-a .good{color:var(--ok)}
+.ivw-why{font-size:12.5px;color:var(--tx2);margin-top:7px;line-height:1.7;border-top:1px dashed var(--bd);padding-top:8px}
+.ivw-foot{margin-top:8px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .msg:hover{opacity:.85}
 .msg.future:hover{opacity:.55}
 .msg:hover .mlabel,.msg:hover .fx-label{text-decoration:underline;text-underline-offset:3px}
@@ -114,7 +174,7 @@ h2.sec{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-top:48px}
 .msg.active{opacity:1}
 .wire{stroke-dasharray:1;stroke-dashoffset:0}
 .msg.future .wire{stroke-dashoffset:1}
-.msg.active .wire{animation:draw .45s ease forwards}
+.msg.active .wire{animation:draw .65s ease forwards}
 @keyframes draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
 .mlabel{font:700 12.5px var(--mono);fill:var(--tx1);text-anchor:middle}
 .chan{font:600 10.5px var(--mono);fill:var(--tx3);text-anchor:middle}
@@ -337,6 +397,33 @@ section.quiz{margin-top:26px}
   padding:16px 18px;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;box-shadow:var(--shadow-card)}
 .license-card .lc-t{font-weight:800;font-size:14px}
 .license-card .lc-d{font-size:12.5px;color:var(--tx2);margin-top:3px}
+
+/* ---------- Hub：学习域分组目录（2026-09-30 重构 · 10-01 两级手风琴） ---------- */
+.pathline.gnav{scroll-margin-top:24px}
+button.pathstep{cursor:pointer}
+button.pathstep:hover{border-color:var(--accent)}
+button.pathstep:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hub-headrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:20px}
+.hub-headrow h2.sec{margin-top:0}
+.hub-expand{flex:none}
+.hubgroup{margin-top:26px;scroll-margin-top:24px}
+.ghead{display:flex;align-items:flex-start;gap:14px;padding:6px 10px 10px;cursor:pointer;border-radius:12px;
+  transition:background .15s;user-select:none}
+.ghead:hover{background:var(--inset)}
+.ghead:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.gtog{flex:none;width:20px;height:20px;border-radius:6px;background:var(--bg);border:1px solid var(--bd2);
+  display:inline-flex;align-items:center;justify-content:center;color:var(--tx3);margin-top:3px;transition:transform .18s}
+.hubgroup:not(.closed) .gtog{transform:rotate(90deg)}
+.gnum{font:800 13px var(--mono);color:var(--accent-deep);background:var(--accent-bg);border:1px solid var(--bd2);
+  border-radius:10px;padding:6px 10px;flex:none;margin-top:2px}
+.gtxt{flex:1;min-width:0}
+.gname{font-weight:800;font-size:15px;letter-spacing:-.2px}
+.gdesc{font-size:12.5px;color:var(--tx3);margin-top:2px;line-height:1.5}
+.gcount{font:700 11.5px var(--mono);color:var(--tx3);background:var(--inset);border-radius:999px;padding:4px 10px;flex:none;margin-top:3px}
+.hubgroup .mgrid{margin-top:2px}
+.hubgroup.closed .gbody{display:none}
+.hubgroup.closed .gdesc{display:none}
+.hubgroup.closed .ghead{padding-bottom:6px}
 .license-state{font:700 12px var(--mono);padding:4px 10px;border-radius:999px;background:var(--inset);color:var(--tx3)}
 .license-state.on{background:var(--accent-bg);color:var(--accent-deep)}
 
@@ -465,6 +552,12 @@ section.quiz{margin-top:26px}
   padding:16px 20px;margin-top:12px;transition:border-color .2s}
 .dict-card.hit{border-color:var(--nas);box-shadow:0 0 0 3px #F5F0FE}
 .dc-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.dc-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;cursor:pointer;user-select:none}
+.dc-tog{flex:none;align-self:center;width:18px;height:18px;border-radius:5px;background:var(--bg);border:1px solid var(--bd2);
+  display:inline-flex;align-items:center;justify-content:center;color:var(--tx3);transition:transform .18s;margin-left:auto}
+.dict-card.open .dc-tog{transform:rotate(90deg)}
+.dict-card:not(.open) .dc-full{display:none}
+.dict-card .dc-head:hover .dc-term{color:var(--accent-deep)}
 .dc-term{font:800 15.5px var(--sans);color:var(--tx1);letter-spacing:-.2px}
 .dc-spec{font:600 11px var(--mono);color:var(--nas);background:#F5F0FE;border-radius:6px;padding:2px 8px}
 .dc-brief{font:600 13px var(--sans);color:var(--accent-deep);margin-top:8px}

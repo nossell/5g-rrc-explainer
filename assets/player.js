@@ -91,7 +91,7 @@
     var store = opts.store || R.Store();
     var m = R.get(moduleId);
     if (!m) throw new Error('未知模块: ' + moduleId);
-    var branch = 'success', scenario = 'success', idx = 0, playing = false, speed = 1, timer = null;
+    var branch = 'success', scenario = 'success', idx = 0, playing = false, speed = 0.75, timer = null;
     var scenarios = (m.branches && m.branches.length > 1) ? m.branches : null;
 
     if (g.RRCPlayer) { try { g.RRCPlayer.unmount(); } catch (e0) {} }
@@ -144,8 +144,9 @@
       '<svg id="ic-pause-' + m.id + '" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>', '播放/暂停', true);
     var dots = el('div', 'dots');
     var speedBox = el('div', 'speed');
-    [['1', 1], ['1.5', 1.5], ['2', 2]].forEach(function (p, i) {
-      var b = el('button', i === 0 ? 'on' : '', p[0]); b.dataset.s = p[1];
+    speedBox.title = '播放速度：0.75× 为新手默认（每步约 5.6 秒），熟练后可加快';
+    [['0.5', 0.5], ['0.75', 0.75], ['1', 1], ['1.5', 1.5], ['2', 2]].forEach(function (p, i) {
+      var b = el('button', p[1] === 0.75 ? 'on' : '', p[0] + '×'); b.dataset.s = p[1];
       b.onclick = function () {
         speed = p[1];
         speedBox.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
@@ -179,8 +180,18 @@
     }
     panelC.appendChild(controls);
 
-    /* ---- 右：讲解 ---- */
-    panelR.appendChild(el('div', 'panel-head', '讲解 <span style="text-transform:none;letter-spacing:0">大白话 + 类比</span>'));
+    /* ---- 右：讲解（含"一句话版"初学开关，本机记忆） ---- */
+    var plainMode = (function () { try { return localStorage.getItem('rrc.plain') !== '0'; } catch (e0) { return true; } })();
+    var headR = el('div', 'panel-head');
+    headR.innerHTML = '讲解 <span style="text-transform:none;letter-spacing:0">大白话 + 类比</span>' +
+      '<label class="plain-toggle" title="开：每步先给一句外行也能懂的白话；关：只看完整讲解"><input type="checkbox"' + (plainMode ? ' checked' : '') + '><span class="pt-track"><span class="pt-knob"></span></span>一句话版</label>';
+    var ptInput = headR.querySelector('input');
+    ptInput.onchange = function () {
+      plainMode = ptInput.checked;
+      try { localStorage.setItem('rrc.plain', plainMode ? '1' : '0'); } catch (e1) {}
+      renderExplain();
+    };
+    panelR.appendChild(headR);
     var explain = el('div');
     panelR.appendChild(explain);
 
@@ -258,7 +269,7 @@
       timer = setTimeout(function () {
         if (!stepFwd()) { pause(); return; }
         if (playing) loop();
-      }, (idx === 0 ? 1700 : 2800) / speed);
+      }, (idx === 0 ? 2400 : 4200) / speed);
     }
     function pause() { playing = false; clearTimeout(timer); icon(); }
     function icon() {
@@ -305,6 +316,11 @@
     }
     /* ---- 决策点作答状态（本 mount 内保留；"你就是 UE"） ---- */
     var dpAnswered = {};
+    function plainHtml(d) {
+      return (plainMode && d && d.plain)
+        ? '<div class="plain-box"><span class="pb-cap">一句话看懂</span><p>' + d.plain + '</p></div>'
+        : '';
+    }
 
     function renderExplain() {
       var d, dir;
@@ -312,7 +328,7 @@
         d = m.intro || { title: '开场', narr: '按播放开始。' }; dir = ['场景', 'dir-int'];
         explain.innerHTML = '<div class="explain-body"><div class="step-kicker">第 0 步 / 共 ' + pathLen() + ' 步 · ' +
           '<span class="' + dir[1] + '">' + dir[0] + '</span></div>' +
-          '<h3 class="step-title">' + d.title + '</h3><p class="step-narr">' + mdBold(d.narr) + '</p></div>';
+          '<h3 class="step-title">' + d.title + '</h3>' + plainHtml(d) + '<p class="step-narr">' + mdBold(d.narr) + '</p></div>';
         return;
       }
       d = m.steps[m.paths[branch][idx - 1]];
@@ -368,6 +384,7 @@
         ((d.ies && d.ies.length) ? ' · <a class="wb-link" href="../rrc-workbench/dist/index.html" target="_blank" title="在 ASN 编码实验室里亲手编码这条消息">去编码实验室 ↗</a>' : '') +
         '</div>' +
         '<h3 class="step-title">' + d.title + '</h3>' +
+        plainHtml(d) +
         '<p class="step-narr">' + mdBold(d.narr) + '</p>' +
         iesHtml + dpHtml + refsHtml +
         (d.exam ? '<div class="exambox"><div class="exam-head"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><circle cx="12" cy="16.6" r=".6" fill="currentColor"/></svg>面试考法</div><p>' + mdBold(d.exam) + '</p></div>' : '') +
@@ -557,7 +574,7 @@
         '每步大白话讲解 + 面试考法标注 + 结课自测',
         '买一次，浏览器本地永久离线可用'
       ];
-      var price = gate.price || '完整版 16 模块（M0–M15）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
+      var price = gate.price || '完整版 21 模块（M0–M20）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
       root.innerHTML = '';
       var w = el('div', 'gate-wrap');
       var c = el('div', 'gate');
@@ -570,7 +587,7 @@
         '<div class="g-actions">' +
         '<button class="btn primary" data-act="unlock">完整版解锁码</button>' +
         '<a class="btn" href="index.html">返回目录</a></div>' +
-        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M19 共 18 个模块属完整版，获取方式见仓库 README。</p>';
+        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M20 共 19 个模块属完整版，获取方式见仓库 README。</p>';
       w.appendChild(c); root.appendChild(w);
       c.querySelector('[data-act="unlock"]').onclick = function () {
         store.setLicense({ demo: true });
@@ -580,6 +597,16 @@
   };
 
   /* ================= Hub 模块墙 ================= */
+  /* 学习域分组（2026-09-30 重构）：按"一条消息的完整旅程"排组——
+     主线 → 空口信令（RRC）→ 接口运输 → 信封外层（NAS/核心网）→ 底层地基 → 横切对照 */
+  var HUB_GROUPS = [
+    { key: 'main', no: '01', short: '主线', name: '主线 · 免费起点', desc: '一部电影看完全程：从开机到注册能上网的每一条信令——全站的地图，也是所有课的前置。', mods: ['ma'] },
+    { key: 'rrc', no: '02', short: 'RRC 九课', name: 'RRC · 空口信令九课', desc: 'UE 与基站之间的对话全集：连接建立、系统消息、寻呼、测量、切换、承载重配、挂起、AS 安全、双连接。', mods: ['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8'] },
+    { key: 'if', no: '03', short: '接口与用户面', name: '接口与用户面 · 信令离开基站之后', desc: 'NG/Xn 两条网络接口的柜台单据、S1/F1/E1 接口族收官、加上数据面与 GTP-U 隧道——网络侧视角与比特流视角。', mods: ['mi', 'mx', 'mp', 'mz'] },
+    { key: 'nas', no: '04', short: 'NAS 与核心网', name: 'NAS 与核心网 · 信封的外层', desc: '注册与会话这一层的两代全套：5G NAS、5GC 会话流程、EPS 侧 EMM/ESM 专章。', mods: ['mn', 'mg', 'me'] },
+    { key: 'low', no: '05', short: '空口底层', name: '空口底层 · 信令脚下的地基', desc: '信令之前的那一秒：MAC 怎么敲门、物理层怎么把比特搬上无线帧——学完上层再下井，豁然开朗。', mods: ['mc', 'mf'] },
+    { key: 'cross', no: '06', short: '安全与对照', name: '安全与两代对照 · 横切视角收官', desc: '密钥树怎么一级级长出来，以及 4G/5G 同一流程并排看——横穿所有层的两组收官课。', mods: ['ms', 'ml'] }
+  ];
   var Hub = {
     render: function (root, store, opts) {
       opts = opts || {};
@@ -588,11 +615,30 @@
       var mods = R.modules();
       root.innerHTML = '';
 
-      /* 学习路径条 */
-      var path = el('div', 'pathline');
-      mods.forEach(function (m, i) {
+      /* 学习域导览条：六组胶囊，点击展开并滚动到组 */
+      var path = el('div', 'pathline gnav');
+      var grpOpen = {}; HUB_GROUPS.forEach(function (g, i) { grpOpen[g.key] = (i === 0); });
+      function openGroup(key, open) {
+        grpOpen[key] = open !== false;
+        var sec = document.getElementById('hub-g-' + key);
+        if (sec) {
+          sec.classList.toggle('closed', !grpOpen[key]);
+          var h = sec.querySelector('.ghead');
+          if (h) h.setAttribute('aria-expanded', grpOpen[key]);
+        }
+      }
+      HUB_GROUPS.forEach(function (g, i) {
         if (i) path.appendChild(el('span', 'pathsep', '→'));
-        path.appendChild(el('span', 'pathstep', '<span class="n">' + i + '</span>' + m.title));
+        var s = el('button', 'pathstep gstep');
+        s.type = 'button';
+        s.innerHTML = '<span class="n">' + g.no + '</span>' + g.short;
+        s.title = g.name;
+        s.onclick = function () {
+          openGroup(g.key, true);
+          var t = document.getElementById('hub-g-' + g.key);
+          if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        };
+        path.appendChild(s);
       });
       root.appendChild(path);
 
@@ -618,8 +664,19 @@
         if (r) r.onclick = function () { store.setLicense({ demo: false }); renderLic(); renderGrid(); };
       }
       renderLic();
-      root.appendChild(el('h2', 'sec', '模块目录'));
-      root.appendChild(el('p', 'sec-sub', '免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M19 属完整版。建议按序号顺序学习。'));
+      var headRow = el('div', 'hub-headrow');
+      headRow.appendChild(el('h2', 'sec', '模块目录'));
+      var expandBtn = el('button', 'btn sm hub-expand');
+      expandBtn.type = 'button';
+      expandBtn.textContent = '全部展开';
+      expandBtn.onclick = function () {
+        var anyClosed = HUB_GROUPS.some(function (g) { return !grpOpen[g.key]; });
+        HUB_GROUPS.forEach(function (g) { openGroup(g.key, anyClosed); });
+        expandBtn.textContent = anyClosed ? '全部收起' : '全部展开';
+      };
+      headRow.appendChild(expandBtn);
+      root.appendChild(headRow);
+      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M20 属完整版。'));
       root.appendChild(tools);
 
       /* 总进度 */
@@ -645,13 +702,43 @@
       }
       function renderGrid() {
         var kw = (inp.value || '').trim().toLowerCase();
+        var byId = {}; mods.forEach(function (m) { byId[m.id] = m; });
+        var grouped = {}; HUB_GROUPS.forEach(function (g) { g.mods.forEach(function (id) { grouped[id] = true; }); });
+        var groups = HUB_GROUPS.slice();
+        var rest = mods.filter(function (m) { return !grouped[m.id]; }).map(function (m) { return m.id; });
+        if (rest.length) { groups.push({ key: 'more', no: '··', name: '更多课程', desc: '新上架，尚未归组。', mods: rest }); grpOpen.more = true; }
         grid.innerHTML = '';
-        mods.filter(function (m) {
-          return !kw || (m.title + m.tagline + m.tech + 'm' + m.num).toLowerCase().indexOf(kw) >= 0;
-        }).forEach(function (m) {
-          var a = el('a', 'mcard', cardHtml(m));
-          a.href = href(m.id);
-          grid.appendChild(a);
+        groups.forEach(function (g) {
+          var hits = g.mods.filter(function (id) {
+            var m = byId[id]; if (!m) return false;
+            return !kw || (m.title + m.tagline + m.tech + 'm' + m.num).toLowerCase().indexOf(kw) >= 0;
+          });
+          if (!hits.length) return;
+          /* 过滤中：有命中的组自动展开；无过滤：尊重折叠态 */
+          var open = kw ? true : grpOpen[g.key] !== false;
+          var done = hits.filter(function (id) { var p = store.progress(id); return p && p.done; }).length;
+          var sec = el('div', 'hubgroup' + (open ? '' : ' closed')); sec.id = 'hub-g-' + g.key;
+          sec.innerHTML = '<div class="ghead" role="button" tabindex="0" aria-expanded="' + open + '">' +
+            '<span class="gtog" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M9 5.5l7 6.5-7 6.5z"/></svg></span>' +
+            '<span class="gnum">' + g.no + '</span>' +
+            '<div class="gtxt"><div class="gname">' + g.name + '</div><div class="gdesc">' + g.desc + '</div></div>' +
+            '<span class="gcount">' + hits.length + ' 门' + (done ? ' · ' + done + '/' + hits.length : '') + '</span></div>';
+          var ggrid = el('div', 'mgrid gbody');
+          hits.forEach(function (id) {
+            var a = el('a', 'mcard', cardHtml(byId[id]));
+            a.href = href(id);
+            ggrid.appendChild(a);
+          });
+          sec.appendChild(ggrid);
+          var head = sec.querySelector('.ghead');
+          function toggle() {
+            var nowOpen = sec.classList.toggle('closed') === false;
+            head.setAttribute('aria-expanded', nowOpen);
+            grpOpen[g.key] = nowOpen;
+          }
+          head.onclick = toggle;
+          head.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
+          grid.appendChild(sec);
         });
         if (!grid.children.length) grid.appendChild(el('p', 'sec-sub', '没有匹配的模块。'));
       }
@@ -665,4 +752,5 @@
   R.mountPlayer = mountPlayer;
   R.Gate = Gate;
   R.Hub = Hub;
+  R.HUB_GROUPS = HUB_GROUPS; /* 面试模式等工具页复用六域划分 */
 })(typeof window !== 'undefined' ? window : globalThis);

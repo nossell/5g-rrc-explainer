@@ -20,6 +20,7 @@
   <nav class="topnav">
     <a class="navlink" href="index.html">目录</a>
     <a class="navlink" href="app.html">课程</a>
+    <a class="navlink" href="interview.html">面试</a>
     <a class="navlink on" href="dict.html">词典</a>
     <a class="navlink" href="anim.html">动画</a>
     <a class="navlink" href="timer-net.html">定时器网</a>
@@ -30,7 +31,7 @@
 
 <section class="hero" style="padding-top:26px;max-width:760px">
   <h1 style="font-size:25px">信元词典</h1>
-  <p class="sub">消息字段树里点"词典详解"就到这里。同一个信元（如 NAS-PDU、Security Key）会在很多消息里出现——<b>写一次，处处引用</b>；每条都挂条款锚点与关联信元。</p>
+  <p class="sub">消息字段树里点"词典详解"就到这里。同一个信元（如 NAS-PDU、Security Key）会在很多消息里出现——<b>写一次，处处引用</b>；每条都挂条款锚点与关联信元。词条按<b>所属协议分组</b>、组内按名称排序；点词条展开详解。</p>
 </section>
 
 <div class="hub-tools" style="margin-top:18px">
@@ -54,6 +55,23 @@
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
   /* 与 player.js 的 mdBold 同款：内容里的 **强调** → <strong>（esc 之后转换，标签安全） */
   function mdBold(s) { return String(s).replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>'); }
+  /* 协议分组：取 spec 第一个规范号归组，学习序排列，其余归"其他" */
+  var SPEC_GROUPS = [
+    ['38.331', 'TS 38.331 · NR RRC（无线资源控制）'],
+    ['38.413', 'TS 38.413 · NGAP（NG 接口信令）'],
+    ['38.423', 'TS 38.423 · XnAP（基站间信令）'],
+    ['23.501', 'TS 23.501 系 · 5G 核心网架构'],
+    ['38.323', 'TS 38.323 · PDCP（数据汇聚与安全）'],
+    ['37.324', 'TS 37.324 · SDAP（QoS 数据面）'],
+    ['24.501', 'TS 24.501 · 5G NAS'],
+    ['24.301', 'TS 24.301 · EPS NAS'],
+    ['other', '其他规范（29.244 等）']
+  ];
+  function grpOf(it) {
+    var m = (it.spec || '').match(/(\d\d\.\d{3})/);
+    var no = m ? m[1] : 'other';
+    return SPEC_GROUPS.some(function (g) { return g[0] === no; }) ? no : 'other';
+  }
   function card(it) {
     var refs = (it.refs || []).map(function (r) {
       return '<span class="ref-badge" title="条款锚点">§' + r + '</span>';
@@ -62,32 +80,79 @@
       var t = RRC.IEDict.get(k);
       return t ? '<a class="chip" style="text-decoration:none" href="#k=' + encodeURIComponent(k) + '">' + t.term.split('（')[0] + '</a>' : '';
     }).join(' ');
-    return '<div class="dict-card" id="k-' + it.k + '">' +
-      '<div class="dc-top"><span class="dc-term">' + esc(it.term) + '</span><span class="dc-spec">' + esc(it.spec || '') + '</span></div>' +
+    return '<div class="dict-card" id="k-' + it.k + '" data-k="' + esc(it.k) + '">' +
+      '<div class="dc-head" role="button" tabindex="0" aria-expanded="false">' +
+      '<span class="dc-term">' + esc(it.term) + '</span><span class="dc-spec">' + esc(it.spec || '') + '</span>' +
+      '<span class="dc-tog" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M9 5.5l7 6.5-7 6.5z"/></svg></span></div>' +
       '<div class="dc-brief">' + mdBold(esc(it.brief)) + '</div>' +
       '<div class="dc-full">' + mdBold(esc(it.full)) + '</div>' +
       '<div class="dc-foot">' + refs + (see ? '<span class="dc-see-cap">关联：</span>' + see : '') + '</div>' +
       '</div>';
   }
+  function bindCard(rootEl) {
+    rootEl.querySelectorAll('.dict-card').forEach(function (c) {
+      function toggle() {
+        var open = c.classList.toggle('open');
+        c.querySelector('.dc-head').setAttribute('aria-expanded', open);
+      }
+      var h = c.querySelector('.dc-head');
+      h.onclick = toggle;
+      h.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
+    });
+    rootEl.querySelectorAll('.dict-grp .ghead').forEach(function (h) {
+      function toggle() {
+        var grp = h.closest('.dict-grp');
+        var open = grp.classList.toggle('closed') === false;
+        h.setAttribute('aria-expanded', open);
+      }
+      h.onclick = toggle;
+      h.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
+    });
+  }
   function render() {
     var kw = (inp.value || '').trim().toLowerCase();
-    var ks = RRC.IEDict.keys().filter(function (k) {
+    var all = RRC.IEDict.keys().map(function (k) { return RRC.IEDict.get(k); });
+    var hits = all.filter(function (it) {
       if (!kw) return true;
-      var it = RRC.IEDict.get(k);
       return (it.term + it.brief + it.full).toLowerCase().indexOf(kw) >= 0;
     });
-    list.innerHTML = ks.length ? ks.map(function (k) { return card(RRC.IEDict.get(k)); }).join('')
-      : '<p class="sec-sub">没有匹配的信元。</p>';
+    if (!hits.length) { list.innerHTML = '<p class="sec-sub">没有匹配的信元。</p>'; return; }
+    var byGrp = {};
+    hits.forEach(function (it) { (byGrp[grpOf(it)] = byGrp[grpOf(it)] || []).push(it); });
+    var html = '';
+    SPEC_GROUPS.forEach(function (g) {
+      var items = byGrp[g[0]];
+      if (!items || !items.length) return;
+      html += '<div class="dict-grp hubgroup' + (kw ? '' : (g[0] === '38.331' ? '' : ' closed')) + '" id="dg-' + g[0].replace('.', '-') + '">' +
+        '<div class="ghead" role="button" tabindex="0" aria-expanded="' + (kw || g[0] === '38.331') + '">' +
+        '<span class="gtog" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M9 5.5l7 6.5-7 6.5z"/></svg></span>' +
+        '<div class="gtxt"><div class="gname">' + g[1] + '</div></div>' +
+        '<span class="gcount">' + items.length + ' 条</span></div>' +
+        '<div class="dict-grp-body gbody">' +
+        items.map(card).join('') + '</div></div>';
+    });
+    list.innerHTML = html;
+    bindCard(list);
   }
   inp.oninput = render;
   render();
-  /* 锚点直达：dict.html#k=key */
-  if (location.hash.indexOf('#k=') === 0) {
+  /* 锚点直达：dict.html#k=key —— 展开所在组与词条，滚动高亮 */
+  function focusKey() {
+    if (location.hash.indexOf('#k=') !== 0) return;
     var k = decodeURIComponent(location.hash.slice(3));
     var el = document.getElementById('k-' + k);
-    if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('hit'); }
-    else list.insertAdjacentHTML('afterbegin', '<p class="sec-sub">词典暂无条目：' + k.replace(/</g, '&lt;') + '</p>');
+    if (el) {
+      var grp = el.closest('.dict-grp');
+      if (grp) { grp.classList.remove('closed'); grp.querySelector('.ghead').setAttribute('aria-expanded', 'true'); }
+      el.classList.add('open', 'hit');
+      el.querySelector('.dc-head').setAttribute('aria-expanded', 'true');
+      el.scrollIntoView({ block: 'center' });
+    } else {
+      list.insertAdjacentHTML('afterbegin', '<p class="sec-sub">词典暂无条目：' + k.replace(/</g, '&lt;') + '</p>');
+    }
   }
+  window.addEventListener('hashchange', focusKey);
+  focusKey();
 })();
 </script>
 </body>

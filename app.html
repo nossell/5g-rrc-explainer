@@ -19,6 +19,7 @@
   <nav class="topnav">
     <a class="navlink" href="index.html">目录</a>
     <a class="navlink on" href="app.html">课程</a>
+    <a class="navlink" href="interview.html">面试</a>
     <a class="navlink" href="dict.html">词典</a>
     <a class="navlink" href="anim.html">动画</a>
     <a class="navlink" href="timer-net.html">定时器网</a>
@@ -33,7 +34,7 @@
 </div>
 <div class="verify-banner">
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
-  <span>本页讲解为项目自写内容（非 3GPP 规范原文），M0–M11 的 155 条 + M12–M18 的 212 条论断已独立复核销账（2026-09-30 报告见仓库 docs/review/），M19 待复核（§徽章可查看出处短引）——学习时仍请以 3GPP 正式文本为准。</span>
+  <span>本页讲解为项目自写内容（非 3GPP 规范原文），M0–M20 全部 21 模块的 411 条论断已独立复核销账（2026-10-01 报告见仓库 docs/review/；§徽章可查看出处短引）——学习时仍请以 3GPP 正式文本为准。</span>
 </div>
 <div id="view"></div>
 </div>
@@ -52,7 +53,7 @@
 <script>
 (function () {
   var store = RRC.Store();
-  var PAID = { m1:'M2 · 系统消息', m2:'M3 · 寻呼与 DRX', m3:'M4 · 测量事件', m4:'M5 · 切换全流程', m5:'M6 · 承载与重配置', m6:'M7 · RRC_INACTIVE', m7:'M8 · AS 安全激活', m8:'M9 · EN-DC 互操作', mi:'M10 · NG 接口课', mx:'M11 · Xn 接口课', mc:'M12 · MAC 随机接入课', mn:'M13 · NAS 注册课', mg:'M14 · 5GC 流程课', mp:'M15 · 用户面协议栈课', ml:'M16 · LTE 对照课', ms:'M17 · 安全线课', mf:'M18 · 物理层课', me:'M19 · LTE NAS 专章' };
+  var PAID = { m1:'M2 · 系统消息', m2:'M3 · 寻呼与 DRX', m3:'M4 · 测量事件', m4:'M5 · 切换全流程', m5:'M6 · 承载与重配置', m6:'M7 · RRC_INACTIVE', m7:'M8 · AS 安全激活', m8:'M9 · EN-DC 互操作', mi:'M10 · NG 接口课', mx:'M11 · Xn 接口课', mc:'M12 · MAC 随机接入课', mn:'M13 · NAS 注册课', mg:'M14 · 5GC 流程课', mp:'M15 · 用户面协议栈课', ml:'M16 · LTE 对照课', ms:'M17 · 安全线课', mf:'M18 · 物理层课', me:'M19 · LTE NAS 专章', mz:'M20 · 接口族收官课' };
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
   function currentId() {
     var h = (location.hash || '#m0').slice(1);
@@ -68,11 +69,11 @@
     var view = document.getElementById('view');
     if (window.RRCPlayer) { try { window.RRCPlayer.unmount(); } catch (e) {} }
     view.innerHTML = '<div class="gate-wrap"><div class="gate">' +
-      '<div class="g-kicker">完整版模块 · 20 模块课程线</div>' +
+      '<div class="g-kicker">完整版模块 · 21 模块课程线</div>' +
       '<h2>' + esc(label) + '</h2>' +
       '<p class="g-sub">本站为免费层：M0 接入全流程、M1 连接建立两课与全部工具页开放体验</p>' +
       '<ul><li>✓ 本模块含原表全量字段树 / 失败分支全集 / 决策点 / 结课测验</li>' +
-      '<li>✓ 条款引用全程 §徽章直连 3GPP 原文短引（350+ 锚点），复核台账见仓库 docs/review/</li>' +
+      '<li>✓ 条款引用全程 §徽章直连 3GPP 原文短引（417 锚点），复核台账见仓库 docs/review/</li>' +
       '<li>✓ 买断后浏览器本地永久离线可用</li></ul>' +
       '<div class="g-price">完整版 20 模块 · 内测期全套 <b>¥99</b> / 单模块 <b>¥12</b></div>' +
       '<div class="g-actions"><a class="btn primary" href="README.md#获取完整版">获取完整版</a>' +

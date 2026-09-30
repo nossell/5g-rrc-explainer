@@ -300,7 +300,7 @@
     /* —— 时间轴 —— */
     var starts = [], total = 0;
     script.beats.forEach(function (b) { starts.push(total); total += b.dur; });
-    var t = 0, playing = !!opts.autoplay, last = null, rafId = null, curBeat = -1;
+    var t = 0, playing = !!opts.autoplay, last = null, rafId = null, curBeat = -1, rate = opts.rate || 1;
 
     /* dots */
     script.beats.forEach(function (b, i) {
@@ -341,7 +341,7 @@
     function loop() {
       if (!playing) return;
       var now = performance.now();
-      if (last != null) t += (now - last) / 1000;
+      if (last != null) t += (now - last) / 1000 * rate;
       last = now;
       if (t > total) t = total;
       draw();
