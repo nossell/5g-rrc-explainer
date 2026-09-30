@@ -574,7 +574,7 @@
         '每步大白话讲解 + 面试考法标注 + 结课自测',
         '买一次，浏览器本地永久离线可用'
       ];
-      var price = gate.price || '完整版 21 模块（M0–M20）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
+      var price = gate.price || '完整版 27 模块（M0–M26）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
       root.innerHTML = '';
       var w = el('div', 'gate-wrap');
       var c = el('div', 'gate');
@@ -587,7 +587,7 @@
         '<div class="g-actions">' +
         '<button class="btn primary" data-act="unlock">完整版解锁码</button>' +
         '<a class="btn" href="index.html">返回目录</a></div>' +
-        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M20 共 19 个模块属完整版，获取方式见仓库 README。</p>';
+        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M26 共 25 个模块属完整版，获取方式见仓库 README。</p>';
       w.appendChild(c); root.appendChild(w);
       c.querySelector('[data-act="unlock"]').onclick = function () {
         store.setLicense({ demo: true });
@@ -603,9 +603,11 @@
     { key: 'main', no: '01', short: '主线', name: '主线 · 免费起点', desc: '一部电影看完全程：从开机到注册能上网的每一条信令——全站的地图，也是所有课的前置。', mods: ['ma'] },
     { key: 'rrc', no: '02', short: 'RRC 九课', name: 'RRC · 空口信令九课', desc: 'UE 与基站之间的对话全集：连接建立、系统消息、寻呼、测量、切换、承载重配、挂起、AS 安全、双连接。', mods: ['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8'] },
     { key: 'if', no: '03', short: '接口与用户面', name: '接口与用户面 · 信令离开基站之后', desc: 'NG/Xn 两条网络接口的柜台单据、S1/F1/E1 接口族收官、加上数据面与 GTP-U 隧道——网络侧视角与比特流视角。', mods: ['mi', 'mx', 'mp', 'mz'] },
-    { key: 'nas', no: '04', short: 'NAS 与核心网', name: 'NAS 与核心网 · 信封的外层', desc: '注册与会话这一层的两代全套：5G NAS、5GC 会话流程、EPS 侧 EMM/ESM 专章。', mods: ['mn', 'mg', 'me'] },
+    { key: 'nas', no: '04', short: 'NAS 与核心网', name: 'NAS 与核心网 · 信封的外层', desc: '注册与会话这一层的两代全套：5G NAS、5GC 会话流程、隧道与转发面信令（GTP-C/PFCP）、EPS 侧 EMM/ESM 专章。', mods: ['mn', 'mg', 'mb', 'me'] },
     { key: 'low', no: '05', short: '空口底层', name: '空口底层 · 信令脚下的地基', desc: '信令之前的那一秒：MAC 怎么敲门、物理层怎么把比特搬上无线帧——学完上层再下井，豁然开朗。', mods: ['mc', 'mf'] },
-    { key: 'cross', no: '06', short: '安全与对照', name: '安全与两代对照 · 横切视角收官', desc: '密钥树怎么一级级长出来，以及 4G/5G 同一流程并排看——横穿所有层的两组收官课。', mods: ['ms', 'ml'] }
+    { key: 'cross', no: '06', short: '安全与对照', name: '安全与两代对照 · 横切视角收官', desc: '密钥树怎么一级级长出来，以及 4G/5G 同一流程并排看——横穿所有层的两组收官课。', mods: ['ms', 'ml'] },
+    { key: 'apps', no: '07', short: '业务与垂直', name: '业务与垂直 · 信令的应用现场', desc: '信令学完去哪用：IMS 语音（SIP 注册到挂断）、定位（LPP/NRPPa）、五大垂直特性速览（NTN/RedCap/Sidelink/MBS/IAB）——应用现场的三门课。', mods: ['mv', 'md', 'mk'] },
+    { key: 'jobs', no: '08', short: '测试与终端', name: '测试与终端 · 岗位直通', desc: '与求职岗位最短路径的两门课：一致性测试线（怎么给手机发合格证）与卡与终端（USIM 与一条短信的旅程）——全站收官。', mods: ['mt', 'mu'] }
   ];
   var Hub = {
     render: function (root, store, opts) {
@@ -652,7 +654,7 @@
       function renderLic() {
         lic = store.license();
         licCard.innerHTML =
-          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0/M1 与全部工具页；完整版（M2–M19）获取方式见 README。</div></div>' +
+          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0/M1 与全部工具页；完整版（M2–M26）获取方式见 README。</div></div>' +
           '<div style="display:flex;gap:8px;align-items:center">' +
           '<span class="license-state' + (lic.demo ? ' on' : '') + '">' + (lic.demo ? '完整版用户' : '免费层') + '</span>' +
           (lic.demo
@@ -676,7 +678,7 @@
       };
       headRow.appendChild(expandBtn);
       root.appendChild(headRow);
-      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M20 属完整版。'));
+      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M26 属完整版。'));
       root.appendChild(tools);
 
       /* 总进度 */

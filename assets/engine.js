@@ -19,7 +19,7 @@
   var clauseIndex = null;
   function isClauseRef(s) {
     /* 允许末段字母后缀（如 5.3.3.1a / 5.7.3b——语料条款树中真实存在） */
-    return typeof s === 'string' && (/^\d+(\.\d+)+[a-z]?$/.test(s) || /^\d{2}\.\d{3}#\d+(\.\d+)+[a-z]?$/.test(s));
+    return typeof s === 'string' && (/^\d+(\.\d+)+[A-Za-z]?$/.test(s) || /^\d{2}\.\d{3}(-\d+)?#\d+(\.\d+)+[A-Za-z]?$/.test(s));
   }
   function clauseMissing(ref) {
     if (clauseIndex == null) return false;
