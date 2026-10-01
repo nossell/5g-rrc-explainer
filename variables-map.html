@@ -103,6 +103,14 @@
       clear: '上报后清除；记录超期（日志时长上限）作废', fields: 'Logged measurement 样本序列',
       links: [['定时器网（记录期与各定时器的纠缠）', 'timer-net.html']], ref: '38.331 §5.5a/§7.4' },
     /* ---------- 第二幕：CONNECTED 工作记忆 ---------- */
+    { id: 'UE derived QoS rule 列表', group: 'connected', tag: '反射笔记', one: '看下行学上行的成果本：每条反射来的规则带过滤器+QFI，RQ Timer 一到就撕页。',
+      write: 'SDAP 收到 RQI=1 的 DL 包：无对应规则则从 DL 包反推过滤器生成新规则并启动/重启 RQ Timer；QFI 变了就更新（23.501 §5.7.5.3）', read: 'UL 包分类时与显式配置的 QoS rule 一起按 precedence 匹配——找不到任何匹配即丢包',
+      clear: 'RQ Timer 到期删除该条（每次 RQI 重启定时器顺延到期时刻）', fields: '包过滤器集（从 DL 包反推）+ QFI + RQ Timer 到期时刻',
+      links: [['QoS 课 · 反射 QoS', 'app.html#mq'], ['词典：qfi', 'dict.html#k=qfi']], ref: '23.501 §5.7.5.3' },
+    { id: 'UL flow→DRB 映射规则', group: 'connected', tag: '车道表', one: '每条 DRB 一页"哪些 QFI 从我这里走"——反射学来或 RRC 直配，永远执行最新。',
+      write: '收到 DL 包（记下 QFI↔DRB）或收到 RRC 映射规则时写入/更新；更新前先在旧 DRB 发 end-marker（37.324 §5.3）', read: 'UL SDAP 发包时按它给包打 QFI 并选 DRB；DL 带 RDI=1 时同样触发存映射',
+      clear: 'RRC 释放/重配覆盖；DRB 释放随页撕掉', fields: 'DRB → QFI 清单（默认 DRB 兜底：无规则时发默认 DRB）；两级映射总图见 38.300 §12.1',
+      links: [['QoS 课 · SDAP 绑定', 'app.html#mq'], ['词典：rqi', 'dict.html#k=rqi']], ref: '37.324 §5.3' },
     { id: 'VarMeasConfig', group: 'connected', tag: '任务书', one: '当前生效的测量配置全集——测什么、怎么滤波、何时报告，全在这一册。',
       write: 'RRCReconfiguration 的 measConfig 增删改后更新（5.3.5.3）——M4 测量课那张 66 行大树的最终归宿', read: '每个测量判定动作都要查它（5.5.1/5.5.2.x）',
       clear: 'measConfig 释放（release 字段）；离开 CONNECTED（回 IDLE/INACTIVE）随大扫除释放', fields: '测量对象/报告配置/量距/门限/滤波系数/测量缺口',
@@ -133,6 +141,10 @@
       clear: '离开 INACTIVE（成功恢复→开箱转入连接态变量体系；失败回 IDLE→随行李箱丢弃）', fields: '源小区 PCI+C-RNTI+完整性算法+目标小区标识',
       links: [['INACTIVE 课 · 恢复请求', 'app.html#m6'], ['Xn 课 · Integrity protection（凭据跨接口接力）', 'app.html#mx']], ref: '38.331 §5.3.8.3/§5.3.13.3/§7.4' },
     /* ---------- 第四幕：IDLE 生存技能 ---------- */
+    { id: 'deprioritisation 请求存储', group: 'idle', tag: '降级黑名单', one: 'RRCRelease 带来的"别去这些频率"指令——T325 跑着期间一直压在最低优先级，连接态都有效。',
+      write: '收到带 deprioritisationReq 的 RRCRelease 时存储并启动/重启 T325（38.331 §5.3.8.3）', read: '重选评估全程查它：在记的频率（或全部 NR 频率）按最低优先级参与比较，不论当前驻留 RAT（38.304 §5.2.4.1）',
+      clear: 'T325 到期/停止；应 NAS 请求执行 PLMN/SNPN 选择时删除（换运营商即洗白）', fields: '被降级频率清单（或"全部 NR 频率"指示）+ T325 到期时刻',
+      links: [['定时器网 · T325', 'timer-net.html'], ['空闲态课 · 降级', 'app.html#my']], ref: '38.331 §5.3.8.3' },
     { id: 'VarMeasReselectionConfig', group: 'idle', tag: '重选攻略', one: 'IDLE/INACTIVE 态的生存法则——测哪些频点、按什么优先级换小区。',
       write: '离开连接态时从广播 SIB 与专用信令汇编（5.3.8.3/5.3.13.4）；含广播版与增强版（VarMeasIdleConfig 族）', read: '小区重选判定全程查它（5.7.8.x：R 准则/S 准则/同频异频规则）',
       clear: '进入连接态时释放；专用优先级另有 T320 保质期，到期回归广播默认值', fields: '频点优先级/门限/迟滞等重选参数',
@@ -150,9 +162,9 @@
     idle: ['第四幕 · IDLE 生存技能', '重选攻略——没人管的时候自己找路']
   };
   var STATES = [
-    { name: 'RRC_IDLE', desc: '深度睡眠 · 周期醒来看寻呼', t: ['VarMeasReselectionConfig', 'VarMobilityHistoryReport', 'VarLogMeasReport', 'VarRLF-Report', 'VarConnEstFailReport'] },
-    { name: 'RRC_INACTIVE', desc: '浅睡 · 行李箱随身（五件套）', t: ['UE Inactive AS 上下文', 'VarResumeMAC-Input', 'VarMeasReselectionConfig', 'VarMobilityHistoryReport', 'VarLogMeasReport'] },
-    { name: 'RRC_CONNECTED', desc: '全连接 · 工作记忆满载', t: ['VarMeasConfig', 'VarMeasReportList', 'VarConditionalReconfig', 'VarShortMAC-Input'] },
+    { name: 'RRC_IDLE', desc: '深度睡眠 · 周期醒来看寻呼', t: ['VarMeasReselectionConfig', 'deprioritisation 请求存储', 'VarMobilityHistoryReport', 'VarLogMeasReport', 'VarRLF-Report', 'VarConnEstFailReport'] },
+    { name: 'RRC_INACTIVE', desc: '浅睡 · 行李箱随身（五件套）', t: ['UE Inactive AS 上下文', 'VarResumeMAC-Input', 'VarMeasReselectionConfig', 'deprioritisation 请求存储', 'VarMobilityHistoryReport', 'VarLogMeasReport'] },
+    { name: 'RRC_CONNECTED', desc: '全连接 · 工作记忆满载', t: ['VarMeasConfig', 'VarMeasReportList', 'VarConditionalReconfig', 'VarShortMAC-Input', 'UE derived QoS rule 列表', 'UL flow→DRB 映射规则'] },
     { name: '跨态行李柜', desc: '三态都带 · 见网络就交', t: ['VarMobilityHistoryReport', 'VarRLF-Report', 'VarConnEstFailReport', 'VarLogMeasReport'] }
   ];
   var SWEEP = '<b>§5.3.11 · 回 IDLE 的大扫除（读源码数出来的清单）</b>：discard <b>UE Inactive AS 上下文</b>、release suspendConfig → remove 所有 <b>VarConditionalReconfig</b> 条目 → 丢弃 <b>KgNB/S-KgNB/KRRCenc/KRRCint/KUPint/KUPenc 全部密钥</b> → 丢弃 VarCSI-LogMeasReport 条目与未发完的分段消息。一张清单看懂"哪些记忆不许过夜"——安全记忆零残留，履历记忆保留。';

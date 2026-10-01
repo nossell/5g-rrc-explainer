@@ -135,6 +135,17 @@
       expiry: '超时：丢弃专用优先级，回归 SIB 默认值',
       dials: 'min5 / min10 / min20 / min30 / min60 / min120 / min180（分钟档枚举）', vars: 'IDLE 态省电与驻留策略的"时效阀门"',
       links: [['INACTIVE 课 · RRCRelease 随行优先级', 'app.html#m6']], ref: '38.331 §5.3.8.3/§6.2.2' },
+    { id: 'T325', group: 'inactive', tag: '降级保质期', one: '网络"拉黑降级"的有效期——RRCRelease 带 deprioritisationReq 后，相关频率被压到最低重选优先级，跑完才解冻。',
+      start: '收到带 deprioritisationReq 的 RRCRelease 时启动/重启（值=随信 deprioritisationTimer，§5.3.8.3）', stop: '到点自然停止；存储的降级请求在"应 NAS 请求执行 PLMN/SNPN 选择"时删除（换运营商即洗白）',
+      expiry: '超时：降级解除，相关频率恢复常规优先级参与重选——是压到最低档，不是禁止',
+      dials: '值由 RRCRelease 的 deprioritisationReq 指定', vars: '38.304 §5.2.4.1 语义：运行期间该频率视为最低优先级参与重选（不论当前驻留 RAT）；NOTE 1a：降级请求的存储不受专用/广播优先级指派影响、也不受 RRC 连接影响——连接态都压着',
+      links: [['空闲态课 · 降级与 T325', 'app.html#my'], ['INACTIVE 课 · RRCRelease 随行', 'app.html#m6']], ref: '38.331 §5.3.8.3/§5.3.11' },
+    { id: 'T311', group: 'keep', tag: '求救选址沙漏', one: '宣布无线链路失败后挑"重建医院"的限时——它跑着时 UE 在找 suitable 小区，找到才换 T301 发求救信。',
+      start: '无线链路失败被判时启动（T310 超时/完整性校验失败等，§5.3.10——同时停 T310/T312/T304/T316 一票定时器）', stop: '重建流程中选定 suitable 小区后停止——随即换 T301 接棒等批复（§5.3.7.2）',
+      expiry: '超时：noSuitableCellFound 写入 VarRLF-Report，回 RRC_IDLE（§5.3.11）',
+      dials: 'ms1000 / ms3000 / ms5000 / ms10000 / ms15000 / ms20000 / ms30000（秒级七档，RLF-TimersAndConstants）',
+      vars: '与 T301 分工：T311 找医院、T301 等批复——重建时延的主成分；秒级档位是它和 T310（ms 级）的肉眼区别',
+      links: [['切换课 · 重建请求', 'app.html#m4'], ['变量地图 · VarRLF-Report', 'variables-map.html']], ref: '38.331 §5.3.10/§5.3.7.2/§6.3.2' },
     { id: 'T301', group: 'keep', tag: '求救等待', one: '发 RRCReestablishmentRequest 后等原小区链路的续接批复。',
       start: '发送 RRCReestablishmentRequest 时启动', stop: '收到 RRCReestablishment / RRCReject / 重选时停止',
       expiry: '超时：回 IDLE（脱网重选）',
@@ -154,9 +165,9 @@
     inactive: ['第四幕 · INACTIVE 与 IDLE', '睡眠态的纪律：恢复等待、定期签到、优先级保质期']
   };
   var STATES = [
-    { name: 'RRC_IDLE', desc: '深度睡眠 · 周期醒来看寻呼', t: [] },
-    { name: 'RRC_INACTIVE', desc: '浅睡 · 保留 AS 上下文（五件套）', t: ['T319', 'T380', 'T320'] },
-    { name: 'RRC_CONNECTED', desc: '全连接 · 信令与业务满速', t: ['T310', 'T304', 'T316', 'T301'] },
+    { name: 'RRC_IDLE', desc: '深度睡眠 · 周期醒来看寻呼', t: ['T325'] },
+    { name: 'RRC_INACTIVE', desc: '浅睡 · 保留 AS 上下文（五件套）', t: ['T319', 'T380', 'T320', 'T325'] },
+    { name: 'RRC_CONNECTED', desc: '全连接 · 信令与业务满速', t: ['T310', 'T304', 'T316', 'T301', 'T311'] },
     { name: '接入中（IDLE→CONNECTED）', desc: '敲门进行时', t: ['T300', 'T302', 'T390', 'TCR'] }
   ];
 

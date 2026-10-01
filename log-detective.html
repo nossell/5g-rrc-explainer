@@ -275,6 +275,44 @@
         ['21:15:40.000', 'note', '—', '（网管注记）', 'C1/C2 弱覆盖工单 · 接入成功率告警', 'report',
          '闭环：两张小票+超时记录喂给网优——"UE 侧变量 → 网络侧工单"的完整数据链，这就是小票存在的意义。']
       ]
+    },
+    {
+      id: 'c005', title: '案卷 005 · 被降级的频段', sub: '搜网安家 → 降级令 → 绕行 → 手动选网洗白',
+      brief: '<b>案情</b>：一台手机从开机搜网到安家落户，半天里收到一张网络下发的"降级令"（deprioritisationReq），被引着绕开一个频段，最后用户手动选网触发"洗白"回到该频段（中间一段连接态对话未展示）。<b>考点</b>：空闲态的每一步都有条款管着——分得清"小区选择看门槛"与"重选看优先级"两代规则、降级与 barred 的区别，才读得懂这张日志。',
+      cats: { search: '开机扫街与上报', select: '小区选择与门槛', reselect: '重选与排位赛', deprio: '降级令与洗白', report: '漫游节流与日常' },
+      catCourse: { search: '空闲态课（my）mys1', select: 'my mys2-5（S 准则/suitable/驻留）', reselect: 'my mym1/mym3（优先级与 R 准则）', deprio: 'my myh4 + 定时器网 T325', report: 'my mys3 注脚 + 测量课' },
+      log: [
+        ['08:00:01.010', 'nas', 'UE—', 'PLMN SELECTION', '自动模式 · 目标=460-00', 'search',
+         '开机第一步挑运营商：NAS 按优先级清单点名，AS 随即受命扫街（空闲态课 mys1）。'],
+        ['08:00:01.480', 'uu', 'UE→频段', 'RF SCAN', 'n41 最强小区 PCI=151 · RSRP=-98 dBm', 'search',
+         '每个载波只看最强小区的门牌；RSRP 过 -110 dBm 高质量线，按高质量上报不带读数（mys1 判据）。'],
+        ['08:00:02.010', 'uu', 'UE←小区', 'SIB1 ACQUIRE', 'PLMN=460-00 ✓ · cellBarred=notBarred', 'select',
+         '读系统信息验身份：PLMN 对上、没被拉黑——S 准则两道门槛（Srxlev/Squal）同步开算（mys3/mys4）。'],
+        ['08:00:02.200', 'uu', 'UE—', 'CAMP + TA REGISTRATION', 'TAI=460-00-21 · suitable ✓', 'select',
+         '四重核验全过（PLMN 归属/S 准则/不 barred/TA 不受限）→驻留+TA 注册，selected 变 registered（mys5）。'],
+        ['08:30:15.000', 'uu', 'A→UE', 'RRCRelease', 'deprioritisationReq · 频段=n28', 'deprio',
+         '网络下发"降级令"：n28 被压到最低重选优先级，T325 同步起跑——负载分担的隐形之手（myh4/定时器网 T325）。'],
+        ['08:30:15.120', 'uu', 'UE—', 'STORE deprioReq', '到期=+T325', 'deprio',
+         'NOTE 1a：降级请求照单全收，专用/广播优先级指派与 RRC 连接都改变不了它（变量地图·降级黑名单）。'],
+        ['08:45:22.310', 'uu', 'UE—', 'RESELECTION EVAL', 'n28 跳过（deprio）· 现驻 n41', 'reselect',
+         '重选评估只对"系统信息给出且 UE 持有优先级"的频率进行——被降级的 n28 候选资格排最后（myh4）。'],
+        ['08:46:02.780', 'uu', 'UE→B', 'RESELECT to B', 'Rn>Rs 持续 Treselection · 驻留>1s', 'reselect',
+         '同频排位赛：邻区 Rn 超过服务小区 Rs 且站稳 Treselection，驻留又满 1 秒——搬家成立（mym3 两个硬条件）。'],
+        ['09:10:40.500', 'uu', 'B→UE', 'RRCRelease', 'redirectedCarrier=n28', 'deprio',
+         '（中间一段连接态对话未展示）网络试图把 UE 重定向回被降级的 n28——降级请求依然在册，重选时照样压最低（NOTE 1a 跨连接效力）。'],
+        ['09:12:00.000', 'nas', 'UE—', 'NAS PLMN SELECTION REQ', '手动选网（用户操作）', 'deprio',
+         '换卡/手动选网触发"洗白"：应 NAS 请求执行 PLMN/SNPN 选择时删除存储的降级请求（myh4 删除时机）。'],
+        ['09:12:00.050', 'uu', 'UE—', 'DEPRIO CLEARED', 'T325 停 · n28 恢复常规优先级', 'deprio',
+         'T325 连同降级请求一并清除——n28 重新以常规优先级参与重选评估（定时器网 T325）。'],
+        ['09:12:03.300', 'uu', 'UE←n28', 'SIB1 ACQUIRE', 'PLMN=460-00 ✓ · S 准则 ✓', 'select',
+         '直奔 n28 最强小区：Srxlev/Squal 两道门槛都过线——选择阶段只认 S 准则与门槛，不看优先级（mys2 经典考题）。'],
+        ['09:12:03.500', 'uu', 'UE—', 'CAMP on n28', 'TAI=460-00-22', 'select',
+         '驻留成功——"扫频仪看得见强信号、手机不驻留"的悬案反转：行政限制解除后一切正常（myh3 现案对应）。'],
+        ['09:40:11.900', 'uu', 'UE—', 'RESELECTION EVAL', 'VPLMN 驻留 · 周期搜更高优先级 PLMN', 'report',
+         '漫游态纪律：驻留 VPLMN 正常时周期搜更高优先级 PLMN，minoffset 还会抬门槛——搜网也有节流阀（mys3 注脚③）。'],
+        ['09:40:12.100', 'uu', 'UE—', 'NO BETTER PLMN', '维持现驻 · 回省电态', 'report',
+         '本轮搜索无更高优先级 PLMN——按 38.133 最低性能要求收工，继续省电睡觉（mym2 测量分层）。']
+      ]
     }
   ];
 
