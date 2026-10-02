@@ -602,7 +602,7 @@
   var HUB_GROUPS = [
     { key: 'main', no: '01', short: '主线', name: '主线 · 免费起点', desc: '一部电影看完全程：从开机到注册能上网的每一条信令——全站的地图，也是所有课的前置。', mods: ['ma'] },
     { key: 'rrc', no: '02', short: 'RRC 十课', name: 'RRC · 空口信令十课', desc: 'UE 与基站之间的对话全集：连接建立、系统消息、寻呼、测量、切换、承载重配、挂起、AS 安全、双连接，外加空闲态与小区重选专课（38.304）。', mods: ['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'my'] },
-    { key: 'if', no: '03', short: '接口与用户面', name: '接口与用户面 · 信令离开基站之后', desc: 'NG/Xn 两条网络接口的柜台单据（NGAP 另有消息级解剖专课）、S1/F1/E1 接口族收官、加上数据面与 GTP-U 隧道——网络侧视角与比特流视角。', mods: ['mi', 'mx', 'mp', 'mz', 'mng', 'ms1'] },
+    { key: 'if', no: '03', short: '接口与用户面', name: '接口与用户面 · 信令离开基站之后', desc: 'NG/Xn 两条网络接口的柜台单据（NGAP 与 S1AP 另有消息级解剖专课）、F1/E1 接口族收官、加上数据面与 GTP-U 隧道——网络侧视角与比特流视角。', mods: ['mi', 'mx', 'mp', 'mz', 'mng', 'ms1'] },
     { key: 'nas', no: '04', short: 'NAS 与核心网', name: 'NAS 与核心网 · 信封的外层', desc: '注册与会话这一层的全套：5G NAS、5GC 会话流程、隧道与转发面信令（GTP-C/PFCP）、网络切片专课（S-NSSAI 的旅程）、EPS 侧 EMM/ESM 专章，加上 SBA 服务化架构（NRF/发现/token）、PDU 会话信令专课与 Service Request 专课。', mods: ['mn', 'mg', 'mb', 'me', 'mr', 'mo', 'mm', 'mns'] },
     { key: 'low', no: '05', short: '空口底层', name: '空口底层 · 信令脚下的地基', desc: '信令之前的那一秒：MAC 怎么敲门、物理层怎么把比特搬上无线帧、QoS 流怎么绑进承载（5QI/SDAP 专课）——学完上层再下井，豁然开朗。', mods: ['mc', 'mf', 'mq'] },
     { key: 'cross', no: '06', short: '安全与对照', name: '安全与两代对照 · 横切视角收官', desc: '密钥树怎么一级级长出来（33.501 骨架课+密钥层级深潜课），以及 4G/5G 同一流程并排看——横穿所有层的收官课组。', mods: ['ms', 'ml', 'mj'] },

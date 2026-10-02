@@ -32,6 +32,7 @@
 .ld-if.xn{background:#FFF4E0;color:#92600A}
 .ld-if.ng{background:#F5F0FE;color:#6D3FBF}
 .ld-if.sctp{background:#EEF2F8;color:#3D5A80}
+.ld-if.nas{background:#E5F6F7;color:#0E7C7B}
 .ld-if.note{background:#F0EDE6;color:#8A8578}
 .ld-dir{flex:none;font:700 11px var(--mono);color:var(--tx3);width:58px}
 .ld-msg{flex:1;min-width:0;font:700 12px var(--mono);color:var(--tx1);overflow-wrap:anywhere}
@@ -72,7 +73,7 @@
   <section class="ld-hero">
     <h1>信令日志侦探——把课程知识变成查错能力</h1>
     <p class="sub">网优/测试岗的日常：面对一屏日志，第一眼要看出<b>这是哪条流程的第几步、顺不顺、卡在哪</b>。下面是若干份<b>完全合成的脱敏案卷</b>，给你的任务：逐行标注它属于哪个故事段。选完交卷，逐行判分并给出正解推理。</p>
-    <div class="ld-meta"><span>四案卷 · 共 71 行 · 三接口（Uu / Xn-C / NG-C）</span><span>合成数据 · 与任何真实网络无关</span></div>
+    <div class="ld-meta"><span>五案卷 · 共 86 行 · 五路来源（Uu / Xn-C / NG-C / SCTP / NAS）</span><span>合成数据 · 与任何真实网络无关</span></div>
   </section>
 
   <div class="ld-tabs" id="ld-tabs"></div>
@@ -290,8 +291,8 @@
          '读系统信息验身份：PLMN 对上、没被拉黑——S 准则两道门槛（Srxlev/Squal）同步开算（mys3/mys4）。'],
         ['08:00:02.200', 'uu', 'UE—', 'CAMP + TA REGISTRATION', 'TAI=460-00-21 · suitable ✓', 'select',
          '四重核验全过（PLMN 归属/S 准则/不 barred/TA 不受限）→驻留+TA 注册，selected 变 registered（mys5）。'],
-        ['08:30:15.000', 'uu', 'A→UE', 'RRCRelease', 'deprioritisationReq · 频段=n28', 'deprio',
-         '网络下发"降级令"：n28 被压到最低重选优先级，T325 同步起跑——负载分担的隐形之手（myh4/定时器网 T325）。'],
+        ['08:30:15.000', 'uu', 'A→UE', 'RRCRelease', 'deprioritisationReq · type=frequency（当前频率 n28）', 'deprio',
+         '网络下发"降级令"：n28 被压到最低重选优先级，T325 同步起跑——负载分担的隐形之手。注意协议能力边界：deprioritisationType 只有 frequency（当前频率）/nr（全部 NR 频率）两值，**不能点名降级别的频率**——此令指向 n28，意味着 UE 当时在 n28 的连接上被释放（08:00–08:30 这段连接态对话未入卷），释放后按 S 准则选回了最强的 n41（myh4/定时器网 T325）。'],
         ['08:30:15.120', 'uu', 'UE—', 'STORE deprioReq', '到期=+T325', 'deprio',
          'NOTE 1a：降级请求照单全收，专用/广播优先级指派与 RRC 连接都改变不了它（变量地图·降级黑名单）。'],
         ['08:45:22.310', 'uu', 'UE—', 'RESELECTION EVAL', 'n28 跳过（deprio）· 现驻 n41', 'reselect',
@@ -309,9 +310,9 @@
         ['09:12:03.500', 'uu', 'UE—', 'CAMP on n28', 'TAI=460-00-22', 'select',
          '驻留成功——"扫频仪看得见强信号、手机不驻留"的悬案反转：行政限制解除后一切正常（myh3 现案对应）。'],
         ['09:40:11.900', 'uu', 'UE—', 'RESELECTION EVAL', 'VPLMN 驻留 · 周期搜更高优先级 PLMN', 'report',
-         '漫游态纪律：驻留 VPLMN 正常时周期搜更高优先级 PLMN，minoffset 还会抬门槛——搜网也有节流阀（mys3 注脚③）。'],
+         '漫游态纪律：驻留 VPLMN 正常时周期搜更高优先级 PLMN，minoffset 还会抬门槛——搜网也有节流阀。460-00 是 09:12 手动选中的非本机归属 PLMN，故此刻算 VPLMN 驻留（mys3 注脚③）。'],
         ['09:40:12.100', 'uu', 'UE—', 'NO BETTER PLMN', '维持现驻 · 回省电态', 'report',
-         '本轮搜索无更高优先级 PLMN——按 38.133 最低性能要求收工，继续省电睡觉（mym2 测量分层）。']
+         '本轮搜索无更高优先级 PLMN——按协议最低性能节奏收工，继续省电睡觉（mym2 测量分层）。']
       ]
     }
   ];
@@ -339,7 +340,7 @@
     }).join('');
     document.getElementById('ld-table').innerHTML = c.log.map(function (l, i) {
       var ifCls = l[1] === 'note' ? 'note' : l[1];
-      var ifTxt = { uu: 'Uu', xn: 'Xn-C', ng: 'NG-C', sctp: 'SCTP', note: '注记' }[l[1]];
+      var ifTxt = { uu: 'Uu', xn: 'Xn-C', ng: 'NG-C', sctp: 'SCTP', nas: 'NAS', note: '注记' }[l[1]];
       return '<div class="ld-row' + (l[1] === 'note' ? ' note' : '') + '" data-i="' + i + '">' +
         '<span class="ld-ts">' + esc(l[0]) + '</span>' +
         '<span class="ld-if ' + ifCls + '">' + ifTxt + '</span>' +
