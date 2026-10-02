@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全站搜索 — RRC 讲解器</title>
+<meta name="description" content="一站搜全部课程与帧、词典词条、定时器卡、UE 变量、日志案卷：输入关键词即时过滤，点击直达对应课程帧或组件卡。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+.sr-grp{margin-top:18px}
+.sr-card{display:block;background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:12px 16px;margin-bottom:8px;text-decoration:none;color:var(--tx1)}
+.sr-card:hover{border-color:var(--accent)}
+.sr-t{font:700 15px var(--sans)}
+.sr-card mark{background:rgba(24,163,74,.25);color:inherit;border-radius:3px;padding:0 1px}
+.sr-s{font:600 12px var(--sans);color:var(--accent-deep);margin-top:2px}
+.sr-b{font:400 12.5px var(--sans);color:var(--tx3);margin-top:4px}
+.sr-empty{text-align:center;padding:40px 0;color:var(--tx3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <a class="brand" href="index.html">
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 15 L7.5 15 L10 8 L13 18 L15.5 12 L17.5 15 L21 15" stroke="#18A34A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="15" r="1.6" fill="#18A34A"/></svg>
+    RRC 讲解器
+  </a>
+  <nav class="topnav">
+    <a class="navlink" href="index.html">目录</a>
+    <a class="navlink" href="app.html">课程</a>
+    <a class="navlink" href="interview.html">面试</a>
+    <a class="navlink" href="dict.html">词典</a>
+    <a class="navlink" href="anim.html">动画</a>
+    <a class="navlink" href="timer-net.html">定时器网</a>
+    <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink" href="log-detective.html">日志侦探</a>
+    <a class="navlink on" href="search.html">搜索</a>
+  </nav>
+</header>
+
+<section class="hero" style="padding-top:26px;max-width:760px">
+  <h1 style="font-size:25px">全站搜索</h1>
+  <p class="sub">一站搜全部课程与帧、词典词条、定时器卡、UE 变量、日志案卷——<b id="sr-count">…</b>。输入关键词即时过滤；结果可分享：<span class="mono">search.html?q=关键词</span>。</p>
+</section>
+
+<div class="hub-tools" style="margin-top:18px">
+  <div class="filter"><input id="sr-q" placeholder="搜课程 / 帧 / 信元 / 定时器 / 变量（如：T310、切换、KAMF、重选）…" autofocus></div>
+</div>
+<div id="sr-list"></div>
+
+<footer>
+  <div class="flinks"><a href="index.html">目录</a><a href="app.html">课程</a><a href="interview.html">面试模式</a></div>
+  <div><b>零依赖纪律：</b>索引为构建期生成（tools/gen_search_index.py），纯本地过滤，无任何服务端与追踪。</div>
+</footer>
+</div>
+
+<script src="assets/content/search-index.js"></script>
+<script>
+(function () {
+  var DATA = window.RRC_SEARCH || { items: [] };
+  document.getElementById('sr-count').textContent = '共 ' + DATA.items.length + ' 个可搜条目';
+  var list = document.getElementById('sr-list');
+  var inp = document.getElementById('sr-q');
+  var KIND_ORDER = ['课程', '课程帧', '词典', '定时器', '变量', '案卷'];
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function hl(s, kw) {
+    var e = esc(s);
+    if (!kw) return e;
+    var i = e.toLowerCase().indexOf(kw.toLowerCase());
+    if (i < 0) return e;
+    return e.slice(0, i) + '<mark>' + e.slice(i, i + kw.length) + '</mark>' + e.slice(i + kw.length);
+  }
+  function search(q) {
+    var kw = q.trim().toLowerCase();
+    if (!kw) return [];
+    return DATA.items.filter(function (it) {
+      return (it.t + ' ' + it.s + ' ' + (it.b || '')).toLowerCase().indexOf(kw) >= 0;
+    }).slice(0, 120);
+  }
+  function render() {
+    var q = inp.value;
+    var hits = search(q);
+    if (!q.trim()) { list.innerHTML = '<p class="sr-empty">输入关键词开始——试试 T310、切换、KAMF、重选、N2。</p>'; return; }
+    if (!hits.length) { list.innerHTML = '<p class="sr-empty">没有匹配条目——换个更短的关键词试试。</p>'; return; }
+    var by = {};
+    hits.forEach(function (it) { (by[it.k] = by[it.k] || []).push(it); });
+    var html = '';
+    KIND_ORDER.forEach(function (k) {
+      var arr = by[k];
+      if (!arr) return;
+      html += '<div class="sr-grp"><div class="dict-grp"><div class="ghead" style="cursor:default"><div class="gtxt"><div class="gname">' + k + '</div></div><span class="gcount">' + arr.length + ' 条</span></div><div class="gbody">' +
+        arr.map(function (it) {
+          return '<a class="sr-card" href="' + it.u + '">' +
+            '<div class="sr-t">' + hl(it.t, q) + '</div>' +
+            '<div class="sr-s">' + hl(it.s, q) + '</div>' +
+            (it.b ? '<div class="sr-b">' + hl(it.b, q) + '</div>' : '') +
+            '</a>';
+        }).join('') + '</div></div></div>';
+    });
+    list.innerHTML = html + (hits.length >= 120 ? '<p class="sr-empty">只显示前 120 条——请再加关键词收窄。</p>' : '');
+  }
+  inp.oninput = render;
+  /* ?q= 深链与 hash 双支持 */
+  function fromUrl() {
+    var m = location.search.match(/[?&]q=([^&]*)/) || location.hash.match(/^#q=(.*)$/);
+    if (m) { inp.value = decodeURIComponent(m[1]).replace(/\+/g, ' '); }
+    render();
+  }
+  window.addEventListener('hashchange', fromUrl);
+  fromUrl();
+})();
+</script>
+</body>
+</html>

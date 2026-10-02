@@ -391,6 +391,7 @@ section.quiz{margin-top:26px}
 .btn.primary{background:var(--accent);border-color:var(--accent-deep);color:#FFFFFF}
 .btn.primary:hover{background:var(--accent-deep)}
 .btn.sm{padding:5px 12px;font-size:12.5px;border-radius:10px}
+.btn.accent{background:var(--accent-bg);border-color:var(--accent);color:var(--accent-deep)}
 .progressbar{height:10px;border-radius:5px;background:var(--bd);overflow:hidden;margin-top:8px}
 .progressbar i{display:block;height:100%;background:var(--accent);border-radius:5px;transition:width .4s}
 .license-card{margin-top:18px;background:var(--panel);border:1px solid var(--bd);border-radius:16px;

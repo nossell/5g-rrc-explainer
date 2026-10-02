@@ -380,6 +380,19 @@
     { k: 'kgnb', term: 'K_gNB（gNB 级密钥）', spec: 'TS 33.501',
       brief: 'AS 安全的母钥匙：从 KAMF 推衍（初始或经 NH 链），下挂 KRRC/KUP 四把叶钥匙。',
       full: '§6.2.1 的层级中枢：AMF 与 UE 从 KAMF 推衍 K_gNB（初始推衍或经 {NH,NCC} 垂直推衍，§6.9.2），K_gNB 再派生 KRRCint/KRRCenc/KUPint/KUPenc——**每 AS 上下文一把，DRB 靠 BEARER 输入区分**，不是每 DRB 一把。切换时按 NCC 换代：水平推衍（源 gNB 直推）不换根，垂直推衍（经 AMF 的 NH）逐级提升密钥分离度。K_gNB 回 IDLE/INACTIVE 挂起时妥善处置，回 IDLE 即弃。',
-      refs: ['33.501#6.2.1'], seeAlso: ['masterKeyUpdate', 'nextHopChainingCount'] }
+      refs: ['33.501#6.2.1'], seeAlso: ['masterKeyUpdate', 'nextHopChainingCount'] },
+    /* ---------- 日志侦探案卷 006-008 配套（2026-10-02 · 24.501 注册/会话拒绝面） ---------- */
+    { k: 't3502', term: 'T3502（PLMN 级注册冷静期）', spec: 'TS 24.501',
+      brief: '注册尝试计数器爬满 5 之后的全局冷静——运行期本 PLMN 禁止再发起注册。',
+      full: '注册失败三层退避的最外层：T3510 守卫单次等待、T3511 有限重试（注册尝试计数器 <5，到点自动重试）；计数器爬到 5 时 UE 删除 TAI 清单并启动 T3502（§5.5.1.2.7），此后本 PLMN 不得再发起注册，只剩转 4G 或换 PLMN 两条路。T3502 值可由网络在 REGISTRATION ACCEPT/REJECT 中下发（REJECT 版须完整性保护才采信），无存值/网络声明停用/换入非等效 PLMN 等情形用默认值（§5.3.8）。与 RRC 侧 T302 冷静期同构——"节流下沉进信令"的设计在 AS/NAS 两层各演一遍。',
+      refs: ['24.501#5.3.8', '24.501#5.5.1.2.7'], seeAlso: ['t3519'] },
+    { k: 't3519', term: 'T3519（SUCI 复用定时器）', spec: 'TS 24.501',
+      brief: '重试期间不许换"加密名片"：SUCI 首次上送即存档，T3519 运行期必须复用同一枚。',
+      full: 'UE 把 SUCI（隐私保护加密后的订阅永久标识）放进 REGISTRATION REQUEST、或应 IDENTITY REQUEST 交出时，若 T3519 未运行则存档该值并启动定时器（§5.5.1.2/§5.4.3.3）；T3519 运行期间的后续尝试必须携带同一 SUCI，而不是按 33.501 每次现抽新密文——否则网络侧无法把多次尝试关联到同一签约，身份解析永远从头再来。收到带新 5G-GUTI 的消息时停 T3519 并删除存档：身份已落地，名片使命完成。注册风暴排障里"每轮换 SUCI"的异常日志，先查终端对这条的实现。',
+      refs: ['24.501#5.4.3.3', '24.501#5.5.1.2'], seeAlso: ['t3502', 'ngksi'] },
+    { k: 'pti', term: 'PTI（Procedure Transaction Identity，过程事务标识）', spec: 'TS 24.501 / 24.007',
+      brief: '5GSM 一问一答的流水号：请求方定号、应答回填同号——对不上就吃 #47/#81 罚单。',
+      full: '每笔 UE 请求的 5GSM 事务（建立/修改/释放）带一个 PTI，ACCEPT/REJECT/COMPLETE 回填同一号完成配对；流程结束即释放、但不立即复用（24.007 事务模型）。网络主动下发命令（如 SMF 发起的修改/释放）时命令带"no procedure transaction identity assigned"。**纪律在 §7.3.1 双向清单**：收端收到 COMPLETE/COMMAND REJECT 带不匹配的 PTI → 回 5GSM STATUS #47 "PTI mismatch"；REQUEST 带未指派 PTI → #81 "invalid PTI value"；保留值直接忽略。PTI 是流水号不是身份号——测试脚本复用旧 PTI 是制造罚单的最快方式。',
+      refs: ['24.501#7.3.1'], seeAlso: ['ngksi'] }
   ]);
 })(typeof window !== 'undefined' ? window : globalThis);

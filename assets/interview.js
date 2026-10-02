@@ -74,12 +74,20 @@
     };
   }
 
-  /* ---------- 错题本存取（本机 localStorage，独立于 Store 进度） ---------- */
+  /* ---------- 错题本存取（本机 localStorage，独立于 Store 进度） ----------
+     行结构 {qid, mod, pick, ts} + SM-2 轻量排期字段（v2 起可选）：
+     iv=当前间隔（天，1→2→4→8，16 毕业出本）、due=下次复习时间戳。
+     旧数据无 due 视为立即到期（迁移兼容）。 */
+  var DAY = 86400000;
   function loadMisses() {
     try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch (e) { return []; }
   }
   function saveMisses(list) {
     try { localStorage.setItem(LS_KEY, JSON.stringify(list.slice(0, 200))); } catch (e) {}
+  }
+  function dueRows() {
+    var now = Date.now();
+    return loadMisses().filter(function (r) { return (r.due || 0) <= now; });
   }
 
   /* ---------- 挂载 ---------- */
@@ -117,6 +125,7 @@
         if (p.some(function (q) { return q.domain === grp.short; })) domains.push(grp.short);
       });
       var missN = loadMisses().length;
+      var dueN = dueRows().length;
       var w = el('div', 'iv-config');
       var scope = el('select', 'iv-scope');
       scope.innerHTML = '<option value="all">全部学习域</option>' +
@@ -136,12 +145,17 @@
       var meta = el('p', 'iv-meta',
         '题库共 <b>' + pool(Object.assign({}, store, { license: function () { return { demo: true }; } })).length + '</b> 题' +
         '（当前可用 <b>' + p.length + '</b> 题' + (demo ? '' : '——演示解锁后全部开放') + '）' +
-        (missN ? ' · 错题本留存 <b>' + missN + '</b> 题' : '') +
-        '。随机抽题、选项洗牌，答完即出解析与条款出处。');
+        (missN ? ' · 错题本留存 <b>' + missN + '</b> 题' + (dueN ? '（<b>' + dueN + '</b> 题今日到期）' : '（今日无到期）') : '') +
+        '。随机抽题、选项洗牌，答完即出解析与条款出处；错题按间隔复习（1→2→4→8 天，连对三轮出本）。');
       var actions = el('div', 'iv-actions');
       var go = el('button', 'btn primary', '开始面试');
       go.onclick = function () { start(); };
       actions.appendChild(go);
+      if (dueN) {
+        var rv = el('button', 'btn accent', '今日复习（' + dueN + ' 题到期）');
+        rv.onclick = function () { startDue(); };
+        actions.appendChild(rv);
+      }
       if (!demo) {
         var ub = el('button', 'btn', '演示解锁全部');
         ub.onclick = function () { store.setLicense({ demo: true }); render(); };
@@ -171,6 +185,18 @@
         var cand = cfg.domain === 'all' ? p : p.filter(function (q) { return q.domain === cfg.domain; });
         exam = buildExam(shuffled(cand, rnd).slice(0, cfg.count));
       }
+      /* 到期复习共用同一开考路径：review 模式由 startDue 先改 exam 再落到这里 */
+      view = 'exam';
+      render();
+    }
+    /* 今日复习：只抽到期错题（SM-2），按 due 升序，上限 20 */
+    function startDue() {
+      var p = pool(store);
+      var qs = dueRows().sort(function (a, b) { return (a.due || 0) - (b.due || 0); })
+        .map(function (r) { return p.filter(function (q) { return q.qid === r.qid; })[0]; })
+        .filter(Boolean).slice(0, 20);
+      if (!qs.length) { renderConfig(); return; }
+      exam = buildExam(qs);
       view = 'exam';
       render();
     }
@@ -262,18 +288,20 @@
       render();
     }
 
-    /* ---- 判分与错题落账 ---- */
+    /* ---- 判分与错题落账（SM-2 轻量：答对升间隔，≥16 天毕业出本；答错回到今日） ---- */
     function recordMisses() {
       var miss = loadMisses();
       exam.qs.forEach(function (x) {
         var right = x.pick === x.q.correct;
+        var i = miss.findIndex(function (r) { return r.qid === x.q.qid; });
         if (right) {
-          /* 练对旧错题 → 出本 */
-          var j = miss.findIndex(function (r) { return r.qid === x.q.qid; });
-          if (j >= 0) miss.splice(j, 1);
+          if (i < 0) return;
+          var iv = (miss[i].iv || 0) ? Math.min(miss[i].iv * 2, 32) : 1;
+          if (iv >= 16) { miss.splice(i, 1); return; } /* 连对三轮，毕业 */
+          miss[i].iv = iv;
+          miss[i].due = Date.now() + iv * DAY;
         } else {
-          var i = miss.findIndex(function (r) { return r.qid === x.q.qid; });
-          var row = { qid: x.q.qid, mod: x.q.mod, pick: x.pick == null ? -1 : x.pick, ts: Date.now() };
+          var row = { qid: x.q.qid, mod: x.q.mod, pick: x.pick == null ? -1 : x.pick, ts: Date.now(), iv: 0, due: Date.now() };
           if (i >= 0) miss[i] = row; else miss.unshift(row);
         }
       });
@@ -338,9 +366,15 @@
         w.appendChild(go);
         return w;
       }
-      w.appendChild(el('p', 'iv-meta', '留存 <b>' + rows.length + '</b> 题（重练答对自动出本）。'));
+      var dueN = dueRows().length;
+      w.appendChild(el('p', 'iv-meta', '留存 <b>' + rows.length + '</b> 题' + (dueN ? '（<b>' + dueN + '</b> 题今日到期）' : '（今日无到期，间隔复习中）') + '。答对升间隔（1→2→4→8 天），连对三轮自动出本。'));
       rows.slice(0, 50).forEach(function (r) {
         var q = p.filter(function (x) { return x.qid === r.qid; })[0];
+        var dueTag = '';
+        if (r.due) {
+          var dd = Math.ceil((r.due - Date.now()) / DAY);
+          dueTag = dd <= 0 ? ' <span class="badge">今日到期</span>' : ' <span class="badge">' + dd + ' 天后复习</span>';
+        }
         var row = el('div', 'iv-wrong');
         if (!q) {
           row.innerHTML = '<div class="ivw-q">[' + esc(r.mod) + '] 题目暂不可用（模块未加载或未解锁）</div>';
@@ -348,7 +382,7 @@
           row.innerHTML = '<div class="ivw-q">' + mdBold(q.q) + '</div>' +
             '<div class="ivw-a">上次答：' + (r.pick < 0 ? '<b class="bad">未作答</b>' : '<b class="bad">' + String.fromCharCode(65 + r.pick) + '</b>') +
             '　正确：<b class="good">' + String.fromCharCode(65 + q.correct) + ' · ' + esc(q.options[q.correct]) + '</b>' +
-            '　<span class="badge">' + esc(q.domain) + '</span> <span class="ref-badge">§' + esc(q.ref || '') + '</span></div>' +
+            '　<span class="badge">' + esc(q.domain) + '</span> <span class="ref-badge">§' + esc(q.ref || '') + '</span>' + dueTag + '</div>' +
             '<div class="ivw-foot"><a class="wb-link" href="app.html#' + esc(q.mod) + '">去重学 →</a></div>';
         }
         w.appendChild(row);
@@ -357,6 +391,11 @@
       var rp = el('button', 'btn primary', '重练错题（最多 20 题）');
       rp.onclick = function () { start(true); };
       actions.appendChild(rp);
+      if (dueN) {
+        var rv = el('button', 'btn accent', '今日复习（' + dueN + ' 题）');
+        rv.onclick = function () { startDue(); };
+        actions.appendChild(rv);
+      }
       var clr = el('button', 'btn', '清空错题本');
       clr.onclick = function () { saveMisses([]); render(); };
       actions.appendChild(clr);
@@ -387,6 +426,8 @@
       next: function () { next(); },
       finish: function () { finish(false); },
       practiceMisses: function () { start(true); },
+      startReview: function () { startDue(); },
+      reviewDue: function () { return dueRows().length; },
       showWrongbook: function () { setTab('misses'); },
       misses: function () { return loadMisses(); },
       state: function () {

@@ -68,12 +68,13 @@
     <a class="navlink" href="timer-net.html">定时器网</a>
     <a class="navlink" href="variables-map.html">变量地图</a>
     <a class="navlink on" href="log-detective.html">日志侦探</a>
+    <a class="navlink" href="search.html">搜索</a>
   </nav>
   </header>
   <section class="ld-hero">
     <h1>信令日志侦探——把课程知识变成查错能力</h1>
     <p class="sub">网优/测试岗的日常：面对一屏日志，第一眼要看出<b>这是哪条流程的第几步、顺不顺、卡在哪</b>。下面是若干份<b>完全合成的脱敏案卷</b>，给你的任务：逐行标注它属于哪个故事段。选完交卷，逐行判分并给出正解推理。</p>
-    <div class="ld-meta"><span>五案卷 · 共 86 行 · 五路来源（Uu / Xn-C / NG-C / SCTP / NAS）</span><span>合成数据 · 与任何真实网络无关</span></div>
+    <div class="ld-meta"><span>八案卷 · 共 134 行 · 五路来源（Uu / Xn-C / NG-C / SCTP / NAS）</span><span>合成数据 · 与任何真实网络无关</span></div>
   </section>
 
   <div class="ld-tabs" id="ld-tabs"></div>
@@ -313,6 +314,126 @@
          '漫游态纪律：驻留 VPLMN 正常时周期搜更高优先级 PLMN，minoffset 还会抬门槛——搜网也有节流阀。460-00 是 09:12 手动选中的非本机归属 PLMN，故此刻算 VPLMN 驻留（mys3 注脚③）。'],
         ['09:40:12.100', 'uu', 'UE—', 'NO BETTER PLMN', '维持现驻 · 回省电态', 'report',
          '本轮搜索无更高优先级 PLMN——按协议最低性能节奏收工，继续省电睡觉（mym2 测量分层）。']
+      ]
+    },
+    {
+      id: 'c006', title: '案卷 006 · 注册被拒的一夜', sub: '身份识别 → 双重闭门羹 → 三层退避 → 换卡收工',
+      brief: '<b>案情</b>：深夜 23:40，UE 开关飞行模式回归归属网——AMF 取不回旧安全上下文，先要了枚 SUCI 仍以 #9 拒之门外；重试又撞上 #22 拥塞（T3346 冷静期）；注册尝试计数器爬满 5，T3502 全局冷静到天亮，用户换卡换 PLMN 才一次落户。<b>考点</b>：注册失败不是一个点，是"cause 决定去向"的分诊台——分得清 T3346/T3511/T3502 三层节奏，才读得懂这一夜（完全合成案卷：时间戳/身份/参数均为虚构）。',
+      cats: { story: '深夜回归', auth: '身份识别', rej: '闭门羹与退避', retry: '节流与再试', ok: '天亮收工' },
+      catCourse: { story: 'mn 课 nad3（initial/mobility/periodic 对照表）', auth: 'mn 课 nan1（SUCI/5G-GUTI 身份链）', rej: 'mn 失败幕 reg-reject + mns 课 nmH2/nmH4（拥塞桶/身份桶）', retry: 'mn 失败幕 t3510-expired（T3511→T3502 三层退避）+ 定时器网', ok: 'mn 课 nan4/nan5（ACCEPT 三件套与 48bit 合龙）' },
+      log: [
+        ['23:40:12.310', 'nas', 'UE→AMF', 'REGISTRATION REQUEST', 'mobility registration updating · 5G-GUTI+ngKSI', 'story',
+         '深夜回归第一句：报旧名片请求续住——mobility 更新与 initial 注册共用一条消息，差别在注册类型 IE（mn 课 nad3 对照表）。'],
+        ['23:40:12.900', 'nas', 'AMF→UE', 'IDENTITY REQUEST', 'Type=SUCI（旧上下文取不回）', 'auth',
+         'AMF 检索不到 ngKSI/5G-GUTI 指示的旧安全上下文——先做身份识别，要一枚加密名片（§5.5.1.3.2 b 项；mn 课 nan1 身份链）。'],
+        ['23:40:13.100', 'nas', 'UE→AMF', 'IDENTITY RESPONSE', 'SUCI · 存档 + T3519 起跑', 'auth',
+         'SUCI 首次上送即存档并启动 T3519——此后重试必须复用同一枚，不许现抽新号（t3519 词条；§5.4.3.3）。'],
+        ['23:40:13.800', 'nas', 'AMF→UE', 'REGISTRATION REJECT', 'cause #9 "UE identity cannot be derived by the network"', 'rej',
+         '第一碗闭门羹最冤：SUCI 交了，网络侧身份解析仍未落地——识别流程走完仍无法处理，按条款回 #9（§5.5.1.3.2 c 项；mns 课 nmH4 身份桶）。'],
+        ['23:40:13.820', 'note', '—', '（UE 侧分诊）', '计数器=1 · T3511 起跑', 'retry',
+         '#9 按"其他 cause"的通用节奏处理：注册尝试计数器 +1、T3511 起跑，到点自动重试——有限重试层开转（§5.5.1.2.7；mn 失败幕 t3510-expired）。'],
+        ['23:44:02.400', 'nas', 'UE→AMF', 'REGISTRATION REQUEST', '（T3511 到期重试）· 复用同一 SUCI', 'retry',
+         '注意 T3519 的纪律：重试请求里还是那枚存档的 SUCI——每轮换新加密身份会让网络侧彻底对不上账（t3519 词条）。'],
+        ['23:44:03.100', 'nas', 'AMF→UE', 'REGISTRATION REJECT', 'cause #22 "Congestion" · T3346 值', 'rej',
+         '第二碗闭门羹是"满员谢客"：拥塞拒绝按条款必须配 T3346 退避值——不是不收，是稍后再来（§5.5.1.2.5 #22 条；mns 课 nmH2 拥塞桶）。'],
+        ['23:44:03.120', 'note', '—', '（UE 侧分诊）', '停 T3510 · T3346 拥塞冷静期', 'rej',
+         '拒绝的读法看 cause：#22 属拥塞桶——等网络给的退避表，冷静期内不发起注册（紧急呼叫等高优先除外）（mns 课 nmH2；mn 失败幕 reg-reject）。'],
+        ['23:59:03.000', 'note', '—', '（T3346 到期标记）', '拥塞冷静期满 · 允许再试', 'retry',
+         'NAS 版的 T302：定时器到点才能再敲——两层冷静期同时运行时，UE 的节奏由更长者约束（mns 课 nmH2 拥塞桶）。'],
+        ['23:59:03.150', 'nas', 'UE→AMF', 'REGISTRATION REQUEST', '（再试）· 仍是同一枚 SUCI', 'retry',
+         '第三次敲门：身份解析仍未恢复，但节奏没乱——T3511 计数层与 T3346 拥塞层交错运行，日志里要分清谁在计时（§5.5.1.2.7）。'],
+        ['23:59:04.000', 'nas', 'AMF→UE', 'REGISTRATION REJECT', 'cause #9（解析仍未恢复）', 'rej',
+         '老毛病复发：还是身份关——计数器再度 +1，两次 #9 一轮 #22，夜还很长（§5.5.1.3.2；mns 课 nmH4）。'],
+        ['00:12:30.000', 'note', '—', '（第 3-5 次尝试 · 同因被拒）', '计数器爬到 5 · 删 TAI 清单', 'retry',
+         '连续失败不是日志噪声：计数器每轮 +1，爬到 5 触发升级——删 TAI 清单与最近访问 TAI，为全局冷静做准备（§5.5.1.2.7）。'],
+        ['00:12:30.100', 'note', '—', '（T3502 起跑标记）', 'PLMN 级全局冷静 · 值随 REJECT/ACCEPT 或默认', 'retry',
+         '最后一层：T3502 运行期本 PLMN 禁止再注册——只剩转 4G 或换 PLMN 两条路（t3502 词条；§5.3.8）。'],
+        ['05:30:02.110', 'nas', 'UE→AMF', 'REGISTRATION REQUEST', 'initial · 换卡后新 PLMN · 新 SUCI 存档', 'ok',
+         '天亮换卡：新 USIM/新归属 PLMN——T3502 只封旧地界，新 PLMN 按默认值重开账户，T3519 以新 SUCI 重新存档（§5.3.8 c 项）。'],
+        ['05:30:04.760', 'nas', 'AMF→UE', 'REGISTRATION ACCEPT', '5G-GUTI · [T3512·T3502 值] · allowed NSSAI', 'ok',
+         '落户三件套到账：新 5G-GUTI + 周期签到与冷静期参数 + 切片配额——attempt 计数清零，T3511/T3502 停表（mn 课 nan4/nan5）。'],
+        ['05:30:04.880', 'nas', 'UE→AMF', 'REGISTRATION COMPLETE', '（落户签收）', 'ok',
+         '最后一签：5GMM 进 REGISTERED——与开头 23:40 的 REQUEST 首尾呼应，一夜闭门羹故事收口（mn 课 nan4）。']
+      ]
+    },
+    {
+      id: 'c007', title: '案卷 007 · 会话开不起来', sub: 'ESTABLISHMENT REQUEST → cause 桶退单 → PTI 罚单 → 改单重建',
+      brief: '<b>案情</b>：上午 10 点，UE 连开三次 PDU 会话都没开起来——第一次 DNN 拼错被 #27 退单，第二次切片没过准入被 #69 配了退避，第三次复用了悬挂事务的旧 PTI 换来 #81 罚单；全部修正后一次建成。<b>考点</b>：5GSM 拒绝面的三读法——读 cause 编号、读 Back-off timer、读 PTI 对账；三张单据分不清，排障就是瞎猜（完全合成案卷：时间戳/DNN/切片均为虚构）。',
+      cats: { req: '开播申请', rej: '拒绝面 cause 桶', pti: 'PTI 对不上账', ok: '改单重建' },
+      catCourse: { req: 'mm 课 mm0/mms1/mms2（两根轴与 REQUEST 门票）', rej: 'mm 课 mmh1/mmh2/mmh3（cause 三大家族/退避时钟/翻车现场）', pti: 'mm 课 mmm4/mme2 + pti-mismatch 深潜（§7.3.1 双向清单）', ok: 'mm 课 mms3/mms4（N2 快车与 ACCEPT 三件套）+ mg 课 success 幕' },
+      log: [
+        ['10:02:11.400', 'uu', 'UE→gNB', 'ULInformationTransfer', '（NAS 专车皮：会话开播申请）', 'req',
+         '三层接力再走一遍：5GSM 消息全程搭 RRC 的车——这条消息几乎只剩 dedicatedNAS-Message 一个字段（attach 课第 ⑨ 步同款；mm 课 mm0 开场）。'],
+        ['10:02:11.420', 'nas', 'UE→AMF', 'PDU SESSION ESTABLISHMENT REQUEST', 'PTI=5 · DNN=ms.example（拼错）· S-NSSAI=1-0000A', 'req',
+         '开播申请：事务号 PTI=5 + 单据三要素（DNN/切片/类型）——发送即启动守卫定时器 T3580（mm 课 mms1）。'],
+        ['10:02:12.950', 'nas', 'AMF→UE', 'PDU SESSION ESTABLISHMENT REJECT', 'cause #27 "missing or unknown DNN"', 'rej',
+         '第一碗闭门羹：SMF 查无此 DNN——UE 可以不带 DNN（网络按签约默认兜底），所以 #27 基本等于"带了但拼错"（mm 课 mmh3；dnn-mismatch 深潜）。'],
+        ['10:02:12.970', 'note', '—', '（UE 侧分诊）', '停 T3580 · PTI=5 归还 · 会话未建立', 'rej',
+         'REJECT 的标准动作：守卫定时器停表、事务号归还、状态回零——#27 可随信带 Back-off timer 值，期间同 DNN 不得再试（mm 课 mmh1）。'],
+        ['10:05:40.200', 'nas', 'UE→AMF', 'PDU SESSION ESTABLISHMENT REQUEST', 'PTI=6 · DNN 改对 · S-NSSAI=9-0000B（未签约）', 'req',
+         '改单再试：DNN 拼写修正，切片却选了个 allowed NSSAI 之外的自选档——UE 侧事前禁令没拦住（mm 课 mmh3 现场还原）。'],
+        ['10:05:41.760', 'nas', 'AMF→UE', 'PDU SESSION ESTABLISHMENT REJECT', 'cause #69 "insufficient resources for specific slice" · Back-off timer 值', 'rej',
+         '第二碗闭门羹：切片没过准入——#69 必带 Back-off timer 值（T3584 类组合退避），期间同 [DNN,S-NSSAI] 不得再发建立/修改（mm 课 mmh2）。'],
+        ['10:05:41.780', 'note', '—', '（UE 侧分诊）', '停 T3580 · 退避表挂账 [9-0000B]', 'rej',
+         '与 #27 的区别在读退避粒度：#27 挂 DNN 的账、#69 挂切片组合的账——换 PLMN/接入不停表（§6.4.1.4.3 NOTE；mm 课 mmh5 总表）。'],
+        ['10:07:02.300', 'nas', 'UE→AMF', 'PDU SESSION ESTABLISHMENT REQUEST', 'PTI=6（复用已结案的事务号！）· 参数全对', 'pti',
+         '第三摔最冤：栈里重试逻辑复用了悬挂事务的 PTI——上一笔早已结案归还，此刻它在网络侧是"未指派值"（mm 课 mmm4 PTI 规矩）。'],
+        ['10:07:02.520', 'nas', 'AMF→UE', '5GSM STATUS', 'cause #81 "invalid PTI value"', 'pti',
+         '§7.3.1 现场执法：REQUEST 带未指派 PTI → 网络回 STATUS #81——STATUS 是 5GSM 的万能纠错单（pti 词条；pti-mismatch 深潜）。'],
+        ['10:07:02.540', 'note', '—', '（双向对照）', '反向同理：COMMAND 带不匹配的已指派 PTI → UE 回 #47', 'pti',
+         'PTI 纪律双向：UE 收到带"不在用"PTI 的 COMMAND，回 STATUS #47 "PTI mismatch"（除非识别为网络重传）——双向清单值得背（mm 课 mme2）。'],
+        ['10:09:15.100', 'nas', 'UE→AMF', 'PDU SESSION ESTABLISHMENT REQUEST', 'PTI=7（新号）· DNN/S-NSSAI 均按签约', 'ok',
+         '第三次下单全对：全新 PTI + 签约内的 DNN 与切片——每笔新事务都从新 PTI 起号，复用旧号就是 #47/#81 罚单的来源（pti 词条）。'],
+        ['10:09:16.400', 'ng', 'AMF→gNB', 'PDU SESSION RESOURCE SETUP REQUEST', '会话清单 · 二级信封（Transfer IE）', 'ok',
+         '网络侧 19 步开场：AMF 把工单下发 gNB——二级信封里是 gNB↔UPF 的传输配置，核心网只当邮差不拆（mm 课 mms3；mng 课 nge1）。'],
+        ['10:09:17.010', 'ng', 'gNB→AMF', 'PDU SESSION RESOURCE SETUP RESPONSE', '成功/拒绝双清单 · N3 下行端点到位', 'ok',
+         '无线侧施工交卷：双清单验收——N3 端点就位，UPF 的 PDR/FAR 认包有了靶子（mng 课 nge3）。'],
+        ['10:09:17.300', 'nas', 'AMF→UE', 'PDU SESSION ESTABLISHMENT ACCEPT', 'QoS 规则集 · 会话级 AMBR · PTI=7 配对', 'ok',
+         '验收三件套到账：QoS 规则（含 default 兜底）+会话闸门+与请求配对的 PTI=7——UE 逐条自检，规则有错可整单退回（mm 课 mms4）。'],
+        ['10:09:17.420', 'nas', 'UE→AMF', 'PDU SESSION ESTABLISHMENT COMPLETE', '（签收）· PTI=7 对上账', 'ok',
+         '一问一答闭环：COMPLETE 用同一 PTI 签收——两拒一罚之后会话终于开起来，"cause→退避→PTI"排障链走完（mm 课 mms4/mms6）。'],
+        ['10:09:40.000', 'note', '—', '（网管注记）', '#27/#69 拒绝分布 · 退避命中率 · #81 应为罕见', 'ok',
+         '闭环：拒绝面排障总表三列——cause 分布指向签约/配置，#81 高频则八成是终端协议栈 bug（mm 课 mmh5 总表）。']
+      ]
+    },
+    {
+      id: 'c008', title: '案卷 008 · 数据前转去哪了', sub: 'NG 切换的转发隧道 → End marker 封条 → 失序悬案 → 恢复',
+      brief: '<b>案情</b>：14:20 一场 N2 路切换执行完毕，UPF 侧却抬起了上行失序告警——Direct 前转没配？Indirect 隧道断了？还是锚点改道时序没对齐？三段排查逐环排除，最后在"End marker 迟到"上找到答案。<b>考点</b>：切换的"无缝"不靠 UE 感恩，靠控制面提前搭好的转发隧道+用户面封条接力——读得懂前转链路，才查得了丢序（完全合成案卷：时间戳/TEID/参数均为虚构）。',
+      cats: { trig: '判决与切换执行', fwd: '前转隧道搭建', probe: '失序排查', em: '封条接续', ok: '恢复与闭环' },
+      catCourse: { trig: 'mng 课 ngm1/ngm3/ngm4 + m4 课 NG 场景 m4n1-m4n7', fwd: 'mng 课 ngm2 + mg 课 mgh4（临时转发隧道）', probe: 'mg 课 mgh2（N3 改道与 end marker 场景）', em: 'mg 课 mgh2 + mp 课 COUNT（跨站接续）', ok: 'mng 课 ngh5/ngm6 + mx 课（Xn 路 PATH SWITCH 对照）' },
+      log: [
+        ['14:19:58.200', 'uu', 'UE→A', 'MeasurementReport', 'measId=1 · A3（邻区 B 优）', 'trig',
+         '判决起点：A3 报"隔壁更好"——但 A 与 B 没有 Xn 直连，只能走 N2 路（AMF 当调度），数据前转的伏笔由此埋下（m4 课选路逻辑；mng 课 ngm1）。'],
+        ['14:19:58.350', 'ng', 'A→AMF', 'HANDOVER REQUIRED', 'Target ID=B · PDU 会话清单', 'trig',
+         'NG 切换开工：源站向 AMF 请示搬家，交底要迁的会话清单——切换准备第 1 帧（mng 课 ngm1；m4 课 m4n1）。'],
+        ['14:19:59.100', 'ng', 'AMF→B', 'HANDOVER REQUEST', 'UE 上下文 · 前转询价（Data Forwarding Request IE）', 'fwd',
+         '目标站备座：请求里逐会话征询"收不收数据前转"——这就是 DL forwarding 的控制面入口（mng 课 ngm2；mg 课 mgh4）。'],
+        ['14:19:59.400', 'ng', 'B→AMF', 'HANDOVER REQUEST ACKNOWLEDGE', 'Data Forwarding Response IE · 转发隧道端点（TNL+TEID）', 'fwd',
+         '备座回执里最值钱的行：B 交出转发隧道端点——Indirect 前转的"收货门牌"在此诞生（mng 课 ngm2）。'],
+        ['14:19:59.800', 'ng', 'AMF→A', 'HANDOVER COMMAND', 'Target to Source 透明容器（HOCommand）', 'trig',
+         '搬家令下达：源站拆容器取出给 UE 的命令——此刻起源站可边发边转，用户面不因切换断流（mng 课 ngm3；m4 课 m4n3）。'],
+        ['14:20:00.500', 'uu', 'A→UE', 'RRCReconfiguration', 'reconfigurationWithSync · t304=ms1000', 'trig',
+         'UE 侧唯一的搬家动作：收命令→跳频点→发 Complete——三条切换路线里 UE 的戏份完全一样（m4 课）。'],
+        ['14:20:00.900', 'uu', 'UE→B', 'RRCReconfigurationComplete', '（新小区签收 · T304 停表）', 'trig',
+         '进门成功——但接缝三件事还悬着：在途包、转发隧道、锚点迁移，一个没对齐就是失序（mng 课 ngm4）。'],
+        ['14:20:01.200', 'ng', 'B→AMF', 'HANDOVER NOTIFY', '（UE 已到岗）', 'trig',
+         '到岗通知：目标站报告人已进区——核心网侧开始收尾：会话改道、旧站退场（mng 课 ngm4；mg 课 mgh5）。'],
+        ['14:20:02.000', 'note', '—', '（网管告警）', 'UPF 侧上行失序计数抬升 · 用户投诉卡顿', 'probe',
+         '悬案开场：切换完成≠无缝——失序说明"新旧两段数据的接缝"没对齐，三个怀疑点排着队查（mg 课 mgh2；mp 课 COUNT 坐标系）。'],
+        ['14:20:02.400', 'note', '—', '（排查一）', 'A↔B 直接前转路径不可用 → 走 Indirect', 'probe',
+         '第一怀疑点：Direct 前转要源目标之间有直连用户面路径——本例缺席，NGAP 的路径可用性位也如实上报（mng 课 ngm2；mg 课 mgh4）。'],
+        ['14:20:02.800', 'note', '—', '（排查二）', 'S-UPF↔T-UPF 转发隧道 N4 修改到位 · 绕行在流', 'probe',
+         '第二怀疑点：SMF 用 N4 修改让两台 UPF 互相认识、搭起临时转发隧道——"旧 gNB→旧 UPF→新 UPF→新 gNB"绕行确认在转（mg 课 mgh4）。'],
+        ['14:20:03.200', 'note', '—', '（排查三）', '锚点 UPF 未换 · 仅 N3 下行端点改道', 'probe',
+         '第三怀疑点定位：先分清"换锚点（重锚定，IP 保持逻辑变复杂）"与"端点改道（UPF 不变只换隧道口）"两档——本例是后者（mg 课 mgh2）。'],
+        ['14:20:03.500', 'note', '—', '（用户面插播）GTP-U END MARKER', '旧 N3 路径末班车 · 封条包', 'em',
+         '答案揭晓：锚点 UPF 在旧路发完最后一个包后补发 end marker——新 gNB 收到它才知道"旧路的包全到齐"，两段数据按序重排（mg 课 mgh2）。'],
+        ['14:20:03.700', 'note', '—', '（疑点闭环）', '告警窗口 = end marker 迟到段 · UL 侧 PDCP SN 接续正常', 'em',
+         '根因收口：DL 侧封条迟到，新站把新旧两段包交错处理造成失序；UL 侧靠 UE 的 COUNT 跨站不回绕接续，无恙（pdcp-count 词条；mp 课）。'],
+        ['14:20:05.100', 'ng', 'AMF→A', 'UE CONTEXT RELEASE COMMAND', 'Cause=成功切换 · 转发隧道随后 N4 拆除', 'ok',
+         '清算退场：旧站交还档案，临时转发隧道功成身退——脚手架只在施工期存在（mng 课 ngh5；mg 课 mgh5）。'],
+        ['14:21:30.000', 'note', '—', '（复盘注记）', 'Xn 路对照：PATH SWITCH 核心网只收尾不指挥', 'ok',
+         '方法论收口：读切换日志先判"哪条路"（Xn 直达/N2 绕 AMF），再查接缝三件套——转发隧道、end marker、锚点归属（mng 课 ngm5/ngm6；mx 课）。']
       ]
     }
   ];
