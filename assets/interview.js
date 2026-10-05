@@ -40,6 +40,81 @@
   }
   var LS_KEY = 'rrc.interview.misses';
 
+  /* ---------- 岗位模拟卷（卅六轮）：三套固定卷——seed 固定，同 key 每次同一套 ----------
+     求职场景要的是"我下周面网优岗，给我一套固定卷"，不是每次都变的随机抽。 */
+  var JOB_PAPERS = [
+    { key: 'opt', name: '无线网优岗', blurb: '空闲态/接入/切换/重建/寻呼与定时器网——RRC 主战场', domains: ['RRC 十课', '空口底层'], seed: 39 },
+    { key: 'core', name: '核心网岗', blurb: '注册/会话/切片/SBA/接口族台账', domains: ['NAS 与核心网', '接口与用户面'], seed: 40 },
+    { key: 'test', name: '协议测试岗', blurb: '一致性测试/卡与终端/安全与跨层排障', domains: ['测试与终端', '安全与对照'], seed: 41 }
+  ];
+  function jobPaper(key) {
+    return JOB_PAPERS.filter(function (p) { return p.key === key; })[0] || null;
+  }
+
+  /* ---------- 学习产物导出（卅六轮）：纯函数生成 Markdown，Blob 下载零依赖 ----------
+     buildMissMarkdown：错题本 → 面试弹药清单（题干/你的答案/正确答案/解析/条款锚/到期）
+     buildProgressMarkdown：41 模块完成态/测验分/下一步建议 */
+  function fmtDate(ts) {
+    var d = new Date(ts);
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  function buildMissMarkdown(rows, poolArr) {
+    var now = Date.now();
+    var dueN = rows.filter(function (r) { return (r.due || 0) <= now; }).length;
+    var L = ['# 错题本导出 · RRC 讲解器', '',
+      '- 导出时间：' + fmtDate(now),
+      '- 留存：' + rows.length + ' 题' + (dueN ? '（今日到期 ' + dueN + ' 题）' : '（今日无到期）'), ''];
+    rows.forEach(function (r, i) {
+      var q = (poolArr || []).filter(function (x) { return x.qid === r.qid; })[0];
+      if (!q) { L.push('## ' + (i + 1) + '. [缺失] ' + r.qid, ''); return; }
+      L.push('## ' + (i + 1) + '. ' + q.q.replace(/\*\*/g, ''), '',
+        '- 模块：M' + q.modNum + ' ' + q.mod + '（' + q.domain + ' · ' + q.type + '）',
+        '- 你的答案：' + (r.pick < 0 ? '未作答' : String.fromCharCode(65 + r.pick) + ' · ' + (q.options[r.pick] || '').replace(/\*\*/g, '')),
+        '- 正确答案：' + String.fromCharCode(65 + q.correct) + ' · ' + q.options[q.correct].replace(/\*\*/g, ''),
+        '- 解析：' + q.why.replace(/\*\*/g, ''),
+        '- 条款锚点：§' + (q.ref || '—'),
+        '- 复习：' + ((r.due || 0) <= now ? '**今日到期**' : fmtDate(r.due)) + '（间隔 iv=' + (r.iv || 0) + ' 天）', '');
+    });
+    L.push('---', '间隔复习规则：答对间隔翻倍（1→2→4→8 天），连对三轮自动出本。', '');
+    return L.join('\n');
+  }
+  function buildProgressMarkdown(store) {
+    var mods = R.order().map(function (id) { return R.get(id); });
+    var done = mods.filter(function (m) { var p = store.progress(m.id); return p && p.done; });
+    var quizOk = mods.filter(function (m) { var s = store.quizScore(m.id); return s && s.got === s.total; });
+    var nextUp = null;
+    for (var i = 0; i < mods.length; i++) {
+      var p = store.progress(mods[i].id);
+      if (!(p && p.done)) { nextUp = mods[i]; break; }
+    }
+    var L = ['# 学习进度导出 · RRC 讲解器', '',
+      '- 导出时间：' + fmtDate(Date.now()),
+      '- 授权：' + (store.license().demo ? '已解锁（演示）' : '未解锁（免费层）'),
+      '- 完课：' + done.length + ' / ' + mods.length + ' · 测验满分：' + quizOk.length + ' 门', ''];
+    L.push('| # | 模块 | 学完 | 测验 |');
+    L.push('| --- | --- | --- | --- |');
+    mods.forEach(function (m) {
+      var p = store.progress(m.id), s = store.quizScore(m.id);
+      L.push('| M' + m.num + ' | ' + m.title + ' | ' + (p && p.done ? '✓' : '—') + ' | ' + (s ? s.got + '/' + s.total : '未考') + ' |');
+    });
+    L.push('');
+    if (nextUp) {
+      L.push('## 下一步建议', '',
+        '按学习序，你的下一课是 **M' + nextUp.num + ' ' + nextUp.title + '**（app.html#' + nextUp.id + '）。',
+        nextUp.prereq && nextUp.prereq.length ? '前置：' + nextUp.prereq.map(function (id) { var m = R.get(id); return m ? 'M' + m.num + ' ' + m.title : id; }).join('、') + '。' : '', '');
+    } else {
+      L.push('## 下一步建议', '', '全部 ' + mods.length + ' 课学完——去面试页刷岗位模拟卷与错题复习，把知识变成 offer。', '');
+    }
+    return L.join('\n');
+  }
+  function downloadText(name, text) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+    a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 400);
+  }
+
   /* ---------- 题池 ---------- */
   /* 返回当前授权可访问的全部题目：{qid, mod, modNum, type, domain, q, options, correct, why, ref} */
   function pool(store) {
@@ -168,6 +243,16 @@
       w.appendChild(el('div', 'iv-row', '<span class="iv-cap">计时</span>'));
       w.appendChild(tgl);
       w.appendChild(meta);
+      /* 岗位快选：三张固定卷卡，点击直接开考（绕过域下拉） */
+      var jobRow = el('div', 'iv-job-row');
+      JOB_PAPERS.forEach(function (jp) {
+        var card = el('button', 'iv-job-card');
+        card.innerHTML = '<b>' + esc(jp.name) + '</b><span>' + esc(jp.blurb) + '</span><i>固定 12 题卷 · 点击即开考</i>';
+        card.onclick = function () { startJobPaper(jp.key); };
+        jobRow.appendChild(card);
+      });
+      w.appendChild(el('div', 'iv-row', '<span class="iv-cap">岗位快选</span>'));
+      w.appendChild(jobRow);
       w.appendChild(actions);
       return w;
     }
@@ -206,6 +291,17 @@
         return { q: q, options: so.options, correct: so.correct, pick: null };
       });
       return { qs: list, idx: 0, score: 0, endsAt: cfg.timer ? list.length * 60 : 0, tick: null, auto: false };
+    }
+    /* 岗位模拟卷：按卷 seed 固定抽 12 题——同 key 每次开出同一套卷（选项顺序也一致） */
+    function startJobPaper(key) {
+      var jp = jobPaper(key);
+      if (!jp) return;
+      var cand = pool(store).filter(function (q) { return jp.domains.indexOf(q.domain) >= 0; });
+      if (cand.length < 12) { renderConfig(); return; }
+      exam = buildExam(shuffled(cand, mulberry32(jp.seed)).slice(0, 12));
+      exam.paper = jp.name;
+      view = 'exam';
+      render();
     }
 
     /* ---- 考中 ---- */
@@ -399,6 +495,11 @@
       var clr = el('button', 'btn', '清空错题本');
       clr.onclick = function () { saveMisses([]); render(); };
       actions.appendChild(clr);
+      var ex = el('button', 'btn', '导出 Markdown');
+      ex.onclick = function () {
+        downloadText('rrc-错题本-' + fmtDate(Date.now()) + '.md', buildMissMarkdown(loadMisses(), p));
+      };
+      actions.appendChild(ex);
       w.appendChild(actions);
       return w;
     }
@@ -420,11 +521,15 @@
       current: function () {
         if (view !== 'exam' || !exam) return null;
         var cur = exam.qs[exam.idx];
-        return { qid: cur.q.qid, q: cur.q.q, options: cur.options, correct: cur.q.correct, pick: cur.pick, mod: cur.q.mod };
+        return { qid: cur.q.qid, q: cur.q.q, options: cur.options, correct: cur.q.correct, pick: cur.pick, mod: cur.q.mod, domain: cur.q.domain };
       },
       pick: function (i) { pick(i); render(); },
       next: function () { next(); },
       finish: function () { finish(false); },
+      startJobPaper: function (k) { startJobPaper(k); },
+      jobPapers: function () { return JOB_PAPERS; },
+      buildMissExport: function () { return buildMissMarkdown(loadMisses(), pool(store)); },
+      buildProgressExport: function () { return buildProgressMarkdown(store); },
       practiceMisses: function () { start(true); },
       startReview: function () { startDue(); },
       reviewDue: function () { return dueRows().length; },
@@ -437,5 +542,5 @@
     };
   }
 
-  R.Interview = { mount: mount, pool: pool };
+  R.Interview = { mount: mount, pool: pool, buildMissMarkdown: buildMissMarkdown, buildProgressMarkdown: buildProgressMarkdown };
 })(typeof window !== 'undefined' ? window : globalThis);

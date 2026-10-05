@@ -179,6 +179,10 @@
       controls.appendChild(branchCtl);
     }
     panelC.appendChild(controls);
+    /* 打印讲义（卅六轮）：@media print 隐藏交互控件，保留讲解正文与信令图 */
+    var btnPrint = ctlBtn('<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>', '打印本页讲义');
+    btnPrint.onclick = function () { window.print(); };
+    controls.appendChild(btnPrint);
 
     /* ---- 右：讲解（含"一句话版"初学开关，本机记忆） ---- */
     var plainMode = (function () { try { return localStorage.getItem('rrc.plain') !== '0'; } catch (e0) { return true; } })();
@@ -574,7 +578,7 @@
         '每步大白话讲解 + 面试考法标注 + 结课自测',
         '买一次，浏览器本地永久离线可用'
       ];
-      var price = gate.price || '完整版 39 模块（M0–M38）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
+      var price = gate.price || '完整版 41 模块（M0–M40）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
       root.innerHTML = '';
       var w = el('div', 'gate-wrap');
       var c = el('div', 'gate');
@@ -587,7 +591,7 @@
         '<div class="g-actions">' +
         '<button class="btn primary" data-act="unlock">完整版解锁码</button>' +
         '<a class="btn" href="index.html">返回目录</a></div>' +
-        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M38 共 37 个模块属完整版，获取方式见仓库 README。</p>';
+        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M40 共 39 个模块属完整版，获取方式见仓库 README。</p>';
       w.appendChild(c); root.appendChild(w);
       c.querySelector('[data-act="unlock"]').onclick = function () {
         store.setLicense({ demo: true });
@@ -602,7 +606,7 @@
   var HUB_GROUPS = [
     { key: 'main', no: '01', short: '主线', name: '主线 · 免费起点', desc: '一部电影看完全程：从开机到注册能上网的每一条信令——全站的地图，也是所有课的前置。', mods: ['ma'] },
     { key: 'rrc', no: '02', short: 'RRC 十课', name: 'RRC · 空口信令十课', desc: 'UE 与基站之间的对话全集：连接建立、系统消息、寻呼、测量、切换、承载重配、挂起、AS 安全、双连接，外加空闲态与小区重选专课（38.304）。', mods: ['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'my'] },
-    { key: 'if', no: '03', short: '接口与用户面', name: '接口与用户面 · 信令离开基站之后', desc: 'NG/Xn 两条网络接口的柜台单据（NGAP 与 S1AP 另有消息级解剖专课）、F1/E1 接口族收官、加上数据面与 GTP-U 隧道——网络侧视角与比特流视角。', mods: ['mi', 'mx', 'mp', 'mz', 'mng', 'ms1', 'mx2'] },
+    { key: 'if', no: '03', short: '接口与用户面', name: '接口与用户面 · 信令离开基站之后', desc: 'NG/Xn/S1/X2/F1/E1 六本消息级接口台账一台凑齐、接口族收官课打底、加上数据面与 GTP-U 隧道——网络侧视角与比特流视角。', mods: ['mi', 'mx', 'mp', 'mz', 'mng', 'ms1', 'mx2', 'mf1', 'me1'] },
     { key: 'nas', no: '04', short: 'NAS 与核心网', name: 'NAS 与核心网 · 信封的外层', desc: '注册与会话这一层的全套：5G NAS、5GC 会话流程、隧道与转发面信令（GTP-C/PFCP）、网络切片专课（S-NSSAI 的旅程）、EPS 侧 EMM/ESM 专章，加上 SBA 服务化架构（NRF/发现/token）、PDU 会话信令专课与 Service Request 专课。', mods: ['mn', 'mg', 'mb', 'me', 'mr', 'mo', 'mm', 'mns'] },
     { key: 'low', no: '05', short: '空口底层', name: '空口底层 · 信令脚下的地基', desc: '信令之前的那一秒：MAC 怎么敲门、物理层怎么把比特搬上无线帧、QoS 流怎么绑进承载（5QI/SDAP 专课）——学完上层再下井，豁然开朗。', mods: ['mc', 'mf', 'mq'] },
     { key: 'cross', no: '06', short: '安全与对照', name: '安全与两代对照 · 横切视角收官', desc: '密钥树怎么一级级长出来（33.501 骨架课+密钥层级深潜课）、4G/5G 同一流程并排看，外加把 PHY→MAC→RLC→PDCP→RRC→NAS 六层串成一条尸检链的跨层排障毕业课——横穿所有层的收官课组。', mods: ['ms', 'ml', 'mj', 'mau'] },
@@ -654,16 +658,28 @@
       function renderLic() {
         lic = store.license();
         licCard.innerHTML =
-          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0/M1 与全部工具页；完整版（M2–M38）获取方式见 README。</div></div>' +
+          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0/M1 与全部工具页；完整版（M2–M40）获取方式见 README。</div></div>' +
           '<div style="display:flex;gap:8px;align-items:center">' +
           '<span class="license-state' + (lic.demo ? ' on' : '') + '">' + (lic.demo ? '完整版用户' : '免费层') + '</span>' +
+          '<button class="btn sm" data-act="export-progress" title="生成 Markdown 学习进度单（完成态/测验分/下一步建议）">导出学习进度</button>' +
           (lic.demo
             ? '<button class="btn sm" data-act="relock">重新锁定</button>'
             : '<button class="btn sm primary" data-act="unlock">了解完整版</button>') +
           '</div>';
-        var u = licCard.querySelector('[data-act="unlock"]'), r = licCard.querySelector('[data-act="relock"]');
+        var u = licCard.querySelector('[data-act="unlock"]'), r = licCard.querySelector('[data-act="relock"]'), ep = licCard.querySelector('[data-act="export-progress"]');
         if (u) u.onclick = function () { store.setLicense({ demo: true }); renderLic(); renderGrid(); };
         if (r) r.onclick = function () { store.setLicense({ demo: false }); renderLic(); renderGrid(); };
+        if (ep) ep.onclick = function () {
+          var IV = g.RRC && g.RRC.Interview;
+          if (IV && IV.buildProgressMarkdown) {
+            var md = IV.buildProgressMarkdown(store);
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown;charset=utf-8' }));
+            a.download = 'rrc-学习进度.md';
+            document.body.appendChild(a); a.click();
+            setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 400);
+          }
+        };
       }
       renderLic();
       var headRow = el('div', 'hub-headrow');
@@ -678,7 +694,7 @@
       };
       headRow.appendChild(expandBtn);
       root.appendChild(headRow);
-      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M38 属完整版。'));
+      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M40 属完整版。'));
       root.appendChild(tools);
 
       /* 总进度 */

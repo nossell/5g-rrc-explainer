@@ -138,6 +138,14 @@ h2.sec{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-top:48px}
 .iv-meta{font-size:13px;color:var(--tx2);margin-top:14px;line-height:1.7}
 .iv-meta b{color:var(--accent-deep)}
 .iv-actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+.iv-job-row{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
+.iv-job-card{flex:1;min-width:170px;text-align:left;border:1px solid var(--bd2);border-radius:12px;
+  background:#FFFFFF;cursor:pointer;padding:12px 14px;display:flex;flex-direction:column;gap:4px;
+  font-family:var(--sans);transition:border-color .15s,box-shadow .15s}
+.iv-job-card:hover{border-color:var(--accent);box-shadow:0 2px 10px rgba(24,163,74,.15)}
+.iv-job-card b{font:800 14px var(--sans);color:var(--tx1)}
+.iv-job-card span{font-size:12px;color:var(--tx2);line-height:1.5}
+.iv-job-card i{font:700 11px var(--mono);color:var(--accent-deep);font-style:normal}
 .iv-top{display:flex;justify-content:space-between;align-items:center}
 .iv-prog{font:800 13px var(--mono);color:var(--tx2)}
 .iv-timer{font:800 15px var(--mono);color:var(--accent-deep);background:var(--accent-bg);
@@ -633,3 +641,16 @@ footer .flinks{display:flex;gap:14px;margin-bottom:8px;flex-wrap:wrap}
 .ref-badge{cursor:pointer}
 .ref-pop{margin:6px 0 2px;padding:9px 12px;border:1px dashed var(--bd);border-radius:8px;background:var(--inset);font:12.5px/1.7 var(--sans);color:var(--tx2);max-width:640px}
 .ref-pop b{color:var(--tx1)}
+
+/* 打印讲义（卅六轮）：隐藏交互控件与导航，保留标题/信令图/讲解正文/失败卡 */
+@media print {
+  .top, .topnav, .hero, .hub-tools, .controls, .dots, .speed, .scn, .branch, .progressbar,
+  .gate, .license-card, .hub-headrow, footer, .ref-pop, .pdot, .kb-hint, .filters { display: none !important; }
+  body { background: #FFFFFF; }
+  .wrap { max-width: 100%; padding: 0; }
+  .panel, .workbench, .plainbox, .failcard, .dict-card { box-shadow: none !important; border-color: #CCCCCC !important; }
+  .plain, .narr { font-size: 12px; }
+  /* 信令图未播放消息打印时加深（讲义要整图可读） */
+  .msg.future { opacity: 1 !important; }
+  a { text-decoration: none; color: inherit; }
+}
