@@ -146,6 +146,9 @@ h2.sec{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-top:48px}
 .iv-job-card b{font:800 14px var(--sans);color:var(--tx1)}
 .iv-job-card span{font-size:12px;color:var(--tx2);line-height:1.5}
 .iv-job-card i{font:700 11px var(--mono);color:var(--accent-deep);font-style:normal}
+.iv-job-card.dim{cursor:not-allowed;opacity:.55;background:var(--inset)}
+.iv-job-card.dim b{color:var(--tx2)}
+.iv-job-card.dim i{color:var(--tx3)}
 .iv-top{display:flex;justify-content:space-between;align-items:center}
 .iv-prog{font:800 13px var(--mono);color:var(--tx2)}
 .iv-timer{font:800 15px var(--mono);color:var(--accent-deep);background:var(--accent-bg);
@@ -645,7 +648,7 @@ footer .flinks{display:flex;gap:14px;margin-bottom:8px;flex-wrap:wrap}
 /* 打印讲义（卅六轮）：隐藏交互控件与导航，保留标题/信令图/讲解正文/失败卡 */
 @media print {
   .top, .topnav, .hero, .hub-tools, .controls, .dots, .speed, .scn, .branch, .progressbar,
-  .gate, .license-card, .hub-headrow, footer, .ref-pop, .pdot, .kb-hint, .filters { display: none !important; }
+  .gate, .license-card, .hub-headrow, footer, .ref-pop, .pdot { display: none !important; }
   body { background: #FFFFFF; }
   .wrap { max-width: 100%; padding: 0; }
   .panel, .workbench, .plainbox, .failcard, .dict-card { box-shadow: none !important; border-color: #CCCCCC !important; }

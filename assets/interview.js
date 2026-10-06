@@ -243,12 +243,17 @@
       w.appendChild(el('div', 'iv-row', '<span class="iv-cap">计时</span>'));
       w.appendChild(tgl);
       w.appendChild(meta);
-      /* 岗位快选：三张固定卷卡，点击直接开考（绕过域下拉） */
+      /* 岗位快选：三张固定卷卡，点击直接开考（绕过域下拉）。
+         免费层兜底：当前授权下候选不足 12 题的卷置灰并说明——点了不开考、不再静默。 */
       var jobRow = el('div', 'iv-job-row');
       JOB_PAPERS.forEach(function (jp) {
-        var card = el('button', 'iv-job-card');
-        card.innerHTML = '<b>' + esc(jp.name) + '</b><span>' + esc(jp.blurb) + '</span><i>固定 12 题卷 · 点击即开考</i>';
-        card.onclick = function () { startJobPaper(jp.key); };
+        var candN = p.filter(function (q) { return jp.domains.indexOf(q.domain) >= 0; }).length;
+        var enough = candN >= 12;
+        var card = el('button', 'iv-job-card' + (enough ? '' : ' dim'));
+        card.innerHTML = '<b>' + esc(jp.name) + '</b><span>' + esc(jp.blurb) + '</span>' +
+          '<i>' + (enough ? '固定 12 题卷 · 点击即开考' : '需解锁全部模块（当前可用 ' + candN + ' 题）') + '</i>';
+        if (enough) card.onclick = function () { startJobPaper(jp.key); };
+        else card.disabled = true;
         jobRow.appendChild(card);
       });
       w.appendChild(el('div', 'iv-row', '<span class="iv-cap">岗位快选</span>'));
