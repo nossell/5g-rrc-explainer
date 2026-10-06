@@ -578,7 +578,7 @@
         '每步大白话讲解 + 面试考法标注 + 结课自测',
         '买一次，浏览器本地永久离线可用'
       ];
-      var price = gate.price || '完整版 41 模块（M0–M40）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
+      var price = gate.price || '完整版 42 模块（M0–M41）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
       root.innerHTML = '';
       var w = el('div', 'gate-wrap');
       var c = el('div', 'gate');
@@ -591,7 +591,7 @@
         '<div class="g-actions">' +
         '<button class="btn primary" data-act="unlock">完整版解锁码</button>' +
         '<a class="btn" href="index.html">返回目录</a></div>' +
-        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M40 共 39 个模块属完整版，获取方式见仓库 README。</p>';
+        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M41 共 40 个模块属完整版，获取方式见仓库 README。</p>';
       w.appendChild(c); root.appendChild(w);
       c.querySelector('[data-act="unlock"]').onclick = function () {
         store.setLicense({ demo: true });
@@ -606,7 +606,7 @@
   var HUB_GROUPS = [
     { key: 'main', no: '01', short: '主线', name: '主线 · 免费起点', desc: '一部电影看完全程：从开机到注册能上网的每一条信令——全站的地图，也是所有课的前置。', mods: ['ma'] },
     { key: 'rrc', no: '02', short: 'RRC 十课', name: 'RRC · 空口信令十课', desc: 'UE 与基站之间的对话全集：连接建立、系统消息、寻呼、测量、切换、承载重配、挂起、AS 安全、双连接，外加空闲态与小区重选专课（38.304）。', mods: ['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'my'] },
-    { key: 'if', no: '03', short: '接口与用户面', name: '接口与用户面 · 信令离开基站之后', desc: 'NG/Xn/S1/X2/F1/E1 六本消息级接口台账一台凑齐、接口族收官课打底、加上数据面与 GTP-U 隧道——网络侧视角与比特流视角。', mods: ['mi', 'mx', 'mp', 'mz', 'mng', 'ms1', 'mx2', 'mf1', 'me1'] },
+    { key: 'if', no: '03', short: '接口与用户面', name: '接口与用户面 · 信令离开基站之后', desc: '38.401 架构总纲课打底（NG-RAN 节点模型与协议栈分布的娘家）、NG/Xn/S1/X2/F1/E1 六本消息级接口台账一台凑齐、接口族收官课、数据面与 GTP-U 隧道——网络侧视角与比特流视角。', mods: ['mi', 'mx', 'mp', 'mz', 'mng', 'ms1', 'mx2', 'mf1', 'me1', 'm41'] },
     { key: 'nas', no: '04', short: 'NAS 与核心网', name: 'NAS 与核心网 · 信封的外层', desc: '注册与会话这一层的全套：5G NAS、5GC 会话流程、隧道与转发面信令（GTP-C/PFCP）、网络切片专课（S-NSSAI 的旅程）、EPS 侧 EMM/ESM 专章，加上 SBA 服务化架构（NRF/发现/token）、PDU 会话信令专课与 Service Request 专课。', mods: ['mn', 'mg', 'mb', 'me', 'mr', 'mo', 'mm', 'mns'] },
     { key: 'low', no: '05', short: '空口底层', name: '空口底层 · 信令脚下的地基', desc: '信令之前的那一秒：MAC 怎么敲门、物理层怎么把比特搬上无线帧、QoS 流怎么绑进承载（5QI/SDAP 专课）——学完上层再下井，豁然开朗。', mods: ['mc', 'mf', 'mq'] },
     { key: 'cross', no: '06', short: '安全与对照', name: '安全与两代对照 · 横切视角收官', desc: '密钥树怎么一级级长出来（33.501 骨架课+密钥层级深潜课）、4G/5G 同一流程并排看，外加把 PHY→MAC→RLC→PDCP→RRC→NAS 六层串成一条尸检链的跨层排障毕业课——横穿所有层的收官课组。', mods: ['ms', 'ml', 'mj', 'mau'] },
@@ -620,6 +620,90 @@
       var href = opts.href || function (id) { return 'app.html#' + id; };
       var mods = R.modules();
       root.innerHTML = '';
+
+      /* 岗位学习路径（卅八轮块 4）：三岗 × 4 周计划——建议顺序，可自由跳序。
+         key 与 interview 岗位卷对齐（opt/core/test）；进度徽章实时算。 */
+      var JOB_PATHS = [
+        { key: 'opt', name: '无线网优岗', blurb: '空口与无线侧：接入/切换/重建/寻呼/测量——RRC 主战场',
+          weeks: [
+            { label: '第 1 周 · 主线与空口地基', mods: ['ma', 'm0', 'm1', 'm2', 'mc'] },
+            { label: '第 2 周 · RRC 核心流程', mods: ['m3', 'm4', 'm5', 'm6', 'my'] },
+            { label: '第 3 周 · 状态机与排障', mods: ['m7', 'm8', 'mf', 'mau'] },
+            { label: '第 4 周 · 接口与核心网速览', mods: ['mi', 'mng', 'm41'] }
+          ] },
+        { key: 'core', name: '核心网岗', blurb: '注册/会话/切片/SBA——信封外层的全套',
+          weeks: [
+            { label: '第 1 周 · 主线与 NAS 入门', mods: ['ma', 'm0', 'm1', 'mn'] },
+            { label: '第 2 周 · 5GC 流程与承载', mods: ['mg', 'mb', 'mm', 'mns'] },
+            { label: '第 3 周 · 切片/SBA/服务化', mods: ['mr', 'mo', 'mq'] },
+            { label: '第 4 周 · 接口台账', mods: ['mi', 'mng', 'ms1', 'm41'] }
+          ] },
+        { key: 'test', name: '协议测试岗', blurb: '一致性测试/卡与终端/安全——岗位直通',
+          weeks: [
+            { label: '第 1 周 · 主线与接入', mods: ['ma', 'm0', 'm1', 'mc'] },
+            { label: '第 2 周 · 测试线与终端', mods: ['mt', 'mu', 'me'] },
+            { label: '第 3 周 · 安全与对照', mods: ['ms', 'ml', 'mj'] },
+            { label: '第 4 周 · 排障与接口', mods: ['mau', 'mi', 'm41'] }
+          ] }
+      ];
+
+      /* 视图切换：browse（按域）| path（按岗位） */
+      var view = 'browse';
+      var viewbar = el('div', 'hub-viewbar');
+      var btnBrowse = el('button', 'on', '按学习域浏览');
+      var btnPath = el('button', '', '按岗位路径学');
+      btnBrowse.type = 'button'; btnPath.type = 'button';
+      viewbar.appendChild(btnBrowse); viewbar.appendChild(btnPath);
+      var pathView = el('div', 'jobpath-view');
+
+      function renderPath() {
+        pathView.innerHTML = '';
+        pathView.appendChild(el('p', 'sec-sub', '建议学习路径，可自由跳序——每岗 4 周，跟着周计划走完就是一条完整的备战线。走完一课最后一帧，徽章自动点亮。'));
+        JOB_PATHS.forEach(function (jp) {
+          var allMods = [];
+          jp.weeks.forEach(function (w) { allMods = allMods.concat(w.mods); });
+          var doneN = allMods.filter(function (id) { var m = R.get(id); var p = m && store.progress(id); return p && p.done; }).length;
+          var card = el('div', 'hubgroup jobpath');
+          card.innerHTML = '<div class="ghead" role="button" tabindex="0" aria-expanded="true">' +
+            '<span class="gnum">★</span>' +
+            '<div class="gtxt"><div class="gname">' + jp.name + ' · 4 周路径</div><div class="gdesc">' + jp.blurb + '　<a class="wb-link" href="interview.html">去面试页开「' + jp.name + '」模拟卷 →</a></div></div>' +
+            '<span class="gcount">' + doneN + '/' + allMods.length + ' 门</span></div>';
+          var body = el('div', 'gbody');
+          jp.weeks.forEach(function (w) {
+            var wk = el('div', 'jobweek');
+            var wdone = w.mods.filter(function (id) { var p = store.progress(id); return p && p.done; }).length;
+            wk.innerHTML = '<div class="jobweek-t"><b>' + w.label + '</b><span>' + wdone + '/' + w.mods.length + '</span></div>';
+            var row = el('div', 'jobweek-row');
+            w.mods.forEach(function (id) {
+              var m = R.get(id); if (!m) return;
+              var p = store.progress(id);
+              var chip = el('a', 'jobchip' + (p && p.done ? ' done' : '') + (m.free ? ' free' : ''));
+              chip.href = href(id);
+              chip.innerHTML = '<i class="jk">' + (p && p.done ? '✓' : m.num) + '</i>' + m.title;
+              chip.title = 'M' + m.num + ' · ' + m.title + (p && p.done ? '（已完成）' : '');
+              row.appendChild(chip);
+            });
+            wk.appendChild(row);
+            body.appendChild(wk);
+          });
+          card.appendChild(body);
+          pathView.appendChild(card);
+        });
+      }
+
+      function setView(v) {
+        view = v;
+        btnBrowse.classList.toggle('on', v === 'browse');
+        btnPath.classList.toggle('on', v === 'path');
+        if (v === 'path') renderPath();
+        pathView.style.display = v === 'path' ? '' : 'none';
+        path.style.display = v === 'browse' ? '' : 'none';
+        tools.style.display = v === 'browse' ? '' : 'none';
+        overall.style.display = v === 'browse' ? '' : 'none';
+        grid.style.display = v === 'browse' ? '' : 'none';
+      }
+      btnBrowse.onclick = function () { setView('browse'); };
+      btnPath.onclick = function () { setView('path'); };
 
       /* 学习域导览条：六组胶囊，点击展开并滚动到组 */
       var path = el('div', 'pathline gnav');
@@ -658,7 +742,7 @@
       function renderLic() {
         lic = store.license();
         licCard.innerHTML =
-          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0/M1 与全部工具页；完整版（M2–M40）获取方式见 README。</div></div>' +
+          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0/M1 与全部工具页；完整版（M2–M41）获取方式见 README。</div></div>' +
           '<div style="display:flex;gap:8px;align-items:center">' +
           '<span class="license-state' + (lic.demo ? ' on' : '') + '">' + (lic.demo ? '完整版用户' : '免费层') + '</span>' +
           '<button class="btn sm" data-act="export-progress" title="生成 Markdown 学习进度单（完成态/测验分/下一步建议）">导出学习进度</button>' +
@@ -694,8 +778,10 @@
       };
       headRow.appendChild(expandBtn);
       root.appendChild(headRow);
-      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M40 属完整版。'));
+      root.appendChild(viewbar);
+      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M41 属完整版。'));
       root.appendChild(tools);
+      root.appendChild(pathView); pathView.style.display = 'none';
 
       /* 总进度 */
       var doneCount = mods.filter(function (m) { var p = store.progress(m.id); return p && p.done; }).length;
