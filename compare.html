@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>两代对照 · RRC 讲解器</title>
+<meta name="description" content="LTE（36.331）与 NR（38.331）同一过程并排对照：改名清单、真正的分岔、成段继承的镜像条款——16 行对照逐行挂条款徽章。">
+<meta property="og:title" content="两代对照 · RRC 讲解器">
+<meta property="og:description" content="LTE（36.331）与 NR（38.331）同一过程并排对照：改名清单、真正的分岔、成段继承的镜像条款——16 行对照逐行挂条款徽章。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://nossell.github.io/5g-rrc-explainer/compare.html">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+.cp-wrap{max-width:1080px;margin:0 auto;padding:34px 26px 70px}
+.cp-hero h1{font-size:26px;font-weight:800;letter-spacing:-.4px}
+.cp-hero .sub{color:var(--tx2);font-size:14px;margin-top:8px;line-height:1.7}
+.cp-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}
+.cp-tab{font:700 12.5px var(--sans);color:var(--tx2);background:var(--panel);border:1px solid var(--bd);border-radius:999px;padding:6px 14px;cursor:pointer}
+.cp-tab.on{color:var(--accent-deep);background:var(--accent-bg);border-color:var(--accent)}
+.cp-row{border:1px solid var(--bd);border-radius:14px;background:var(--panel);padding:15px 17px;margin-top:13px;box-shadow:var(--shadow-card)}
+.cp-topic{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.cp-topic b{font-size:15px;font-weight:800;color:var(--tx1)}
+.cp-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}
+.cp-cell{border:1px solid var(--bd);border-radius:10px;background:var(--bg);padding:11px 13px}
+.cp-gen{font:800 11px var(--mono);letter-spacing:.4px;border-radius:5px;padding:1px 8px;display:inline-block}
+.cp-gen.lte{color:#B45309;background:#FBF3E4;border:1px solid #E8D5B5}
+.cp-gen.nr{color:#2563EB;background:#EBF1FE;border:1px solid #C9D9F5}
+.cp-msg{font:800 13.5px var(--mono);color:var(--tx1);margin-top:6px}
+.cp-note{font-size:12.5px;color:var(--tx2);line-height:1.7;margin-top:6px}
+.cp-badge-row{margin-top:7px}
+.cp-diff{margin-top:10px;border-top:1px dashed var(--bd);padding-top:9px;font-size:12.5px;line-height:1.7;color:var(--tx2)}
+.cp-diff b{color:var(--accent-deep)}
+.cp-note-btm{margin-top:26px;font-size:12.5px;color:var(--tx3);line-height:1.75;border-top:1px solid var(--bd);padding-top:14px}
+@media (max-width:680px){.cp-cols{grid-template-columns:1fr}.cp-wrap{padding:26px 14px 60px}}
+</style>
+</head>
+<body>
+<div class="cp-wrap">
+  <header class="top" style="margin:-34px -26px 0;padding:0 26px">
+  <a class="brand" href="index.html">
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 15 L7.5 15 L10 8 L13 18 L15.5 12 L17.5 15 L21 15" stroke="#18A34A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="15" r="1.6" fill="#18A34A"/></svg>
+    RRC 讲解器
+  </a>
+  <nav class="topnav">
+    <a class="navlink" href="index.html">目录</a>
+    <a class="navlink" href="app.html">课程</a>
+    <a class="navlink" href="interview.html">面试</a>
+    <a class="navlink" href="dict.html">词典</a>
+    <a class="navlink" href="anim.html">动画</a>
+    <a class="navlink" href="timer-net.html">定时器网</a>
+    <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink" href="meas-sandbox.html">参数沙盘</a>
+    <a class="navlink on" href="compare.html">两代对照</a>
+    <a class="navlink" href="log-detective.html">日志侦探</a>
+    <a class="navlink" href="search.html">搜索</a>
+  </nav>
+  </header>
+
+  <section class="cp-hero">
+    <h1>两代对照——同一出戏，两个版本</h1>
+    <p class="sub">38.331 本来就是从 36.331 改写出来的：骨架原样、大段照搬，真正变的集中在几处。<b>左边是 LTE（36.331），右边是 NR（38.331），每行一句"到底差在哪"</b>——分清"哪些只是改名、哪些是真进化"，是两代差别类面试题的标准答法。点 §徽章看条款原文短引。想走完整课程版（带时序图与失败分支）去 <a href="app.html#ml">LTE/5G 对照深潜课 →</a></p>
+  </section>
+
+  <div class="cp-tabs" id="cp-tabs"></div>
+  <div id="cp-rows"></div>
+
+  <p class="cp-note-btm" id="cp-note"></p>
+</div>
+
+<footer style="border-top:1px solid var(--bd);padding:18px 0;text-align:center;color:var(--tx3);font-size:12.5px">
+  <div class="wrap" style="max-width:1080px;margin:0 auto;padding:0 26px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div class="flinks"><a href="index.html">目录</a><a href="app.html">课程</a><a href="app.html#ml">对照课</a><a href="dict.html">词典</a></div>
+    <div>RRC 讲解器 · 可信度组件（两代对照视图）</div>
+  </div>
+</footer>
+
+<script src="assets/content/spec-quotes.js"></script>
+<script>
+(function () {
+  'use strict';
+  var C = window.RRC_COMPARE;
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+  var tabs = document.getElementById('cp-tabs');
+  var cur = 'all';
+  function chipHtml(key, name) {
+    return '<button class="cp-tab" data-g="' + key + '">' + esc(name) + '</button>';
+  }
+  tabs.innerHTML = chipHtml('all', '全部（' + C.rows.length + ' 行）') +
+    C.groups.map(function (gp) {
+      var n = C.rows.filter(function (r) { return r.g === gp.key; }).length;
+      return chipHtml(gp.key, gp.name + '（' + n + '）');
+    }).join('');
+  tabs.addEventListener('click', function (e) {
+    var b = e.target.closest('.cp-tab');
+    if (!b) return;
+    cur = b.dataset.g;
+    [].forEach.call(tabs.children, function (x) { x.classList.toggle('on', x === b); });
+    render();
+  });
+
+  function cellHtml(gen, cell) {
+    var genCls = gen === 'lte' ? 'lte' : 'nr';
+    var genName = gen === 'lte' ? 'LTE · 36.331' : 'NR · 38.331';
+    return '<div class="cp-cell"><span class="cp-gen ' + genCls + '">' + genName + '</span>' +
+      '<div class="cp-msg">' + esc(cell.m) + '</div>' +
+      '<div class="cp-note">' + esc(cell.n) + '</div>' +
+      (cell.s ? '<div class="cp-badge-row"><span class="ref-badge" title="条款原文短引">§' + esc(cell.s) + '</span></div>' : '') +
+      '</div>';
+  }
+  function render() {
+    var rows = C.rows.filter(function (r) { return cur === 'all' || r.g === cur; });
+    document.getElementById('cp-rows').innerHTML = rows.map(function (r) {
+      return '<div class="cp-row"><div class="cp-topic"><b>' + esc(r.topic) + '</b></div>' +
+        '<div class="cp-cols">' + cellHtml('lte', r.lte) + cellHtml('nr', r.nr) + '</div>' +
+        '<div class="cp-diff"><b>差在哪：</b>' + esc(r.diff) + '</div></div>';
+    }).join('');
+  }
+  document.getElementById('cp-note').textContent = C.note;
+  tabs.children[0].classList.add('on');
+  render();
+})();
+</script>
+</body>
+</html>

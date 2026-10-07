@@ -51,6 +51,37 @@
     return JOB_PAPERS.filter(function (p) { return p.key === key; })[0] || null;
   }
 
+  /* ---------- JD 匹配（v7 块 2）：职位描述→学习域/岗位卷 ----------
+     词表是工程配置（现有域名与课程主题的同义表达），不是协议内容——零新论断。
+     纯函数实时匹配，JD 文本不落盘（零新 localStorage 键）。 */
+  var JD_KEYWORDS = [
+    { kws: ['网优', '网络优化', '覆盖', '掉话', '切换', '乒乓', 'rsrp', 'rsrq', 'sinr', '路测', 'kpi', '驻留', '重选', '寻呼', '无线侧'], domain: 'RRC 十课', paper: 'opt', w: 2 },
+    { kws: ['核心网', 'amf', 'smf', 'upf', '会话', '切片', 's-nssai', '注册', '5gc', 'epc', '漫游', 'pdu'], domain: 'NAS 与核心网', paper: 'core', w: 2 },
+    { kws: ['协议测试', '一致性', '仪表', '用例', '终端测试', 'usim', 'sim卡', '信令跟踪', '抓包', 'log', '日志分析'], domain: '测试与终端', paper: 'test', w: 2 },
+    { kws: ['ngap', 'xnap', 'x2ap', 's1ap', 'f1ap', 'e1ap', 'gtp', 'sctp', '接口信令', '站间'], domain: '接口与用户面', paper: 'core', w: 2 },
+    { kws: ['加密', '密钥', '安全', 'aka', '完整性', '算法'], domain: '安全与对照', paper: 'test', w: 1 },
+    { kws: ['mac', '随机接入', 'prach', '物理层', 'qos', '5qi', '承载', 'sdap'], domain: '空口底层', paper: 'opt', w: 1 },
+    { kws: ['ims', 'vonr', 'volte', '语音', '定位', 'ntn', 'redcap', '物联网', '垂直']  , domain: '业务与垂直', paper: null, w: 1 }
+  ];
+  function matchJD(text) {
+    var s = String(text || '').toLowerCase();
+    if (!s.trim()) return { topDomains: [], paper: null, hits: 0 };
+    var domScore = {}, paperScore = {}, total = 0;
+    JD_KEYWORDS.forEach(function (e) {
+      var hits = 0;
+      e.kws.forEach(function (kw) { if (s.indexOf(kw) >= 0) hits++; });
+      if (!hits) return;
+      total += hits;
+      domScore[e.domain] = (domScore[e.domain] || 0) + hits * e.w;
+      if (e.paper) paperScore[e.paper] = (paperScore[e.paper] || 0) + hits * e.w;
+    });
+    var topDomains = Object.keys(domScore).map(function (d) { return { domain: d, score: domScore[d] }; })
+      .sort(function (a, b) { return b.score - a.score; }).slice(0, 3);
+    var bestPaper = null, bestS = 0;
+    Object.keys(paperScore).forEach(function (k) { if (paperScore[k] > bestS) { bestS = paperScore[k]; bestPaper = k; } });
+    return { topDomains: topDomains, paper: bestPaper, hits: total };
+  }
+
   /* ---------- 学习产物导出（卅六轮）：纯函数生成 Markdown，Blob 下载零依赖 ----------
      buildMissMarkdown：错题本 → 面试弹药清单（题干/你的答案/正确答案/解析/条款锚/到期）
      buildProgressMarkdown：41 模块完成态/测验分/下一步建议 */
@@ -323,6 +354,26 @@
           }).join('') + '</div>';
         w.appendChild(rcard);
       }
+      /* JD 匹配卡（v7 块 2）：贴职位描述→推荐学习域与岗位卷；纯前端实时，文本不上传不落盘 */
+      var jd = el('div', 'iv-jd');
+      jd.innerHTML = '<div class="iv-rd-cap">JD 匹配 · 把职位描述贴进来（本机实时匹配，不上传）</div>' +
+        '<textarea class="iv-jd-in" rows="3" placeholder="粘贴 JD 的一段话，例如：负责 5G 无线网络优化，处理切换、掉话、覆盖类 KPI 问题……"></textarea>' +
+        '<div class="iv-jd-out"></div>';
+      var jdOut = jd.querySelector('.iv-jd-out');
+      jd.querySelector('.iv-jd-in').addEventListener('input', function (e) {
+        var r = matchJD(e.target.value);
+        if (!r.topDomains.length) {
+          jdOut.innerHTML = r.hits || e.target.value.trim() ? '<span class="iv-jd-none">没匹配到明确方向——先按全部学习域来一套模拟面试，或看看下方岗位快选。</span>' : '';
+          return;
+        }
+        jdOut.innerHTML = '<div class="iv-jd-domains">' + r.topDomains.map(function (x) {
+          return '<span class="badge">' + esc(x.domain) + ' · 匹配 ' + x.score + '</span>';
+        }).join('') + '</div>' +
+        (r.paper ? '<button class="btn sm iv-jd-go">开对应的岗位模拟卷 →</button>' : '');
+        var go = jdOut.querySelector('.iv-jd-go');
+        if (go) go.onclick = function () { startJobPaper(r.paper); };
+      });
+      w.appendChild(jd);
       var meta = el('p', 'iv-meta',
         '题库共 <b>' + pool(Object.assign({}, store, { license: function () { return { demo: true }; } })).length + '</b> 题' +
         '（当前可用 <b>' + p.length + '</b> 题' + (demo ? '' : '——演示解锁后全部开放') + '）' +
@@ -590,6 +641,7 @@
         return w;
       }
       var dueN = dueRows().length;
+      if (rows.length >= 200) w.appendChild(el('p', 'iv-meta', '⚠️ 错题本已满 200 条上限——新错题会<b>挤出最旧的记录</b>；建议先用"清空错题本"或间隔复习消化几条再继续。'));
       w.appendChild(el('p', 'iv-meta', '留存 <b>' + rows.length + '</b> 题' + (dueN ? '（<b>' + dueN + '</b> 题今日到期）' : '（今日无到期，间隔复习中）') + '。答对升间隔（1→2→4→8 天），连对三轮自动出本。'));
       rows.slice(0, 50).forEach(function (r) {
         var q = p.filter(function (x) { return x.qid === r.qid; })[0];
@@ -668,6 +720,7 @@
       showWrongbook: function () { setTab('misses'); },
       misses: function () { return loadMisses(); },
       followups: function (qid) { return (typeof g.RRC_FOLLOWUPS !== 'undefined' && g.RRC_FOLLOWUPS) ? g.RRC_FOLLOWUPS.get(qid) : null; },
+      matchJD: function (text) { return matchJD(text); },
       readiness: function () { return readinessFor(store); },
       state: function () {
         return { phase: view, idx: exam ? exam.idx : 0, n: exam ? exam.qs.length : 0, score: exam ? exam.score : 0 };
@@ -677,5 +730,5 @@
   }
 
   R.Interview = { mount: mount, pool: pool, buildMissMarkdown: buildMissMarkdown, buildProgressMarkdown: buildProgressMarkdown,
-    buildBackupJSON: buildBackupJSON, restoreBackupJSON: restoreBackupJSON, readinessFor: readinessFor };
+    buildBackupJSON: buildBackupJSON, restoreBackupJSON: restoreBackupJSON, readinessFor: readinessFor, matchJD: matchJD };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -198,6 +198,14 @@ h2.sec{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-top:48px}
 .iv-rd-cell small{grid-area:s;font-size:10.5px;color:var(--tx3)}
 .iv-rd-bar{grid-area:bar;display:block;height:7px;border-radius:4px;background:var(--inset);overflow:hidden}
 .iv-rd-bar i{display:block;height:100%;border-radius:4px;background:var(--accent)}
+/* JD 匹配卡（v7 块 2） */
+.iv-jd{border:1px solid var(--bd);border-radius:12px;background:var(--panel);padding:11px 14px;margin-bottom:12px}
+.iv-jd-in{width:100%;box-sizing:border-box;margin-top:8px;font:400 12.5px/1.6 var(--sans);color:var(--tx1);background:var(--bg);border:1px solid var(--bd);border-radius:9px;padding:9px 11px;resize:vertical}
+.iv-jd-in:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.iv-jd-out{margin-top:8px}
+.iv-jd-domains{display:flex;gap:7px;flex-wrap:wrap}
+.iv-jd-go{margin-top:8px}
+.iv-jd-none{font-size:12px;color:var(--tx3)}
 .msg:hover{opacity:.85}
 .msg.future:hover{opacity:.55}
 .msg:hover .mlabel,.msg:hover .fx-label{text-decoration:underline;text-underline-offset:3px}
