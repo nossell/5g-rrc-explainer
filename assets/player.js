@@ -37,6 +37,39 @@
   function mdBold(s) {
     return String(s).replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
   }
+  /* ================= 确定性选项洗牌（v6 块 1）=================
+     课内测验/决策点此前按 authored 序渲染，而课程数据大多把正确项写在 options[0]
+     → 正确答案恒在 A 位，背位置即可全对。改用 mulberry32(strHash(模块id+题号))
+     生成确定性置换：同一题每次渲染布局恒定（防"刷新来回跳"），永不 Math.random。
+     渲染按置换序输出、点击/判分/高亮全部映射回 authored 序，课程数据与 schema 零改动。 */
+  function strHash(s) {
+    var h = 2166136261 >>> 0;
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  /* 返回 disp2auth：显示位 di 放 authored 第 disp2auth[di] 个选项。Fisher-Yates；
+     小概率撞出恒等置换时轮转一位兜底（结果仍是确定性双射）。 */
+  function optionPerm(key, n) {
+    var rnd = mulberry32(strHash(key));
+    var arr = [], i, j, t;
+    for (i = 0; i < n; i++) arr.push(i);
+    for (j = n - 1; j > 0; j--) {
+      var k = Math.floor(rnd() * (j + 1));
+      t = arr[j]; arr[j] = arr[k]; arr[k] = t;
+    }
+    var identity = true;
+    for (i = 0; i < n; i++) if (arr[i] !== i) { identity = false; break; }
+    if (identity && n > 1) arr.push(arr.shift());
+    return arr;
+  }
   /* ================= 信元树（v2.2）=================
      行=字段节点：点行看详情（比喻/语义/枚举值/条款），点箭头展开子字段。
      参考形态：工程侧信令解析工具的"信元树"（左树右详情的紧凑内联版）。 */
@@ -233,17 +266,21 @@
       card.innerHTML = '<div class="qtag">Q' + (qi + 1) + '</div><div class="qtext">' + mdBold(q.q) + '</div>';
       var box = el('div', 'opts');
       var why = el('div', 'why');
-      q.o.forEach(function (o, oi) {
-        var b = el('button', 'opt', String.fromCharCode(65 + oi) + ' · ' + o);
+      var d2a = optionPerm(m.id + ':q' + qi, q.o.length);
+      var a2d = {};
+      d2a.forEach(function (ai, di) { a2d[ai] = di; });
+      d2a.forEach(function (ai, di) {
+        var b = el('button', 'opt', String.fromCharCode(65 + di) + ' · ' + q.o[ai]);
+        b.setAttribute('data-authored', String(ai));
         b.onclick = function () {
           box.querySelectorAll('.opt').forEach(function (x) { x.disabled = true; });
-          var res = R.Checkers.quiz(q, oi);
+          var res = R.Checkers.quiz(q, ai);
           if (res.correct) { b.classList.add('correct'); gotCount++; why.innerHTML = '<b>答对了。</b>' + mdBold(q.why); }
           else {
             b.classList.add('wrong');
-            box.querySelectorAll('.opt')[q.a].classList.add('correct');
+            box.querySelector('.opt[data-authored="' + q.a + '"]').classList.add('correct');
             why.className = 'why wrong-ans';
-            why.innerHTML = '<b>不对，选 ' + String.fromCharCode(65 + q.a) + '。</b>' + mdBold(q.why);
+            why.innerHTML = '<b>不对，选 ' + String.fromCharCode(65 + a2d[q.a]) + '。</b>' + mdBold(q.why);
           }
           answered++;
           why.classList.add('show');
@@ -367,25 +404,28 @@
       var dpHtml = '';
       if (dp) {
         var key = 'at' + dp.at, picked = dpAnswered[key];
+        var d2a = optionPerm(m.id + ':dp' + dp.at, dp.options.length);
+        var a2d = {};
+        d2a.forEach(function (ai, di) { a2d[ai] = di; });
         dpHtml = '<div class="dp-card">' +
           '<div class="dp-head"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>你就是 UE · 此刻怎么选？</div>' +
           '<div class="dp-q">' + mdBold(dp.q) + '</div>' +
-          '<div class="dp-opts">' + dp.options.map(function (o, i) {
+          '<div class="dp-opts">' + d2a.map(function (ai, di) {
             var cls = 'dp-opt';
             if (picked != null) {
-              if (i === dp.correct) cls += ' correct';
-              else if (i === picked) cls += ' wrong';
+              if (ai === dp.correct) cls += ' correct';
+              else if (ai === picked) cls += ' wrong';
             }
-            return '<button class="' + cls + '" data-i="' + i + '"' + (picked != null ? ' disabled' : '') + '>' +
-              String.fromCharCode(65 + i) + ' · ' + o + '</button>';
+            return '<button class="' + cls + '" data-i="' + ai + '"' + (picked != null ? ' disabled' : '') + '>' +
+              String.fromCharCode(65 + di) + ' · ' + dp.options[ai] + '</button>';
           }).join('') + '</div>' +
-          (picked != null ? '<div class="dp-why show"><b>' + (picked === dp.correct ? '选对了。' : '不对，正确是 ' + String.fromCharCode(65 + dp.correct) + '。') + '</b>' + mdBold(dp.why) +
+          (picked != null ? '<div class="dp-why show"><b>' + (picked === dp.correct ? '选对了。' : '不对，正确是 ' + String.fromCharCode(65 + a2d[dp.correct]) + '。') + '</b>' + mdBold(dp.why) +
             ' <span class="ref-badge">§' + dp.ref + '</span></div>' : '') +
           '</div>';
       }
       explain.innerHTML = '<div class="explain-body">' +
         '<div class="step-kicker">第 ' + idx + ' 步 / 共 ' + pathLen() + ' 步 · <span class="' + dir[1] + '">' + dir[0] + '</span>' +
-        ((d.ies && d.ies.length) ? ' · <a class="wb-link" href="../rrc-workbench/dist/index.html" target="_blank" title="在 ASN 编码实验室里亲手编码这条消息">去编码实验室 ↗</a>' : '') +
+        ((d.ies && d.ies.length) ? ' · <a class="wb-link" href="lab.html" target="_blank" title="在 ASN 编码实验室里亲手编码这条消息">去编码实验室 ↗</a>' : '') +
         '</div>' +
         '<h3 class="step-title">' + d.title + '</h3>' +
         plainHtml(d) +

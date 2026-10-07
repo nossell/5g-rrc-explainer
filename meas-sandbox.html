@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>参数沙盘 · RRC 讲解器</title>
+<meta name="description" content="TTT/迟滞/a3-Offset/滤波系数滑块 + A3 事件触发可视化——把测量课的判据机器变成能玩的：乒乓、迟报、干等一眼看穿。">
+<meta property="og:title" content="参数沙盘 · RRC 讲解器">
+<meta property="og:description" content="TTT/迟滞/a3-Offset/滤波系数滑块 + A3 事件触发可视化——把测量课的判据机器变成能玩的：乒乓、迟报、干等一眼看穿。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://nossell.github.io/5g-rrc-explainer/meas-sandbox.html">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+.sb-wrap{max-width:1080px;margin:0 auto;padding:34px 26px 70px}
+.sb-hero h1{font-size:26px;font-weight:800;letter-spacing:-.4px}
+.sb-hero .sub{color:var(--tx2);font-size:14px;margin-top:8px;line-height:1.7}
+.sb-ctrls{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px;margin-top:22px}
+.sb-ctrl{border:1px solid var(--bd);border-radius:12px;background:var(--panel);padding:12px 15px}
+.sb-ctrl .lab{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;color:var(--tx2)}
+.sb-ctrl .lab b{font:800 13px var(--sans);color:var(--tx1)}
+.sb-ctrl .val{font:800 12.5px var(--mono);color:var(--accent-deep);background:var(--accent-bg);border-radius:6px;padding:1px 8px}
+.sb-ctrl input[type=range]{width:100%;margin-top:9px;accent-color:var(--accent)}
+.sb-ctrl select{margin-top:8px;font:700 12.5px var(--mono);padding:4px 8px;border:1px solid var(--bd);border-radius:7px;background:var(--inset);color:var(--tx1)}
+.sb-sfrow{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:12px;color:var(--tx2);flex-wrap:wrap}
+.sb-sfrow select{margin-top:0}
+.sb-panel{margin-top:20px;border:1px solid var(--bd);border-radius:14px;background:var(--panel);padding:14px 16px 8px}
+.sb-panel h2{font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px}
+.sb-panel .psub{font-size:12px;color:var(--tx3);margin-top:2px}
+.sb-leg{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--tx2);margin-top:6px}
+.sb-leg i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:4px}
+.sb-status{margin-top:14px;border:1px solid var(--bd);border-radius:12px;background:var(--inset);padding:11px 15px;font-size:12.5px;line-height:1.8;color:var(--tx2)}
+.sb-status b{color:var(--tx1)}
+.sb-verdict{margin-top:4px;font-weight:700;color:var(--accent-deep)}
+.sb-note{margin-top:26px;font-size:12.5px;color:var(--tx3);line-height:1.75;border-top:1px solid var(--bd);padding-top:14px}
+.sb-note .fm{display:block;font:700 12px var(--mono);color:var(--tx2);margin-top:7px;overflow-wrap:anywhere}
+.sb-links{margin-top:10px;display:flex;gap:7px;flex-wrap:wrap}
+.sb-links a{font:700 11px var(--mono);text-decoration:none;color:var(--nas);background:#F5F0FE;border:1px solid #DDD3F5;border-radius:6px;padding:2px 9px}
+.sb-links a:hover{background:#EDE4FC}
+@media (max-width:640px){.sb-wrap{padding:26px 14px 60px}.sb-ctrls{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="sb-wrap">
+  <header class="top" style="margin:-34px -26px 0;padding:0 26px">
+  <a class="brand" href="index.html">
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 15 L7.5 15 L10 8 L13 18 L15.5 12 L17.5 15 L21 15" stroke="#18A34A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="15" r="1.6" fill="#18A34A"/></svg>
+    RRC 讲解器
+  </a>
+  <nav class="topnav">
+    <a class="navlink" href="index.html">目录</a>
+    <a class="navlink" href="app.html">课程</a>
+    <a class="navlink" href="interview.html">面试</a>
+    <a class="navlink" href="dict.html">词典</a>
+    <a class="navlink" href="anim.html">动画</a>
+    <a class="navlink" href="timer-net.html">定时器网</a>
+    <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink on" href="meas-sandbox.html">参数沙盘</a>
+    <a class="navlink" href="log-detective.html">日志侦探</a>
+    <a class="navlink" href="search.html">搜索</a>
+  </nav>
+  </header>
+
+  <section class="sb-hero">
+    <h1>参数沙盘——A3 事件的旋钮台</h1>
+    <p class="sub">测量课（M3/M42）讲过的那台判据机器，在这里变成能拧的旋钮：<b>timeToTrigger、hysteresis、a3-Offset、L3 滤波系数、UE 速度</b>。拖动任何一个，下面两张图实时重算——服务小区在降、邻区在升（合成轨迹），A3 判据逐采样评估，TTT 计时段与"上报"标记直接画在图上。<b>TTT/迟滞给太小会出现双标记（乒乓），给太大就看到琥珀色"干等"段迟迟不发货</b>。所有公式与档位照录测量课已审计文本，条款号挂在页脚。</p>
+  </section>
+
+  <div class="sb-ctrls">
+    <div class="sb-ctrl">
+      <div class="lab"><b>timeToTrigger（TTT）</b><span class="val" id="msv-ttt-val"></span></div>
+      <input type="range" id="msv-ttt" min="0" max="15" step="1" value="4">
+      <div class="psub" style="font-size:11px;color:var(--tx3);margin-top:4px">16 档 = 38.331 §6.3.2 TimeToTrigger 枚举原样（ms0 … ms5120）</div>
+    </div>
+    <div class="sb-ctrl">
+      <div class="lab"><b>hysteresis（Hys）</b><span class="val" id="msv-hys-val"></span></div>
+      <input type="range" id="msv-hys" min="0" max="30" step="1" value="2">
+      <div class="psub" style="font-size:11px;color:var(--tx3);margin-top:4px">INTEGER (0..30) dB——进入/离开条件各拉一边，滞回带的宽度</div>
+    </div>
+    <div class="sb-ctrl">
+      <div class="lab"><b>a3-Offset（Off）</b><span class="val" id="msv-off-val"></span></div>
+      <input type="range" id="msv-off" min="-30" max="30" step="1" value="3">
+      <div class="psub" style="font-size:11px;color:var(--tx3);margin-top:4px">MeasTriggerQuantityOffset INTEGER (-30..30) dB——事件级偏移，正得越多越保守</div>
+    </div>
+    <div class="sb-ctrl">
+      <div class="lab"><b>L3 滤波系数 k（filterCoefficient）</b><span class="val" id="msv-k-val"></span></div>
+      <input type="range" id="msv-k" min="0" max="14" step="1" value="4">
+      <div class="psub" style="font-size:11px;color:var(--tx3);margin-top:4px">fc0–fc9 + fc11–fc19 奇数档 = §6.3.2 枚举原样；k 越大曲线越钝</div>
+    </div>
+    <div class="sb-ctrl">
+      <div class="lab"><b>场景速度（合成轨迹斜率）</b><span class="val" id="msv-speed-val"></span></div>
+      <input type="range" id="msv-speed" min="3" max="120" step="1" value="30">
+      <div class="psub" style="font-size:11px;color:var(--tx3);margin-top:4px">只改合成信号的变化快慢（教学参数，非规范取值）</div>
+    </div>
+    <div class="sb-ctrl">
+      <div class="lab"><b>速度缩放（speedStatePars，§5.5.7.1）</b></div>
+      <div class="sb-sfrow">
+        <label><input type="radio" name="msv-ssf" value="none" checked> 未配置</label>
+        <label><input type="radio" name="msv-ssf" value="med"> 中速</label>
+        <label><input type="radio" name="msv-ssf" value="high"> 高速</label>
+      </div>
+      <div class="sb-sfrow">sf-Medium
+        <select id="msv-sfm"><option value="0.25">oDot25 = 0.25</option><option value="0.5" selected>oDot5 = 0.5</option><option value="0.75">oDot75 = 0.75</option><option value="1">lDot0 = 1.0</option></select>
+        ｜ sf-High
+        <select id="msv-sfh"><option value="0.25" selected>oDot25 = 0.25</option><option value="0.5">oDot5 = 0.5</option><option value="0.75">oDot75 = 0.75</option><option value="1">lDot0 = 1.0</option></select>
+      </div>
+      <div class="psub" style="font-size:11px;color:var(--tx3);margin-top:4px">枚举只有 0.25/0.5/0.75/1.0——缩放只会把 TTT 缩短或保持原值，不会放大</div>
+    </div>
+  </div>
+
+  <div class="sb-panel">
+    <h2>① 合成信号轨迹 <span style="font-weight:400;font-size:12px;color:var(--tx3)">RSRP（dBm）· 原始采样散点 + L3 滤波曲线</span></h2>
+    <div class="sb-leg">
+      <span><i style="background:#2563EB"></i>服务小区 Mp（原始）</span>
+      <span><i style="background:#B45309"></i>邻区 Mn（原始）</span>
+      <span><i style="background:#2563EB;height:3px"></i><span style="border-top:2.5px solid #2563EB;padding-top:1px">服务小区 L3 滤波</span></span>
+      <span><i style="background:#B45309;height:3px"></i><span style="border-top:2.5px solid #B45309;padding-top:1px">邻区 L3 滤波</span></span>
+    </div>
+    <div id="msv-svg-top" style="margin-top:4px"></div>
+  </div>
+
+  <div class="sb-panel">
+    <h2>② A3 判据机器 <span style="font-weight:400;font-size:12px;color:var(--tx3)">差值 Δ = Mn − Mp（滤波后）· 门限带 + TTT 计时段 + 上报标记</span></h2>
+    <div class="sb-leg">
+      <span><i style="background:#7C3AED;height:3px"></i><span style="border-top:2.5px solid #7C3AED;padding-top:1px">Δ 曲线</span></span>
+      <span><i style="background:#18A34A;height:3px"></i><span style="border-top:2px dashed #18A34A;padding-top:1px">进入线 Off + Hys</span></span>
+      <span><i style="background:#DC2626;height:3px"></i><span style="border-top:2px dashed #DC2626;padding-top:1px">离开线 Off − Hys</span></span>
+      <span><i style="background:#F59E0B;opacity:.35"></i>TTT 计时中</span>
+      <span><i style="background:#7C3AED"></i>▲ 上报</span>
+    </div>
+    <div id="msv-svg-bot" style="margin-top:4px"></div>
+  </div>
+
+  <div class="sb-status" id="msv-status"></div>
+
+  <div class="sb-links">
+    <a href="app.html#m3">课程 · 测量入门 M3</a>
+    <a href="app.html#m42">课程 · 测量机器 M42</a>
+    <a href="app.html#m4">课程 · 事件与切换 M4</a>
+    <a href="dict.html#k=hysteresis">词条 · hysteresis</a>
+    <a href="dict.html#k=timeToTrigger">词条 · timeToTrigger</a>
+    <a href="dict.html#k=filterCoefficient">词条 · filterCoefficient</a>
+    <a href="timer-net.html">组件 · 定时器交互网</a>
+  </div>
+
+  <p class="sb-note">
+    <b>口径与出处（公式句照录测量课 M42 已审计文本，本页只做可视化，不引入新论断）</b>
+    <span class="fm">A3 进入/离开（38.331 §5.5.4.4）：进入 A3-1：Mn + Ofn + Ocn − Hys &gt; Mp + Ofp + Ocp + Off；离开 A3-2：Mn + Ofn + Ocn + Hys &lt; Mp + Ofp + Ocp + Off。本沙盘未配 Ofn/Ocn/Ofp/Ocp——没配就置零，故进入条件化简为 Mn − Mp &gt; Off + Hys；Mp/Mn 取 L3 滤波后值。</span>
+    <span class="fm">L3 滤波（38.331 §5.5.3.2）：Fn = (1−a)·Fn−1 + a·Mn，a = 1/2^(k/4)；首样 F0 = M1；k=0 时 a=1——滤波输出恒等于最新采样，等效不滤波（NOTE 1）。本沙盘服务小区/邻区共用同一 k（教学简化；规范按测量量/RS 类型/小区/波束各配各的 filterCoefficient），采样间隔取 200ms 合成值（规范刻度假设一个 38.133 同频 L1 测量周期，随频段范围不同）。</span>
+    <span class="fm">速度缩放（38.331 §5.5.7.1 + §6.3.2 SpeedStateScaleFactors）：只缩放 timeToTrigger 一个参数——高速态乘 sf-High、中速态乘 sf-Medium；枚举 {oDot25, oDot5, oDot75, lDot0} = 0.25/0.5/0.75/1.0，只会缩短或保持，"放大延迟"在规范里不存在；未配 speedStatePars 则整条机制不存在，TTT 原值跑。</span>
+    <span class="fm">档位直证（38.331 §6.3.2，在库语料 38331-j30）：TimeToTrigger 枚举 ms0/ms40/ms64/ms80/ms100/ms128/ms160/ms256/ms320/ms480/ms512/ms640/ms1024/ms1280/ms2560/ms5120；Hysteresis INTEGER (0..30)；a3-Offset（MeasTriggerQuantityOffset）INTEGER (-30..30)；FilterCoefficient 枚举 fc0–fc9、fc11–fc19 奇数档。</span>
+    上方信号轨迹为合成数据，仅供判读练习；TTT 计时规则（进入条件须对 TTT 期间每一次 L3 滤波后测量成立，中途破一次从头再计）见 M42 mob 路径 b2 帧与 §5.5.4.1。
+  </p>
+</div>
+
+<footer style="border-top:1px solid var(--bd);padding:18px 0;text-align:center;color:var(--tx3);font-size:12.5px">
+  <div class="wrap" style="max-width:1080px;margin:0 auto;padding:0 26px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div class="flinks"><a href="index.html">目录</a><a href="app.html">课程</a><a href="dict.html">词典</a><a href="timer-net.html">定时器网</a></div>
+    <div>RRC 讲解器 · 动手系列（参数沙盘）</div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  /* ===== 档位（38.331 §6.3.2 在库枚举原样） ===== */
+  var TTT_ENUM = [0, 40, 64, 80, 100, 128, 160, 256, 320, 480, 512, 640, 1024, 1280, 2560, 5120];
+  var K_ENUM = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 15, 17, 19];
+
+  /* ===== 合成轨迹参数（教学可视化，非规范数值） ===== */
+  var T_END = 12, DT = 0.2, N = Math.round(T_END / DT) + 1;
+
+  function $(id) { return document.getElementById(id); }
+  function fx1(i) { return i * DT; }
+  function noiseS(i) { return 1.1 * Math.sin(1.9 * i + 0.7) + 0.7 * Math.sin(0.53 * i + 2.1) + 0.45 * Math.sin(3.1 * i + 4.0); }
+  function noiseN(i) { return 0.9 * Math.sin(1.6 * i + 2.3) + 0.6 * Math.sin(0.61 * i + 0.9) + 0.4 * Math.sin(2.7 * i + 1.2); }
+
+  function readState() {
+    var ttt = TTT_ENUM[+$('msv-ttt').value];
+    var hys = +$('msv-hys').value;
+    var off = +$('msv-off').value;
+    var k = K_ENUM[+$('msv-k').value];
+    var v = +$('msv-speed').value;
+    var mode = 'none';
+    [].forEach.call(document.querySelectorAll('input[name="msv-ssf"]'), function (r) { if (r.checked) mode = r.value; });
+    var sfm = +$('msv-sfm').value, sfh = +$('msv-sfh').value;
+    var sf = mode === 'med' ? sfm : mode === 'high' ? sfh : 1;
+    return { ttt: ttt, hys: hys, off: off, k: k, v: v, mode: mode, sf: sf, tttEff: ttt * sf };
+  }
+
+  /* ===== 仿真：采样 → L3 滤波 → A3 评估（进入须对 TTT 期间每次滤波后测量成立） ===== */
+  function simulate(st) {
+    var a = 1 / Math.pow(2, st.k / 4);
+    var slopeS = 0.45 + st.v / 38, slopeN = 0.4 + st.v / 42;
+    var rawS = [], rawN = [], filtS = [], filtN = [], delta = [];
+    var Fs = null, Fn = null;
+    for (var i = 0; i < N; i++) {
+      var ms = -77 - slopeS * fx1(i) + noiseS(i);
+      var mn = -93 + slopeN * fx1(i) + noiseN(i);
+      rawS.push(ms); rawN.push(mn);
+      Fs = (Fs === null) ? ms : (1 - a) * Fs + a * ms;   /* F0 = M1，k=0 时 a=1 等效不滤波 */
+      Fn = (Fn === null) ? mn : (1 - a) * Fn + a * mn;
+      filtS.push(Fs); filtN.push(Fn); delta.push(Fn - Fs);
+    }
+    /* A3 状态机：未触发→进入线持续 TTTeff 即上报；已触发→跌破离开线退出 */
+    var inTh = st.off + st.hys, outTh = st.off - st.hys;
+    var reports = [], pends = [], pend = null, entered = false;
+    for (var j = 0; j < N; j++) {
+      var t = fx1(j), d = delta[j];
+      if (!entered) {
+        if (d > inTh) {
+          if (!pend) { pend = { t0: t, t1: t }; pends.push(pend); }
+          pend.t1 = t;
+          if ((t - pend.t0) * 1000 >= st.tttEff - 1e-9) { reports.push({ t: t, i: j }); entered = true; pend = null; }
+        } else { pend = null; }
+      } else if (d < outTh) { entered = false; pend = null; }
+    }
+    if (pend) pend.t1 = T_END; /* 窗口结束仍在计时——"干等"可视化 */
+    return { rawS: rawS, rawN: rawN, filtS: filtS, filtN: filtN, delta: delta, reports: reports, pends: pends, inTh: inTh, outTh: outTh };
+  }
+
+  /* ===== SVG 绘制 ===== */
+  var W = 960, H1 = 300, H2 = 250, PADL = 46, PADR = 14, PADT = 14, PADB = 28;
+  function xpix(t) { return PADL + (t / T_END) * (W - PADL - PADR); }
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+  function grid(x0, y0, w, h) {
+    var s = '';
+    for (var gy = 0; gy <= 4; gy++) {
+      var yy = y0 + h - (h * gy / 4);
+      s += '<line x1="' + x0 + '" y1="' + yy + '" x2="' + (x0 + w) + '" y2="' + yy + '" stroke="var(--bd)" stroke-width="1" stroke-dasharray="3 4"/>';
+    }
+    for (var gt = 0; gt <= T_END; gt += 2) {
+      var xx = xpix(gt);
+      s += '<line x1="' + xx + '" y1="' + y0 + '" x2="' + xx + '" y2="' + (y0 + h) + '" stroke="var(--bd)" stroke-width="1" stroke-dasharray="3 6" opacity=".6"/>' +
+        '<text x="' + xx + '" y="' + (y0 + h + 16) + '" font-size="10.5" fill="var(--tx3)" text-anchor="middle">' + gt + 's</text>';
+    }
+    return s;
+  }
+  function pathOf(arr, ymap) {
+    var s = '';
+    for (var i = 0; i < arr.length; i++) s += (i ? 'L' : 'M') + xpix(fx1(i)).toFixed(1) + ' ' + ymap(arr[i]).toFixed(1);
+    return s;
+  }
+  function dotsOf(arr, ymap, color) {
+    var s = '';
+    for (var i = 0; i < arr.length; i++) s += '<circle cx="' + xpix(fx1(i)).toFixed(1) + '" cy="' + ymap(arr[i]).toFixed(1) + '" r="2.1" fill="' + color + '" opacity=".42"/>';
+    return s;
+  }
+
+  function drawTop(sim) {
+    var y0 = PADT, h = H1 - PADT - PADB;
+    var lo = -102, hi = -58;
+    function ym(v) { return y0 + h - (v - lo) / (hi - lo) * h; }
+    var s = '<svg id="msv-svgt" viewBox="0 0 ' + W + ' ' + H1 + '" width="100%" style="display:block">';
+    s += grid(PADL, y0, W - PADL - PADR, h);
+    for (var g = -100; g <= -60; g += 10) {
+      s += '<text x="' + (PADL - 7) + '" y="' + (ym(g) + 4) + '" font-size="10.5" fill="var(--tx3)" text-anchor="end">' + g + '</text>';
+    }
+    s += '<text x="' + (PADL - 7) + '" y="' + (y0 - 2) + '" font-size="10" fill="var(--tx3)" text-anchor="end">dBm</text>';
+    s += dotsOf(sim.rawS, ym, '#2563EB') + dotsOf(sim.rawN, ym, '#B45309');
+    s += '<path id="msv-filt-s" d="' + pathOf(sim.filtS, ym) + '" fill="none" stroke="#2563EB" stroke-width="2.4"/>';
+    s += '<path id="msv-filt-n" d="' + pathOf(sim.filtN, ym) + '" fill="none" stroke="#B45309" stroke-width="2.4"/>';
+    s += '</svg>';
+    $('msv-svg-top').innerHTML = s;
+  }
+
+  function drawBot(sim, st) {
+    var y0 = PADT, h = H2 - PADT - PADB;
+    var lo = Math.min(-16, sim.outTh - 4), hi = Math.max(16, sim.inTh + 4);
+    function ym(v) { return y0 + h - (v - lo) / (hi - lo) * h; }
+    var s = '<svg id="msv-svgb" viewBox="0 0 ' + W + ' ' + H2 + '" width="100%" style="display:block">';
+    s += grid(PADL, y0, W - PADL - PADR, h);
+    /* 滞回带 */
+    s += '<rect x="' + PADL + '" y="' + ym(sim.inTh).toFixed(1) + '" width="' + (W - PADL - PADR) + '" height="' + (ym(sim.outTh) - ym(sim.inTh)).toFixed(1) + '" fill="#18A34A" opacity=".07"/>';
+    /* TTT 计时段（琥珀） */
+    sim.pends.forEach(function (p, pi) {
+      s += '<rect class="msv-tttband" data-p="' + pi + '" x="' + xpix(p.t0).toFixed(1) + '" y="' + y0 + '" width="' + Math.max(1.5, xpix(p.t1) - xpix(p.t0)).toFixed(1) + '" height="' + h + '" fill="#F59E0B" opacity=".22"/>';
+    });
+    /* 门限线 */
+    s += '<line x1="' + PADL + '" y1="' + ym(sim.inTh).toFixed(1) + '" x2="' + (W - PADR) + '" y2="' + ym(sim.inTh).toFixed(1) + '" stroke="#18A34A" stroke-width="1.8" stroke-dasharray="7 5"/>';
+    s += '<line x1="' + PADL + '" y1="' + ym(sim.outTh).toFixed(1) + '" x2="' + (W - PADR) + '" y2="' + ym(sim.outTh).toFixed(1) + '" stroke="#DC2626" stroke-width="1.8" stroke-dasharray="7 5"/>';
+    s += '<text x="' + (W - PADR - 4) + '" y="' + (ym(sim.inTh) - 5).toFixed(1) + '" font-size="10.5" fill="#18A34A" text-anchor="end">进入线 Off+Hys = ' + sim.inTh + ' dB</text>';
+    s += '<text x="' + (W - PADR - 4) + '" y="' + (ym(sim.outTh) + 13).toFixed(1) + '" font-size="10.5" fill="#DC2626" text-anchor="end">离开线 Off−Hys = ' + sim.outTh + ' dB</text>';
+    /* Δ 曲线与刻度 */
+    s += '<path id="msv-delta" d="' + pathOf(sim.delta, ym) + '" fill="none" stroke="#7C3AED" stroke-width="2.4"/>';
+    var step = Math.max(1, Math.round((hi - lo) / 5));
+    for (var g = Math.ceil(lo / step) * step; g <= hi; g += step) {
+      s += '<text x="' + (PADL - 7) + '" y="' + (ym(g) + 4).toFixed(1) + '" font-size="10.5" fill="var(--tx3)" text-anchor="end">' + g + '</text>';
+    }
+    s += '<text x="' + (PADL - 7) + '" y="' + (y0 - 2) + '" font-size="10" fill="var(--tx3)" text-anchor="end">dB</text>';
+    /* 上报标记 */
+    sim.reports.forEach(function (r, ri) {
+      var xx = xpix(r.t).toFixed(1);
+      s += '<g class="msv-report" data-r="' + ri + '">' +
+        '<line x1="' + xx + '" y1="' + y0 + '" x2="' + xx + '" y2="' + (y0 + h) + '" stroke="#7C3AED" stroke-width="1.4" stroke-dasharray="4 4" opacity=".65"/>' +
+        '<path d="M' + xx + ' ' + (y0 + 4) + ' l9 0 l0 7 l-4.5 5 l-4.5 -5 z" fill="#7C3AED"/>' +
+        '<text x="' + (parseFloat(xx) + 13) + '" y="' + (y0 + 13) + '" font-size="10.5" font-weight="700" fill="#7C3AED">上报' + (ri + 1) + ' @' + r.t.toFixed(1) + 's</text></g>';
+    });
+    s += '</svg>';
+    $('msv-svg-bot').innerHTML = s;
+  }
+
+  function verdict(st, sim) {
+    if (sim.reports.length >= 2) return '窗口内上报 ' + sim.reports.length + ' 次——乒乓画像：门限带（2×Hys）与 TTT 挡不住噪声往返，把 Hys 或 TTT 调大再看。';
+    if (sim.reports.length === 1 && st.tttEff >= 1280) return '唯一一次上报且有效 TTT≥1.28s——大 TTT 在快变场景就是"迟报"（高速时谁该来救？看速度缩放那张卡）。';
+    if (sim.pends.length > 0) return '琥珀段=TTT 正在计时仍未满——条件成立但还在"干等"；拖大速度或调小 TTT 看它何时发货。';
+    if (sim.reports.length === 1) return '一次干净上报：过进入线→撑满 TTT→发货，未再跌回离开线。';
+    return '窗口内未触发——邻区从未稳定越过进入线，试试调小 a3-Offset 或加大场景速度。';
+  }
+
+  function render() {
+    var st = readState();
+    $('msv-ttt-val').textContent = st.ttt + ' ms';
+    $('msv-hys-val').textContent = st.hys + ' dB';
+    $('msv-off-val').textContent = (st.off > 0 ? '+' : '') + st.off + ' dB';
+    $('msv-k-val').textContent = 'fc' + st.k + '（a=' + (1 / Math.pow(2, st.k / 4)).toFixed(3) + '）';
+    $('msv-speed-val').textContent = st.v + ' km/h';
+    var sim = simulate(st);
+    drawTop(sim);
+    drawBot(sim, st);
+    var sfTxt = st.mode === 'none' ? '未配置（TTT 原值）'
+      : (st.mode === 'med' ? '中速 ×sf-Medium=' + st.sf : '高速 ×sf-High=' + st.sf);
+    $('msv-status').innerHTML =
+      'Δ（末样）<b>' + sim.delta[sim.delta.length - 1].toFixed(1) + ' dB</b> ｜ 进入线 <b>' + sim.inTh + ' dB</b> ｜ 离开线 <b>' + sim.outTh + ' dB</b>' +
+      ' ｜ TTT <b>' + st.ttt + ' ms</b>（' + sfTxt + '→有效 <b>' + (st.tttEff % 1 ? st.tttEff.toFixed(0) : st.tttEff) + ' ms</b>）' +
+      ' ｜ k=<b>fc' + st.k + '</b> ｜ 上报 <b>' + sim.reports.length + ' 次</b>' +
+      '<div class="sb-verdict">判读：' + esc(verdict(st, sim)) + '</div>';
+  }
+
+  [].forEach.call(document.querySelectorAll('.sb-ctrl input, .sb-ctrl select'), function (inp) {
+    inp.addEventListener('input', render);
+  });
+  render();
+})();
+</script>
+</body>
+</html>

@@ -3,10 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#18A34A">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
 <title>RRC 讲解器 — 交互式信令播放</title>
-<meta name="description" content="逐帧信令图 + 原表全量字段树 + 失败分支全集 + 决策点练习——42 门 3GPP 协议交互课。">
+<meta name="description" content="逐帧信令图 + 原表全量字段树 + 失败分支全集 + 决策点练习——43 门 3GPP 协议交互课。">
 <meta property="og:title" content="课程 · RRC 讲解器">
-<meta property="og:description" content="逐帧信令图 + 原表全量字段树 + 失败分支全集 + 决策点练习——42 门 3GPP 协议交互课。">
+<meta property="og:description" content="逐帧信令图 + 原表全量字段树 + 失败分支全集 + 决策点练习——43 门 3GPP 协议交互课。">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://nossell.github.io/5g-rrc-explainer/app.html">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -29,6 +32,7 @@
     <a class="navlink" href="anim.html">动画</a>
     <a class="navlink" href="timer-net.html">定时器网</a>
     <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink" href="meas-sandbox.html">参数沙盘</a>
     <a class="navlink" href="log-detective.html">日志侦探</a>
     <a class="navlink" href="search.html">搜索</a>
   </nav>
@@ -108,6 +112,12 @@
   window.addEventListener('hashchange', render);
   render();
 })();
+</script>
+<script>
+/* PWA：仅 https 注册（GitHub Pages 满足）；本地 http/file 不注册——测试面零影响（v6 块 5） */
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(function () {});
+}
 </script>
 </body>
 </html>

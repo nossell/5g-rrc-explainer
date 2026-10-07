@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#18A34A">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
 <title>面试模式 — RRC 讲解器</title>
 <meta name="description" content="跨模块模拟面试：按学习域抽卷、计时作答、交卷出分，错题自动留本并一键跳回对应课程帧重学。每道题挂 3GPP 条款锚点，经独立复核。">
 <meta property="og:title" content="面试模式 · RRC 讲解器">
@@ -55,6 +58,12 @@
 <script src="assets/interview.js"></script>
 <script>
 RRC.Interview.mount(document.getElementById('iv-root'), RRC.Store());
+</script>
+<script>
+/* PWA：仅 https 注册（GitHub Pages 满足）；本地 http/file 不注册——测试面零影响（v6 块 5） */
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(function () {});
+}
 </script>
 </body>
 </html>

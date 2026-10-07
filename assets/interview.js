@@ -206,6 +206,58 @@
     return loadMisses().filter(function (r) { return (r.due || 0) <= now; });
   }
 
+  /* ---------- 就绪度（v6 块 3）：按学习域实时聚合，零新 localStorage 键 ----------
+     域内完成课占比 50% + quiz 正确率 30% + 错题本该域到期清零度 20% → 0–100 分。
+     只统计当前授权可见的模块（付费未解锁不扣分）；纯读 store + 错题本。 */
+  function domainOf(mid) {
+    var dom = '其他课程';
+    if (R.HUB_GROUPS) R.HUB_GROUPS.forEach(function (grp) {
+      if (grp.mods.indexOf(mid) >= 0) dom = grp.short;
+    });
+    return dom;
+  }
+  function readinessFor(store) {
+    store = store || R.Store();
+    var demo = store.license().demo;
+    var p = pool(store);
+    var domains = [];
+    if (R.HUB_GROUPS) R.HUB_GROUPS.forEach(function (grp) {
+      if (p.some(function (q) { return q.domain === grp.short; }) && domains.indexOf(grp.short) < 0) domains.push(grp.short);
+    });
+    var misses = loadMisses(), now = Date.now();
+    return domains.map(function (d) {
+      var mods = R.modules().filter(function (m) { return (m.free || demo) && domainOf(m.id) === d; });
+      var doneN = mods.filter(function (m) { var pr = store.progress(m.id); return pr && pr.done; }).length;
+      var donePct = mods.length ? doneN / mods.length : 0;
+      var qGot = 0, qTot = 0;
+      mods.forEach(function (m) { var s = store.quizScore(m.id); if (s && s.total) { qGot += s.got; qTot += s.total; } });
+      var quizPct = qTot ? qGot / qTot : 0;
+      var rows = misses.filter(function (r) {
+        var q = p.filter(function (x) { return x.qid === r.qid; })[0];
+        return q && q.domain === d;
+      });
+      var missPct = rows.length ? 1 - rows.filter(function (r) { return (r.due || 0) <= now; }).length / rows.length : 1;
+      var score = Math.round(50 * donePct + 30 * quizPct + 20 * missPct);
+      score = Math.max(0, Math.min(100, score));
+      return { domain: d, score: score, verdict: score < 40 ? '起步期' : score < 70 ? '强化期' : '应试期', doneN: doneN, modN: mods.length };
+    });
+  }
+  /* ---------- 追问训练折叠块（结果页与错题本共用；数据在 assets/content/followups.js） ---------- */
+  function followupBlock(qid) {
+    var fu = (typeof g.RRC_FOLLOWUPS !== 'undefined' && g.RRC_FOLLOWUPS) ? g.RRC_FOLLOWUPS.get(qid) : null;
+    if (!fu || !fu.levels || !fu.levels.length) return null;
+    var box = el('div', 'iv-fu');
+    var btn = el('button', 'iv-fu-btn', '追问训练（' + fu.levels.length + ' 层）——面试官会怎么追问');
+    var list = el('div', 'iv-fu-list');
+    list.innerHTML = fu.levels.map(function (lv, li) {
+      return '<div class="iv-fu-lv"><div class="iv-fu-q">追问 ' + (li + 1) + '：' + mdBold(lv.q) + '</div>' +
+        '<div class="iv-fu-a">' + mdBold(lv.a) + ' <span class="ref-badge">§' + esc(lv.ref) + '</span></div></div>';
+    }).join('');
+    btn.onclick = function () { box.classList.toggle('open'); };
+    box.appendChild(btn); box.appendChild(list);
+    return box;
+  }
+
   /* ---------- 挂载 ---------- */
   function mount(root, store, opts) {
     opts = opts || {};
@@ -258,6 +310,19 @@
       tgl.innerHTML = '<input type="checkbox"' + (cfg.timer ? ' checked' : '') + '><span class="pt-track"><span class="pt-knob"></span></span>每题 60 秒（面试节奏，到点自动交卷）';
       tgl.querySelector('input').onchange = function (e) { cfg.timer = e.target.checked; };
       var demo = store.license().demo;
+      /* 就绪度卡（v6 块 3）：实时聚合，零新存储键 */
+      var rd = readinessFor(store);
+      if (rd.length) {
+        var rcard = el('div', 'iv-readiness');
+        rcard.innerHTML = '<div class="iv-rd-cap">就绪度 · 按学习域（完成课 50% + 测验正确率 30% + 错题清零 20%）</div>' +
+          '<div class="iv-rd-row">' + rd.map(function (x) {
+            return '<div class="iv-rd-cell"><b>' + esc(x.domain) + '</b>' +
+              '<span class="iv-rd-bar"><i style="width:' + x.score + '%"></i></span>' +
+              '<em>' + x.score + '</em><u>' + esc(x.verdict) + '</u>' +
+              '<small>' + x.doneN + '/' + x.modN + ' 课</small></div>';
+          }).join('') + '</div>';
+        w.appendChild(rcard);
+      }
       var meta = el('p', 'iv-meta',
         '题库共 <b>' + pool(Object.assign({}, store, { license: function () { return { demo: true }; } })).length + '</b> 题' +
         '（当前可用 <b>' + p.length + '</b> 题' + (demo ? '' : '——演示解锁后全部开放') + '）' +
@@ -491,6 +556,8 @@
             '<div class="ivw-why">' + mdBold(x.q.why) + '</div>' +
             '<div class="ivw-foot"><a class="wb-link" href="app.html#' + esc(x.q.mod) + '">去重学：M' + x.q.modNum + ' ' + esc(modTitle(x.q.mod)) + ' →</a>' +
             ' <span class="ref-badge">§' + esc(x.q.ref || '') + '</span></div>';
+          var fb = followupBlock(x.q.qid);
+          if (fb) row.appendChild(fb);
           w.appendChild(row);
         });
       }
@@ -540,6 +607,8 @@
             '　正确：<b class="good">' + String.fromCharCode(65 + q.correct) + ' · ' + esc(q.options[q.correct]) + '</b>' +
             '　<span class="badge">' + esc(q.domain) + '</span> <span class="ref-badge">§' + esc(q.ref || '') + '</span>' + dueTag + '</div>' +
             '<div class="ivw-foot"><a class="wb-link" href="app.html#' + esc(q.mod) + '">去重学 →</a></div>';
+          var fb = followupBlock(q.qid);
+          if (fb) row.appendChild(fb);
         }
         w.appendChild(row);
       });
@@ -598,6 +667,8 @@
       reviewDue: function () { return dueRows().length; },
       showWrongbook: function () { setTab('misses'); },
       misses: function () { return loadMisses(); },
+      followups: function (qid) { return (typeof g.RRC_FOLLOWUPS !== 'undefined' && g.RRC_FOLLOWUPS) ? g.RRC_FOLLOWUPS.get(qid) : null; },
+      readiness: function () { return readinessFor(store); },
       state: function () {
         return { phase: view, idx: exam ? exam.idx : 0, n: exam ? exam.qs.length : 0, score: exam ? exam.score : 0 };
       },
@@ -606,5 +677,5 @@
   }
 
   R.Interview = { mount: mount, pool: pool, buildMissMarkdown: buildMissMarkdown, buildProgressMarkdown: buildProgressMarkdown,
-    buildBackupJSON: buildBackupJSON, restoreBackupJSON: restoreBackupJSON };
+    buildBackupJSON: buildBackupJSON, restoreBackupJSON: restoreBackupJSON, readinessFor: readinessFor };
 })(typeof window !== 'undefined' ? window : globalThis);

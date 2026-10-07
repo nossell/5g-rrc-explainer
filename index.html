@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#18A34A">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png">
 <title>RRC 讲解器 — 把 5G 协议当成一场看得见的接力赛来学</title>
 <meta name="description" content="每次解锁手机，网络都在 19 步信令内办好"落户"。逐帧播放的信令图、每个字段配比喻、每句论断锚定 3GPP 条款——面向通信求职者与在校生的交互式协议课。">
 <meta property="og:title" content="RRC 讲解器 — 5G 无线信令交互课堂">
@@ -41,6 +44,7 @@
     <a class="navlink" href="anim.html">动画</a>
     <a class="navlink" href="timer-net.html">定时器网</a>
     <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink" href="meas-sandbox.html">参数沙盘</a>
     <a class="navlink" href="log-detective.html">日志侦探</a>
     <a class="navlink" href="search.html">搜索</a>
   </nav>
@@ -167,11 +171,12 @@
 <!-- ============ 内部视角 & 动手组件 ============ -->
 <section class="intro-sec">
   <h2 class="sec">不止看流程——钻进协议的里子，再上手断案</h2>
-  <p class="sec-sub">课程之外的四间工具房：两件"内部视角"看协议在 UE 身上留下的行为与记忆，一间词典房查信元，一间动手房拿真实工单的读法练手。</p>
+  <p class="sec-sub">课程之外的五间工具房：两件"内部视角"看协议在 UE 身上留下的行为与记忆，一间词典房查信元，一间沙盘房把测量判据拧成手感，一间动手房拿真实工单的读法练手。</p>
   <div class="trust-row tools">
     <a class="trust" href="timer-net.html"><div class="trust-t">定时器交互网</div><div class="trust-d">14 个定时器的三问：何时开跑、什么让它停、超时发生什么。四幕摆开，配四状态条。</div></a>
     <a class="trust" href="variables-map.html"><div class="trust-t">UE 变量地图</div><div class="trust-d">16 个 UE 变量的三问：谁写我、谁读我、何时清空。看"协议记住了什么"，附回 IDLE 大扫除清单。</div></a>
-    <a class="trust" href="dict.html"><div class="trust-t">信元词典</div><div class="trust-d">89 个跨消息复用信元的详解：是什么、为什么这样设计、字段树一键直达。</div></a>
+    <a class="trust" href="dict.html"><div class="trust-t">信元词典</div><div class="trust-d">106 个跨消息复用信元的详解：是什么、为什么这样设计、字段树一键直达。</div></a>
+    <a class="trust" href="meas-sandbox.html"><div class="trust-t">参数沙盘</div><div class="trust-d">TTT/迟滞/a3-Offset/滤波系数滑块 + A3 触发可视化——乒乓、迟报、干等一眼看穿，测量课的判据机器拧成手感。</div></a>
     <a class="trust" href="log-detective.html"><div class="trust-t">信令日志侦探</div><div class="trust-d">八份合成案卷共 134 行：逐行标注"这是哪条流程的第几步"，交卷判分——面试前的手感房。</div></a>
   </div>
 </section>
@@ -230,6 +235,12 @@ RRC.FlowAnim.mount(document.getElementById('attach-anim'), 'attach', { autoplay:
     });
   });
 })();
+</script>
+<script>
+/* PWA：仅 https 注册（GitHub Pages 满足）；本地 http/file 不注册——测试面零影响（v6 块 5） */
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(function () {});
+}
 </script>
 </body>
 </html>

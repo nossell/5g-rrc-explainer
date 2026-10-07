@@ -1,0 +1,14 @@
+{
+  "name": "RRC 讲解器 · 3GPP 协议可视化课",
+  "short_name": "RRC 讲解器",
+  "description": "面向通信求职者的交互式 3GPP 协议课程：逐帧信令图、失败分支演示、点 §徽章看规范原文短引。",
+  "start_url": "index.html",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#F6F4EF",
+  "theme_color": "#18A34A",
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

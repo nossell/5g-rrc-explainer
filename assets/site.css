@@ -177,6 +177,27 @@ h2.sec{font-size:20px;font-weight:800;letter-spacing:-.3px;margin-top:48px}
 .ivw-a .good{color:var(--ok)}
 .ivw-why{font-size:12.5px;color:var(--tx2);margin-top:7px;line-height:1.7;border-top:1px dashed var(--bd);padding-top:8px}
 .ivw-foot{margin-top:8px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+/* 追问训练折叠块（v6 块 3，结果页与错题本共用） */
+.iv-fu{margin-top:9px}
+.iv-fu-btn{font:700 12px var(--sans);color:var(--accent-deep);background:var(--accent-bg);border:1px solid var(--accent);border-radius:8px;padding:5px 11px;cursor:pointer}
+.iv-fu-btn:hover{filter:brightness(.97)}
+.iv-fu-list{display:none;margin-top:8px;border-left:3px solid var(--accent);padding-left:11px}
+.iv-fu.open .iv-fu-list{display:block}
+.iv-fu-lv{margin-top:7px;font-size:12.5px;line-height:1.7}
+.iv-fu-lv:first-child{margin-top:0}
+.iv-fu-q{font-weight:700;color:var(--tx1)}
+.iv-fu-a{color:var(--tx2);margin-top:3px}
+/* 就绪度卡（v6 块 3，config 页顶部横排） */
+.iv-readiness{border:1px solid var(--bd);border-radius:12px;background:var(--panel);padding:11px 14px;margin-bottom:12px}
+.iv-rd-cap{font-size:11.5px;color:var(--tx3);font-weight:700}
+.iv-rd-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.iv-rd-cell{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"b bar e" "b bar v" "b bar s";align-items:center;column-gap:8px;border:1px solid var(--bd);border-radius:9px;background:var(--bg);padding:7px 11px;min-width:150px;flex:1}
+.iv-rd-cell b{grid-area:b;font:800 12.5px var(--sans);color:var(--tx1)}
+.iv-rd-cell em{grid-area:e;font:800 15px var(--mono);font-style:normal;color:var(--accent-deep)}
+.iv-rd-cell u{grid-area:v;font-size:11px;color:var(--tx2);text-decoration:none}
+.iv-rd-cell small{grid-area:s;font-size:10.5px;color:var(--tx3)}
+.iv-rd-bar{grid-area:bar;display:block;height:7px;border-radius:4px;background:var(--inset);overflow:hidden}
+.iv-rd-bar i{display:block;height:100%;border-radius:4px;background:var(--accent)}
 .msg:hover{opacity:.85}
 .msg.future:hover{opacity:.55}
 .msg:hover .mlabel,.msg:hover .fx-label{text-decoration:underline;text-underline-offset:3px}
@@ -525,6 +546,9 @@ button.pathstep:focus-visible{outline:2px solid var(--accent);outline-offset:2px
   .trust-row{grid-template-columns:repeat(2,1fr)}
   .vs-row{grid-template-columns:1fr;gap:6px}
   .vs-arrow{transform:rotate(90deg)}
+}
+@media (max-width:430px){
+  .trust-row{grid-template-columns:1fr}
 }
 
 /* ---------- 流程动画（FlowAnim · 私有资产库） ---------- */
