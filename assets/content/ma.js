@@ -203,7 +203,7 @@ ies: [
         label: 'AMF · SBA 取鉴权向量', chan: '核心网内部 · AUSF/UDM（33.501 地界）',
         narr: '**为什么有它**：能发 Msg3 的不一定是真卡——克隆卡/伪终端都能喊一嗓子。AMF 收到注册请求后第一件事是验身：经服务化接口（SBA）找 **AUSF/UDM** 取鉴权向量（5G-AKA 或 EAP-AKA\'），产出根密钥材料 **K_AMF**——它不出核心网，后续 AS 安全的 KgNB 由 gNB 从它派生。鉴权本体的算法与流程在 TS 33.501/29.50x 地界，本图画到"AMF 拿到结果"为止。',
         plain: '登记台不轻信来客——万一敲门的是克隆卡呢？它先去后台验证部门调一套出题材料，准备考一考这张卡是真是假，顺便拿到后续加密要用的根钥匙材料。',
-        refs: ['38.413#8.6.1'],
+        refs: ['38.413#8.6.1', '33.501#6.1.3'],
         ies: [],
         exam: '层次题："鉴权在哪层做？"——NAS 层（UE↔AMF↔AUSF/UDM），RRC/NGAP 只当邮差。'
       },
@@ -310,7 +310,7 @@ ies: [
       maa12: {
         title: 'INITIAL CONTEXT SETUP REQUEST ★交钥匙', dir: 'nas', from: 2, to: 1,
         label: 'INITIAL CONTEXT SETUP REQ', chan: 'NG-C（38.413 §8.3.1/§9.2.2.1）· AMF→gNB · 档案整包交接',
-        narr: '**为什么有它**：到目前为止 gNB 只是"邮差"——不认识这个 UE。这条消息让 gNB 从邮差变成管家：安全钥匙（派生 KgNB 的材料）、安全能力、速率闸门（UE-AMBR）、（有会话时）待建资源清单、还捎着 **NAS 的安全命令**（§8.3.1.2："pass it transparently towards the UE"——核心网连保安都搭这条车）。**本流程最厚的一条消息（原表 50+ 信元一字未并，全部在此）**：字段树默认亮重点，点"展开全部字段"看全量；PDU 会话清单里还有对 AMF 透明的传输容器（UPF 隧道/QoS 流配置，逐层展开四层）。\n\n**读树心法（为什么第一层是"平"的）**：NGAP 每条消息在 ASN.1 里就是一个信元容器（ProtocolIE-Container），56 个信元**平级排队**，每项自带三张标签——信元号 / 关键度（reject·ignore）/ **在场性 Presence（mandatory·optional·conditional）**。你在解码工具里看到的"另一层包裹"，是每个信元外面统一套的 ProtocolIE-Field{id, criticality, value} 外壳，不是信元本身的层级；真正的层级只存在于复合信元内部（如本条的 PDU 会话清单→传输容器→QoS 流清单，已逐层展开）。所以这张表第一层长、子孙少——**长得平是协议的真实形状**。对比：RRC 消息（如本流程第 ③④⑤ 帧）没有这层容器，信纸直接是 ASN.1 结构体，criticalExtensions 版格外壳下层层嵌套，树形自然更深。',
+        narr: '**为什么有它**：到目前为止 gNB 只是"邮差"——不认识这个 UE。这条消息让 gNB 从邮差变成管家：安全钥匙（派生 KgNB 的材料）、安全能力、速率闸门（UE-AMBR）、（有会话时）待建资源清单、还捎着 **NAS 的安全命令**（§8.3.1.2："pass it transparently towards the UE"——核心网连保安都搭这条车）。**本流程最厚的一条消息（原表 50+ 信元一字未并，全部在此）**：字段树默认亮重点，点"展开全部字段"看全量；PDU 会话清单里还有对 AMF 透明的传输容器（UPF 隧道/QoS 流配置，逐层展开四层）。\n\n**读树心法（为什么第一层是"平"的）**：NGAP 每条消息在 ASN.1 里就是一个信元容器（ProtocolIE-Container），57 个信元**平级排队**，每项自带三张标签——信元号 / 关键度（reject·ignore）/ **在场性 Presence（mandatory·optional·conditional）**。你在解码工具里看到的"另一层包裹"，是每个信元外面统一套的 ProtocolIE-Field{id, criticality, value} 外壳，不是信元本身的层级；真正的层级只存在于复合信元内部（如本条的 PDU 会话清单→传输容器→QoS 流清单，已逐层展开）。所以这张表第一层长、子孙少——**长得平是协议的真实形状**。对比：RRC 消息（如本流程第 ③④⑤ 帧）没有这层容器，信纸直接是 ASN.1 结构体，criticalExtensions 版格外壳下层层嵌套，树形自然更深。',
         plain: '验身通过，核心网把整包开张材料交给基站：安全钥匙、限速额度、该建的资源清单一应俱全——基站从只管传信的邮差，升级成掌管这台手机事务的管家。',
         refs: ['38.413#8.3.1', '38.413#9.2.2.1', '38.413#9.3.4.1'],
         ies: [
@@ -455,7 +455,7 @@ ies: [
       maa16: {
         title: 'UECapabilityInformation（能力答卷）', dir: 'ul', from: 0, to: 1,
         label: 'UECapabilityInformation', chan: 'DCCH · SRB1 · 逐制式容器 + 过滤口径声明',
-        narr: '**为什么必须有它**：问了一定要有答，网络等的就是这份答卷——逐制式的能力容器，还要**声明实际采用的过滤口径**（appliedFreqBandListFilter）：网络要拿它对账（与缓存口径一致才命中）。答卷太大时走 UL RRC 分段（多条拼装，M1 讲过那个指示位）。此后网络的定制配置全以这份档案为底。',
+        narr: '**为什么必须有它**：问了一定要有答，网络等的就是这份答卷——逐制式的能力容器，还要**声明实际采用的过滤口径**（appliedFreqBandListFilter）：网络要拿它对账（与缓存口径一致才命中）。答卷太大时走 UL RRC 分段（多条拼装，M1 的 SetupComplete 字段树里见过那个指示位）。此后网络的定制配置全以这份档案为底。',
         plain: '手机交上能力答卷，注明这是按基站指定的口径答的题，好让网络对得上账——此后所有定制配置，都以这份档案为底。',
         refs: ['5.6.1', '5.6.1.4'],
 ies: [
@@ -480,9 +480,9 @@ ies: [
         exam: '"答卷里为什么要声明过滤口径？"——网络对账缓存：口径一致才复用，避免每次重问。'
       },
       maa17: {
-        title: 'RRCReconfiguration（装 SRB2/DRB + 捎带 Accept）', dir: 'dl', from: 1, to: 0,
+        title: 'RRCReconfiguration（装 SRB2/DRB）', dir: 'dl', from: 1, to: 0,
         label: 'RRCReconfiguration', chan: 'DCCH · SRB1 · 建承载 · 带 Registration Accept',
-        narr: '**为什么有它**：验完身、登完记，该发"装备"了——SRB2（NAS 专用信令通道）和 DRB（数据承载）一次装齐。**为什么此刻才装**：它们承载的内容必须加密（KUPenc 依赖安全激活）——顺序是结构不是建议。**NAS 的 Registration Accept 也搭这条车下行**。这条消息是 RRC 的"瑞士军刀"（M6 深讲：建/改/释承载、测量、切换都是它）。',
+        narr: '**为什么有它**：验完身、登完记，该发"装备"了——SRB2（NAS 专用信令通道）和 DRB（数据承载）一次装齐。**为什么此刻才装**：它们承载的内容必须加密（KUPenc 依赖安全激活）——顺序是结构不是建议。**Registration Accept 的投递**：它随上一帧 ICS REQUEST 的 NAS-PDU 透明抵达 gNB，但 RRCReconfiguration 消息本体不带 NAS 透传字段（§6.2.2 的 ASN.1 无此槽位）——投递另有 DLInformationTransfer 专线（§5.7.1，M6 深讲）。这条消息是 RRC 的"瑞士军刀"（M6 深讲：建/改/释承载、测量、切换都是它）。',
         plain: '该发装备了：专跑信令的第二条通道和真正运数据的承载一次配齐——之前不发不是怠慢，是这些内容必须等加密生效才准上路；注册通过的批复也搭这趟车下来。',
         refs: ['5.3.5.6', '5.3.5.1'],
 ies: [
@@ -559,8 +559,8 @@ ies: [
       },
       maa18: {
         title: 'RRCReconfigurationComplete（+注册完成捎带）', dir: 'ul', from: 0, to: 1,
-        label: 'RRCReconfigurationComplete', chan: 'DCCH · SRB1 · 配置生效回执 + Registration Complete',
-        narr: '**为什么必须有它**：装机单签收——网络必须知道配置真的生效了（否则资源状态两边对不上账）。回执里再捎一封 **Registration Complete**（NAS）：注册流程的收尾确认。注意回执仍走 SRB1——"装新网卡的回执不必等新网卡"。',
+        label: 'RRCReconfigurationComplete', chan: 'DCCH · SRB1 · 配置生效回执',
+        narr: '**为什么必须有它**：装机单签收——网络必须知道配置真的生效了（否则资源状态两边对不上账）。回执就是回执：**Registration Complete 这封 NAS 收尾不走这条消息**（RRCReconfigurationComplete 的 ASN.1 里没有 NAS 槽位），它在配置生效后经 ULInformationTransfer 专线（§5.7.2）发回、NGAP 侧对应 UPLINK NAS TRANSPORT。注意回执仍走 SRB1——"装新网卡的回执不必等新网卡"。',
         plain: '手机在装机单上签字：新装备全部装好生效；并顺手捎上给核心网的注册完结确认——两边账本这才对得上。',
         refs: ['5.3.5.3'],
 ies: [
@@ -607,14 +607,14 @@ ies: [
         plain: '验身不过流程就走不下去：或核心网验出考卷不对、直接拒绝注册；或手机校验安全指令失败、主动报失败——用户看到的常是无服务，最常见根因是 SIM 卡和网络的密钥体系对不上。',
         refs: ['5.3.4.3'],
         ies: [],
-        exam: '"UE 收到 SMC 校验不过会硬吞吗？"——不会：回 SecurityModeFailure 带失败原因，网络可换算法重试。'
+        exam: '"UE 收到 SMC 校验不过会硬吞吗？"——不会：回 SecurityModeFailure（消息本体不带失败原因字段，§6.2.2 可证），网络可换算法重试。'
       },
       maaf2: {
         title: '注册受限与重试', dir: 'warn', from: 0, to: 1,
         label: '拒绝 → 退避重试', chan: 'Reject(带 backoff) / UAC 限行 · 定时退避',
-        narr: '另一族失败：**Registration Reject 带退避时间**（拥塞/漫游限制——退避期内不再尝试）；或接入层就被 **UAC 门禁拦下**（M3 门禁字段课）。失败不是终点：退避到点重试、换 PLMN、换小区——接入成功率的分子分母就从这些分支里来。演示结束：关闭失败开关回看成功路径。',
+        narr: '另一族失败：**Registration Reject 带退避时间**（拥塞/漫游限制——退避期内不再尝试）；或接入层就被 **UAC 门禁拦下**（M1 讲接入检查、M2 讲 SIB1 门禁字段）。失败不是终点：退避到点重试、换 PLMN、换小区——接入成功率的分子分母就从这些分支里来。演示结束：关闭失败开关回看成功路径。',
         plain: '另一类拒绝自带冷静期：网络说现在太挤，退避时间内别再试；手机便掐表等冷却，到点再试，或换别家网络、别的小区。',
-        refs: ['5.3.15.2'],
+        refs: ['5.3.15.2', '5.3.14'],
         ies: [],
         exam: '把"鉴权失败 vs 拒绝退避"分两类讲（验身不过 vs 名额不够），排障立刻清晰：前者查卡与密钥，后者查拥塞与权限。'
       }
@@ -655,7 +655,7 @@ ies: [
       { id: 'smc-integrity-fail', cond: 'SecurityModeCommand 完整性校验失败（算法/密钥派生不一致）', timer: null,
         trans: 'UE 回 SecurityModeFailure → 网络换算法重试或释放连接', kpi: '安全激活成功率；反复失败指向密钥体系或实现缺陷',
         ref: '5.3.4.3',
-        deep: '**校验失败≠崩溃**：SecurityModeFailure 带失败原因，网络可换算法再来。真失败的是派生不一致（K_AMF 链哪环错了）或算法能力协商 bug（老网新终端高发区）。**排障顺口溜**：先看算法双方认不认，再查密钥链（鉴权→K_AMF→KgNB）哪段断了。' },
+        deep: '**校验失败≠崩溃**：SecurityModeFailure 不带失败原因（消息本体无 cause 字段），网络可换算法再来。真失败的是派生不一致（K_AMF 链哪环错了）或算法能力协商 bug（老网新终端高发区）。**排障顺口溜**：先看算法双方认不认，再查密钥链（鉴权→K_AMF→KgNB）哪段断了。' },
       { id: 'registration-reject', cond: 'Registration Reject 带退避时间（拥塞/漫游/区域限制）', timer: null,
         trans: 'UE 退避期内停止注册尝试（NAS 定时器族管理，24.501 地界）；到点重试', kpi: '注册 KPI 分母；退避风暴防护',
         ref: '38.413#8.6.2',
@@ -707,7 +707,7 @@ ies: [
       {
         q: 'NAS 安全模式命令（NAS SMC）怎么到达 UE？',
         o: ['独立 RRC 消息直发', '藏在 INITIAL CONTEXT SETUP REQUEST 的 NAS-PDU 里经 gNB 透传', 'SIB1 广播', 'UE 本地生成'], a: 1,
-        why: 'ICS REQUEST 携带 NAS-PDU 时 NG-RAN 原样下发——与 Registration Accept 搭重配置的车同一套路。',
+        why: 'ICS REQUEST 携带 NAS-PDU 时 NG-RAN 原样下发——Registration Accept 同理：随 ICS 的 NAS-PDU 捎到 gNB，再由 DLInformationTransfer 专线投递。',
         ref: '38.413#8.3.1'
       },
       {

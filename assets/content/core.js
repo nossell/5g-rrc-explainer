@@ -47,7 +47,7 @@
         label: 'Msg2 · 随机接入响应 RAR', chan: 'PDCCH（RA-RNTI）+ PDSCH · TA / TC-RNTI / UL grant',
         narr: '基站回话："听到了，你是 X 号。"RAR 带三样东西——上行定时提前量 TA（对表用，纠正传播时延）、临时身份 TC-RNTI（后续 Msg3 重传时的身份标识）、上行授权 UL grant（在哪个时频资源上发 Msg3）。UE 从此有资格开口说话。\n\n**身份的接力棒**：TC-RNTI 是"临时工牌"，等 Msg4 竞争解决后转正为 C-RNTI，成为 CONNECTED 态的正式身份——这个接力（随机值 → TC-RNTI → C-RNTI）是理解整个建立流程身份管理的主线。TA/TC-RNTI/UL grant 的机制细节在 TS 38.321。',
         plain: '基站应门，一次递来三样：对表用的提前量、一块临时工牌、下一条消息该用哪段无线资源的指定——手机从此有资格正式开口。',
-        refs: ['5.3.3.2'],
+        refs: ['5.3.3.2', '38.321#6.2'],
         ies: [],
         exam: 'RAR 是用 RA-RNTI 加扰的 PDCCH 调度的；TA 是上行同步关键词，答对这两个词面试官就知道你真看过流程。追问"TC-RNTI 后来去哪了"——竞争解决后转正为 C-RNTI。'
       },
@@ -243,7 +243,7 @@
         trans: '复位 MAC、释放 MAC 配置、为已建立 RB 重建 RLC → 留在 RRC_IDLE，可重选后再发起',
         kpi: 'RRC 建立失败（成功率 KPI 分母 +1）；同小区连续失败达 connEstFailCount 次后，一段有效期内该小区被加临时偏移 connEstFailOffset（降权重）',
         ref: '5.3.3.7',
-        deep: '**为什么要复位 MAC、重建 RLC？**——T300 期间为发 Msg3 已配置了底层实体（默认 MAC 配置、CCCH 的 RLC）。回 IDLE 意味着这些"半成品"配置全部作废：MAC 复位清掉临时状态（含 TC-RNTI），RLC 重建清掉缓存队列，下次建立从默认配置重新来——不留上次尝试的任何残余，这是"无状态重来"的设计哲学。**T300 取值谁定的？**——SIB1 的 ue-TimersAndConstants，规范枚举 100/200/300/400/600/1000/1500/2000 ms 八档（§6.3.2），网络按拥塞水平调：太短会误杀慢调度 UE（KPI 假劣化），太长会让用户干等。**失败也要留遗产**：UE 把失败小区的测量（RSRP/RSRQ、邻区列表）记进 VarConnEstFailReport，最多记 8 次失败计数，下次建立成功时用 connEstFailInfoAvailable 告知网络——MRO 分析"该小区是不是该调参了"就靠这份数据。' },
+        deep: '**为什么要复位 MAC、重建 RLC？**——T300 期间为发 Msg3 已配置了底层实体（默认 MAC 配置、CCCH 的 RLC）。回 IDLE 意味着这些"半成品"配置全部作废：MAC 复位清掉临时状态（含 TC-RNTI），RLC 重建清掉缓存队列，下次建立从默认配置重新来——不留上次尝试的任何残余，这是"无状态重来"的设计哲学。**T300 取值谁定的？**——SIB1 的 ue-TimersAndConstants，规范枚举 100/200/300/400/600/1000/1500/2000 ms 八档（§6.3.2），网络按拥塞水平调：太短会误杀慢调度 UE（KPI 假劣化），太长会让用户干等。**失败也要留遗产**：UE 把失败小区的测量（RSRP/RSRQ、邻区列表）记进 VarConnEstFailReport，失败计数上限按 connEstFailCount 配置（在库枚举 n1..n4），下次建立成功时用 connEstFailInfoAvailable 告知网络——MRO 分析"该小区是不是该调参了"就靠这份数据。' },
       { id: 'rrc-reject', cond: '收到 RRCReject（网络拒绝；可携带 waitTime）。建立场景入口在 §5.3.3.5，行为定义在 §5.3.15', timer: 'T302',
         trans: '停止 T300/T319 等、复位 MAC → 回 RRC_IDLE；配置了 waitTime 则启动 T302=waitTime',
         kpi: '建立被拒；T302 运行期间接入被禁止（access category 0/2 除外），上层被告知失败',

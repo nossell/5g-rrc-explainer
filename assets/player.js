@@ -578,7 +578,7 @@
         '每步大白话讲解 + 面试考法标注 + 结课自测',
         '买一次，浏览器本地永久离线可用'
       ];
-      var price = gate.price || '完整版 42 模块（M0–M41）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
+      var price = gate.price || '完整版 43 模块（M0–M42）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
       root.innerHTML = '';
       var w = el('div', 'gate-wrap');
       var c = el('div', 'gate');
@@ -591,7 +591,7 @@
         '<div class="g-actions">' +
         '<button class="btn primary" data-act="unlock">完整版解锁码</button>' +
         '<a class="btn" href="index.html">返回目录</a></div>' +
-        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M41 共 40 个模块属完整版，获取方式见仓库 README。</p>';
+        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M42 共 41 个模块属完整版，获取方式见仓库 README。</p>';
       w.appendChild(c); root.appendChild(w);
       c.querySelector('[data-act="unlock"]').onclick = function () {
         store.setLicense({ demo: true });
@@ -605,7 +605,7 @@
      主线 → 空口信令（RRC）→ 接口运输 → 信封外层（NAS/核心网）→ 底层地基 → 横切对照 */
   var HUB_GROUPS = [
     { key: 'main', no: '01', short: '主线', name: '主线 · 免费起点', desc: '一部电影看完全程：从开机到注册能上网的每一条信令——全站的地图，也是所有课的前置。', mods: ['ma'] },
-    { key: 'rrc', no: '02', short: 'RRC 十课', name: 'RRC · 空口信令十课', desc: 'UE 与基站之间的对话全集：连接建立、系统消息、寻呼、测量、切换、承载重配、挂起、AS 安全、双连接，外加空闲态与小区重选专课（38.304）。', mods: ['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'my'] },
+    { key: 'rrc', no: '02', short: 'RRC 十课', name: 'RRC · 空口信令十课', desc: 'UE 与基站之间的对话全集：连接建立、系统消息、寻呼、测量、切换、承载重配、挂起、AS 安全、双连接，外加空闲态与小区重选专课（38.304）与测量机器深潜课——测量模型/配置四件套/L3 滤波/gap 与 38.133 秒表（38.331 §5.5 + 38.133）。', mods: ['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'my', 'm42'] },
     { key: 'if', no: '03', short: '接口与用户面', name: '接口与用户面 · 信令离开基站之后', desc: '38.401 架构总纲课打底（NG-RAN 节点模型与协议栈分布的娘家）、NG/Xn/S1/X2/F1/E1 六本消息级接口台账一台凑齐、接口族收官课、数据面与 GTP-U 隧道——网络侧视角与比特流视角。', mods: ['mi', 'mx', 'mp', 'mz', 'mng', 'ms1', 'mx2', 'mf1', 'me1', 'm41'] },
     { key: 'nas', no: '04', short: 'NAS 与核心网', name: 'NAS 与核心网 · 信封的外层', desc: '注册与会话这一层的全套：5G NAS、5GC 会话流程、隧道与转发面信令（GTP-C/PFCP）、网络切片专课（S-NSSAI 的旅程）、EPS 侧 EMM/ESM 专章，加上 SBA 服务化架构（NRF/发现/token）、PDU 会话信令专课与 Service Request 专课。', mods: ['mn', 'mg', 'mb', 'me', 'mr', 'mo', 'mm', 'mns'] },
     { key: 'low', no: '05', short: '空口底层', name: '空口底层 · 信令脚下的地基', desc: '信令之前的那一秒：MAC 怎么敲门、物理层怎么把比特搬上无线帧、QoS 流怎么绑进承载（5QI/SDAP 专课）——学完上层再下井，豁然开朗。', mods: ['mc', 'mf', 'mq'] },
@@ -663,6 +663,14 @@
           var allMods = [];
           jp.weeks.forEach(function (w) { allMods = allMods.concat(w.mods); });
           var doneN = allMods.filter(function (id) { var m = R.get(id); var p = m && store.progress(id); return p && p.done; }).length;
+          /* 当前该学：按周序第一个未完成课 */
+          var nextId = null;
+          for (var wi = 0; wi < jp.weeks.length && !nextId; wi++) {
+            for (var xi = 0; xi < jp.weeks[wi].mods.length; xi++) {
+              var pn = store.progress(jp.weeks[wi].mods[xi]);
+              if (!(pn && pn.done)) { nextId = jp.weeks[wi].mods[xi]; break; }
+            }
+          }
           var card = el('div', 'hubgroup jobpath');
           card.innerHTML = '<div class="ghead" role="button" tabindex="0" aria-expanded="true">' +
             '<span class="gnum">★</span>' +
@@ -677,9 +685,10 @@
             w.mods.forEach(function (id) {
               var m = R.get(id); if (!m) return;
               var p = store.progress(id);
-              var chip = el('a', 'jobchip' + (p && p.done ? ' done' : '') + (m.free ? ' free' : ''));
+              var isNext = (id === nextId && !(p && p.done));
+              var chip = el('a', 'jobchip' + (p && p.done ? ' done' : '') + (m.free ? ' free' : '') + (isNext ? ' next' : ''));
               chip.href = href(id);
-              chip.innerHTML = '<i class="jk">' + (p && p.done ? '✓' : m.num) + '</i>' + m.title;
+              chip.innerHTML = '<i class="jk">' + (p && p.done ? '✓' : m.num) + '</i>' + m.title + (isNext ? '<b class="jk-next">当前该学</b>' : '');
               chip.title = 'M' + m.num + ' · ' + m.title + (p && p.done ? '（已完成）' : '');
               row.appendChild(chip);
             });
@@ -742,15 +751,42 @@
       function renderLic() {
         lic = store.license();
         licCard.innerHTML =
-          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0/M1 与全部工具页；完整版（M2–M41）获取方式见 README。</div></div>' +
+          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0/M1 与全部工具页；完整版（M2–M42）获取方式见 README。</div></div>' +
           '<div style="display:flex;gap:8px;align-items:center">' +
           '<span class="license-state' + (lic.demo ? ' on' : '') + '">' + (lic.demo ? '完整版用户' : '免费层') + '</span>' +
           '<button class="btn sm" data-act="export-progress" title="生成 Markdown 学习进度单（完成态/测验分/下一步建议）">导出学习进度</button>' +
+          '<button class="btn sm" data-act="backup-store" title="把学习进度与错题本打包成 JSON 文件">备份学习档案</button>' +
+          '<button class="btn sm" data-act="restore-store" title="从 JSON 备份恢复进度与错题本（结构不符则原数据不动）">恢复</button>' +
+          '<input type="file" data-act="restore-file" accept=".json,application/json" style="display:none">' +
           (lic.demo
             ? '<button class="btn sm" data-act="relock">重新锁定</button>'
             : '<button class="btn sm primary" data-act="unlock">了解完整版</button>') +
           '</div>';
         var u = licCard.querySelector('[data-act="unlock"]'), r = licCard.querySelector('[data-act="relock"]'), ep = licCard.querySelector('[data-act="export-progress"]');
+        var bk = licCard.querySelector('[data-act="backup-store"]'), rs = licCard.querySelector('[data-act="restore-store"]'), rf = licCard.querySelector('[data-act="restore-file"]');
+        if (bk) bk.onclick = function () {
+          var IV = g.RRC && g.RRC.Interview;
+          if (!IV || !IV.buildBackupJSON) return;
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(new Blob([IV.buildBackupJSON(store)], { type: 'application/json' }));
+          a.download = 'rrc-学习档案-' + new Date().toISOString().slice(0, 10) + '.json';
+          document.body.appendChild(a); a.click();
+          setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 400);
+        };
+        if (rs) rs.onclick = function () { if (rf) rf.click(); };
+        if (rf) rf.onchange = function () {
+          var f = rf.files && rf.files[0];
+          if (!f) return;
+          var fr = new FileReader();
+          fr.onload = function () {
+            var IV = g.RRC && g.RRC.Interview;
+            var okRes = IV && IV.restoreBackupJSON ? IV.restoreBackupJSON(String(fr.result)) : false;
+            rf.value = '';
+            if (okRes) { location.reload(); }
+            else { alert('恢复失败：文件结构不符合备份格式（version:1），原数据未改动。'); }
+          };
+          fr.readAsText(f);
+        };
         if (u) u.onclick = function () { store.setLicense({ demo: true }); renderLic(); renderGrid(); };
         if (r) r.onclick = function () { store.setLicense({ demo: false }); renderLic(); renderGrid(); };
         if (ep) ep.onclick = function () {
@@ -779,7 +815,7 @@
       headRow.appendChild(expandBtn);
       root.appendChild(headRow);
       root.appendChild(viewbar);
-      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M41 属完整版。'));
+      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M42 属完整版。'));
       root.appendChild(tools);
       root.appendChild(pathView); pathView.style.display = 'none';
 

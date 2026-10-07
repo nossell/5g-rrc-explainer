@@ -673,5 +673,7 @@ footer .flinks{display:flex;gap:14px;margin-bottom:8px;flex-wrap:wrap}
 .jobchip .jk{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;
   background:var(--inset);font:700 10px var(--mono);color:var(--tx2);font-style:normal;flex:none}
 .jobchip.done{border-color:var(--accent);background:var(--accent-bg)}
+.jobchip.next{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-bg)}
+.jobchip .jk-next{font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-bg);border-radius:4px;padding:1px 4px;line-height:1.4}
 .jobchip.done .jk{background:var(--accent);color:#FFFFFF}
 .jobchip.free .jk{border:1px solid var(--accent);color:var(--accent-deep);background:#FFFFFF}

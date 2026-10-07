@@ -107,6 +107,47 @@
     }
     return L.join('\n');
   }
+  /* ---- 学习档案备份/恢复：只聚合 'rrc.v1' 与 'rrc.interview.misses' 两键 ---- */
+  function buildBackupJSON(storeObj) {
+    var storeData = null;
+    if (storeObj && typeof storeObj.all === 'function') {
+      storeData = storeObj.all();
+    } else {
+      try { storeData = JSON.parse(localStorage.getItem('rrc.v1') || 'null'); } catch (e0) { storeData = null; }
+    }
+    var missData = null;
+    try { missData = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch (e1) { missData = null; }
+    return JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), store: storeData, misses: missData });
+  }
+  /* 结构校验失败一律不动原数据并返回 false；成功写回 'rrc.v1'（或注入 store 的后端）与错题本 */
+  function restoreBackupJSON(text, storeObj) {
+    var o;
+    try { o = JSON.parse(text); } catch (e) { return false; }
+    if (!o || typeof o !== 'object' || Array.isArray(o) || o.version !== 1) return false;
+    if (!('store' in o) || !('misses' in o)) return false;
+    var sd = o.store, ml = o.misses;
+    if (sd !== null && (typeof sd !== 'object' || Array.isArray(sd))) return false;
+    if (ml !== null && !Array.isArray(ml)) return false;
+    if (sd) {
+      if (sd.progress != null && (typeof sd.progress !== 'object' || Array.isArray(sd.progress))) return false;
+      if (sd.quiz != null && (typeof sd.quiz !== 'object' || Array.isArray(sd.quiz))) return false;
+      if (sd.license != null && (typeof sd.license !== 'object' || Array.isArray(sd.license))) return false;
+    }
+    if (ml) {
+      for (var i = 0; i < ml.length; i++) {
+        if (!ml[i] || typeof ml[i] !== 'object' || typeof ml[i].qid !== 'string') return false;
+      }
+    }
+    if (storeObj && typeof storeObj.importAll === 'function' && sd) {
+      storeObj.importAll(sd);
+      if (ml) localStorage.setItem(LS_KEY, JSON.stringify(ml));
+    } else {
+      if (sd) localStorage.setItem('rrc.v1', JSON.stringify(sd));
+      if (ml) localStorage.setItem(LS_KEY, JSON.stringify(ml));
+    }
+    return true;
+  }
+
   function downloadText(name, text) {
     var a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
@@ -226,6 +267,10 @@
       var go = el('button', 'btn primary', '开始面试');
       go.onclick = function () { start(); };
       actions.appendChild(go);
+      var daily = el('button', 'btn', '今日一题（' + fmtDate(Date.now()) + '）');
+      daily.title = '同一天打开都是同一题——确定性抽题，出自当前授权可用池';
+      daily.onclick = function () { startDaily(); };
+      actions.appendChild(daily);
       if (dueN) {
         var rv = el('button', 'btn accent', '今日复习（' + dueN + ' 题到期）');
         rv.onclick = function () { startDue(); };
@@ -305,6 +350,16 @@
       if (cand.length < 12) { renderConfig(); return; }
       exam = buildExam(shuffled(cand, mulberry32(jp.seed)).slice(0, 12));
       exam.paper = jp.name;
+      view = 'exam';
+      render();
+    }
+
+    /* 今日一题：seed=当天 YYYYMMDD——同日每次打开都是同一题（确定性抽 1 题出自当前授权可用池） */
+    function startDaily() {
+      var d = new Date();
+      var seed = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+      exam = buildExam(shuffled(pool(store), mulberry32(seed)).slice(0, 1));
+      exam.paper = '今日一题 · ' + fmtDate(Date.now());
       view = 'exam';
       render();
     }
@@ -535,6 +590,9 @@
       jobPapers: function () { return JOB_PAPERS; },
       buildMissExport: function () { return buildMissMarkdown(loadMisses(), pool(store)); },
       buildProgressExport: function () { return buildProgressMarkdown(store); },
+      buildBackupExport: function () { return buildBackupJSON(store); },
+      restoreBackup: function (text) { var okRes = restoreBackupJSON(text, store); if (okRes) render(); return okRes; },
+      startDaily: function () { startDaily(); },
       practiceMisses: function () { start(true); },
       startReview: function () { startDue(); },
       reviewDue: function () { return dueRows().length; },
@@ -547,5 +605,6 @@
     };
   }
 
-  R.Interview = { mount: mount, pool: pool, buildMissMarkdown: buildMissMarkdown, buildProgressMarkdown: buildProgressMarkdown };
+  R.Interview = { mount: mount, pool: pool, buildMissMarkdown: buildMissMarkdown, buildProgressMarkdown: buildProgressMarkdown,
+    buildBackupJSON: buildBackupJSON, restoreBackupJSON: restoreBackupJSON };
 })(typeof window !== 'undefined' ? window : globalThis);
