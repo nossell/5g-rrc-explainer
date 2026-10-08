@@ -62,7 +62,7 @@
 
   <section class="sb-hero">
     <h1>参数沙盘——A3 事件的旋钮台</h1>
-    <p class="sub">测量课（M3/M42）讲过的那台判据机器，在这里变成能拧的旋钮：<b>timeToTrigger、hysteresis、a3-Offset、L3 滤波系数、UE 速度</b>。拖动任何一个，下面两张图实时重算——服务小区在降、邻区在升（合成轨迹），A3 判据逐采样评估，TTT 计时段与"上报"标记直接画在图上。<b>TTT/迟滞给太小会出现双标记（乒乓），给太大就看到琥珀色"干等"段迟迟不发货</b>。所有公式与档位照录测量课已审计文本，条款号挂在页脚。</p>
+    <p class="sub">测量课（M3/M42）讲过的那台判据机器，在这里变成能拧的旋钮：<b>timeToTrigger、hysteresis、a3-Offset、L3 滤波系数、UE 速度</b>。拖动任何一个，下面两张图实时重算——服务小区在降、邻区在升（合成轨迹），A3 判据逐采样评估，TTT 计时段与"上报"标记直接画在图上。<b>TTT/迟滞给太小会出现双标记（乒乓），给太大就看到琥珀色"干等"段迟迟不发货</b>。公式句照录测量课已审计文本、档位直取 38.331 §6.3.2 在库枚举，条款号挂在页脚。</p>
   </section>
 
   <div class="sb-ctrls">
@@ -145,7 +145,7 @@
   <p class="sb-note">
     <b>口径与出处（公式句照录测量课 M42 已审计文本，本页只做可视化，不引入新论断）</b>
     <span class="fm">A3 进入/离开（38.331 §5.5.4.4）：进入 A3-1：Mn + Ofn + Ocn − Hys &gt; Mp + Ofp + Ocp + Off；离开 A3-2：Mn + Ofn + Ocn + Hys &lt; Mp + Ofp + Ocp + Off。本沙盘未配 Ofn/Ocn/Ofp/Ocp——没配就置零，故进入条件化简为 Mn − Mp &gt; Off + Hys；Mp/Mn 取 L3 滤波后值。</span>
-    <span class="fm">L3 滤波（38.331 §5.5.3.2）：Fn = (1−a)·Fn−1 + a·Mn，a = 1/2^(k/4)；首样 F0 = M1；k=0 时 a=1——滤波输出恒等于最新采样，等效不滤波（NOTE 1）。本沙盘服务小区/邻区共用同一 k（教学简化；规范按测量量/RS 类型/小区/波束各配各的 filterCoefficient），采样间隔取 200ms 合成值（规范刻度假设一个 38.133 同频 L1 测量周期，随频段范围不同）。</span>
+    <span class="fm">L3 滤波（38.331 §5.5.3.2）：Fn = (1−a)·Fn−1 + a·Mn，a = 1/2^(k/4)；首样 F0 = M1；k=0 时 a=1——滤波输出恒等于最新采样，等效不滤波（NOTE 1）。本沙盘服务小区/邻区共用同一 k（教学简化；规范按测量量/RS 类型经 quantityConfig 各配各的 filterCoefficient，波束另有同款逐波束滤波），采样间隔取 200ms 合成值（规范刻度假设一个 38.133 同频 L1 测量周期，随频段范围不同）。</span>
     <span class="fm">速度缩放（38.331 §5.5.7.1 + §6.3.2 SpeedStateScaleFactors）：只缩放 timeToTrigger 一个参数——高速态乘 sf-High、中速态乘 sf-Medium；枚举 {oDot25, oDot5, oDot75, lDot0} = 0.25/0.5/0.75/1.0，只会缩短或保持，"放大延迟"在规范里不存在；未配 speedStatePars 则整条机制不存在，TTT 原值跑。</span>
     <span class="fm">档位直证（38.331 §6.3.2，在库语料 38331-j30）：TimeToTrigger 枚举 ms0/ms40/ms64/ms80/ms100/ms128/ms160/ms256/ms320/ms480/ms512/ms640/ms1024/ms1280/ms2560/ms5120；Hysteresis INTEGER (0..30)；a3-Offset（MeasTriggerQuantityOffset）INTEGER (-30..30)；FilterCoefficient 枚举 fc0–fc9、fc11–fc19 奇数档。</span>
     上方信号轨迹为合成数据，仅供判读练习；TTT 计时规则（进入条件须对 TTT 期间每一次 L3 滤波后测量成立，中途破一次从头再计）见 M42 mob 路径 b2 帧与 §5.5.4.1。

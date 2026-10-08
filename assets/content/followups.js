@@ -49,7 +49,7 @@
         ref: '38.331#5.3.5.5.2' },
       { q: 'CHO 执行时 T304 何时起跑？它和 T316 是什么关系？',
         a: 'CHO：**执行条件满足时才起跑同一枚 T304**——候选配置下发时不起跑。T316 是 MR-DC 里 MCG 失败的快速救援沙漏，**与 CHO 无关——CHO 的执行限时就是 T304**；elapsedTimeT316 进失败报告（VarRLF-Report）取证。',
-        ref: '38.331#5.3.7.2' }
+        ref: '38.331#5.3.5.13.5' }
     ] },
     'm4:d6': { levels: [
       { q: 'CHO 的执行条件用哪组判据？配置挂在哪？',
@@ -139,6 +139,7 @@
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
+    keys: function () { return Object.keys(F); },
     size: function () { return Object.keys(F).length; },
     levelTotal: function () { var n = 0; Object.keys(F).forEach(function (k) { n += F[k].levels.length; }); return n; }
   };

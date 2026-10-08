@@ -57,10 +57,10 @@
   var JD_KEYWORDS = [
     { kws: ['网优', '网络优化', '覆盖', '掉话', '切换', '乒乓', 'rsrp', 'rsrq', 'sinr', '路测', 'kpi', '驻留', '重选', '寻呼', '无线侧'], domain: 'RRC 十课', paper: 'opt', w: 2 },
     { kws: ['核心网', 'amf', 'smf', 'upf', '会话', '切片', 's-nssai', '注册', '5gc', 'epc', '漫游', 'pdu'], domain: 'NAS 与核心网', paper: 'core', w: 2 },
-    { kws: ['协议测试', '一致性', '仪表', '用例', '终端测试', 'usim', 'sim卡', '信令跟踪', '抓包', 'log', '日志分析'], domain: '测试与终端', paper: 'test', w: 2 },
+    { kws: ['协议测试', '一致性', '仪表', '用例', '终端测试', 'usim', 'sim卡', '信令跟踪', '抓包', '日志分析'], domain: '测试与终端', paper: 'test', w: 2 },
     { kws: ['ngap', 'xnap', 'x2ap', 's1ap', 'f1ap', 'e1ap', 'gtp', 'sctp', '接口信令', '站间'], domain: '接口与用户面', paper: 'core', w: 2 },
     { kws: ['加密', '密钥', '安全', 'aka', '完整性', '算法'], domain: '安全与对照', paper: 'test', w: 1 },
-    { kws: ['mac', '随机接入', 'prach', '物理层', 'qos', '5qi', '承载', 'sdap'], domain: '空口底层', paper: 'opt', w: 1 },
+    { kws: ['mac层', '随机接入', 'prach', '物理层', 'qos', '5qi', '承载', 'sdap'], domain: '空口底层', paper: 'opt', w: 1 },
     { kws: ['ims', 'vonr', 'volte', '语音', '定位', 'ntn', 'redcap', '物联网', '垂直']  , domain: '业务与垂直', paper: null, w: 1 }
   ];
   function matchJD(text) {
@@ -345,7 +345,7 @@
       var rd = readinessFor(store);
       if (rd.length) {
         var rcard = el('div', 'iv-readiness');
-        rcard.innerHTML = '<div class="iv-rd-cap">就绪度 · 按学习域（完成课 50% + 测验正确率 30% + 错题清零 20%）</div>' +
+        rcard.innerHTML = '<div class="iv-rd-cap">就绪度 · 按学习域（完成课 50% + 测验正确率 30% + 错题到期清零 20%）</div>' +
           '<div class="iv-rd-row">' + rd.map(function (x) {
             return '<div class="iv-rd-cell"><b>' + esc(x.domain) + '</b>' +
               '<span class="iv-rd-bar"><i style="width:' + x.score + '%"></i></span>' +

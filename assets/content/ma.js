@@ -481,9 +481,9 @@ ies: [
       },
       maa17: {
         title: 'RRCReconfiguration（装 SRB2/DRB）', dir: 'dl', from: 1, to: 0,
-        label: 'RRCReconfiguration', chan: 'DCCH · SRB1 · 建承载 · 带 Registration Accept',
-        narr: '**为什么有它**：验完身、登完记，该发"装备"了——SRB2（NAS 专用信令通道）和 DRB（数据承载）一次装齐。**为什么此刻才装**：它们承载的内容必须加密（KUPenc 依赖安全激活）——顺序是结构不是建议。**Registration Accept 的投递**：它随上一帧 ICS REQUEST 的 NAS-PDU 透明抵达 gNB，但 RRCReconfiguration 消息本体不带 NAS 透传字段（§6.2.2 的 ASN.1 无此槽位）——投递另有 DLInformationTransfer 专线（§5.7.1，M6 深讲）。这条消息是 RRC 的"瑞士军刀"（M6 深讲：建/改/释承载、测量、切换都是它）。',
-        plain: '该发装备了：专跑信令的第二条通道和真正运数据的承载一次配齐——之前不发不是怠慢，是这些内容必须等加密生效才准上路；注册通过的批复也搭这趟车下来。',
+        label: 'RRCReconfiguration', chan: 'DCCH · SRB1 · 建 SRB2+DRB',
+        narr: '**为什么有它**：验完身、登完记，该发"装备"了——SRB2（NAS 专用信令通道）和 DRB（数据承载）一次装齐。**为什么此刻才装**：它们承载的内容必须加密（KUPenc 依赖安全激活）——顺序是结构不是建议。**Registration Accept 的投递**：它随上一帧 ICS REQUEST 的 NAS-PDU 透明抵达 gNB，但 RRCReconfiguration 的基础 IE 集不带 NAS 透传字段（§6.2.2 的 ASN.1 里 NAS 槽位只在 v1530 扩展链的 dedicatedNAS-MessageList，且限非切换场景）——注册流程的投递另有 DLInformationTransfer 专线（§5.7.1，M6 深讲）。这条消息是 RRC 的"瑞士军刀"（M6 深讲：建/改/释承载、测量、切换都是它）。',
+        plain: '该发装备了：专跑信令的第二条通道和真正运数据的承载一次配齐——之前不发不是怠慢，是这些内容必须等加密生效才准上路；注册通过的批复另坐专线车，不搭这趟装备车。',
         refs: ['5.3.5.6', '5.3.5.1'],
 ies: [
         { name: 'rrc-TransactionIdentifier', type: 'RRC-TransactionIdentifier (0..3)', pres: 'M', dict: 'rrc-TransactionIdentifier', meta: '柜台小票号——重配也要回执（下一条 Complete 凭它配对）', sem: '事务标识（详见词典）', ref: '6.2.2' },
