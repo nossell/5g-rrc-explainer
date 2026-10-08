@@ -31,6 +31,15 @@
 .cp-diff{margin-top:10px;border-top:1px dashed var(--bd);padding-top:9px;font-size:12.5px;line-height:1.7;color:var(--tx2)}
 .cp-diff b{color:var(--accent-deep)}
 .cp-note-btm{margin-top:26px;font-size:12.5px;color:var(--tx3);line-height:1.75;border-top:1px solid var(--bd);padding-top:14px}
+/* 走线模式（v8 块 4）：步骤条+行高亮+淡化 */
+.cp-walkbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:14px;padding:10px 12px;border:1px dashed var(--bd);border-radius:12px;background:var(--bg)}
+.cp-walk-step{font:700 12px var(--sans);color:var(--tx2);background:var(--panel);border:1px solid var(--bd);border-radius:999px;padding:4px 11px;cursor:pointer}
+.cp-walk-step.done{opacity:.45}
+.cp-walk-step.on{color:#fff;background:var(--accent);border-color:var(--accent)}
+.cp-walk-nav{display:flex;gap:6px;margin-left:auto}
+.cp-walk-nav button{font:700 12px var(--sans);border:1px solid var(--bd);background:var(--panel);color:var(--tx1);border-radius:8px;padding:4px 12px;cursor:pointer}
+.cp-row.walk-hit{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-bg),var(--shadow-card)}
+.cp-walking .cp-row:not(.walk-hit){opacity:.38}
 @media (max-width:680px){.cp-cols{grid-template-columns:1fr}.cp-wrap{padding:26px 14px 60px}}
 </style>
 </head>
@@ -62,6 +71,7 @@
   </section>
 
   <div class="cp-tabs" id="cp-tabs"></div>
+  <div class="cp-walkbar" id="cp-walkbar" hidden></div>
   <div id="cp-rows"></div>
 
   <p class="cp-note-btm" id="cp-note"></p>
@@ -90,12 +100,16 @@
     C.groups.map(function (gp) {
       var n = C.rows.filter(function (r) { return r.g === gp.key; }).length;
       return chipHtml(gp.key, gp.name + '（' + n + '）');
-    }).join('');
+    }).join('') +
+    chipHtml('walk', '▶ 按流程走（' + C.walk.length + ' 步）');
   tabs.addEventListener('click', function (e) {
     var b = e.target.closest('.cp-tab');
     if (!b) return;
-    cur = b.dataset.g;
+    var g = b.dataset.g;
     [].forEach.call(tabs.children, function (x) { x.classList.toggle('on', x === b); });
+    if (g === 'walk') { enterWalk(); return; }
+    if (cur === 'walk') { exitWalk(); }
+    cur = g;
     render();
   });
 
@@ -115,6 +129,53 @@
         '<div class="cp-cols">' + cellHtml('lte', r.lte) + cellHtml('nr', r.nr) + '</div>' +
         '<div class="cp-diff"><b>差在哪：</b>' + esc(r.diff) + '</div></div>';
     }).join('');
+  }
+  /* ---------- 走线模式（v8 块 4）：全部行渲染 + 步骤条逐步高亮滚动 ---------- */
+  var walkbar = document.getElementById('cp-walkbar');
+  var rowsEl = document.getElementById('cp-rows');
+  var walkIdx = -1;
+  walkbar.addEventListener('click', function (e) {
+    var st = e.target.closest('.cp-walk-step');
+    if (st) { walkStep(Number(st.dataset.i)); return; }
+    if (e.target.id === 'cp-walk-prev') walkStep(walkIdx - 1);
+    if (e.target.id === 'cp-walk-next') walkStep(walkIdx + 1);
+  });
+  function walkStep(i) {
+    var n = C.walk.length;
+    walkIdx = Math.max(0, Math.min(n - 1, i));
+    [].forEach.call(walkbar.querySelectorAll('.cp-walk-step'), function (s, si) {
+      s.classList.toggle('on', si === walkIdx);
+      s.classList.toggle('done', si < walkIdx);
+    });
+    [].forEach.call(rowsEl.querySelectorAll('.cp-row'), function (row, ri) {
+      row.classList.toggle('walk-hit', ri === C.walk[walkIdx].r);
+    });
+    var hit = rowsEl.querySelectorAll('.cp-row')[C.walk[walkIdx].r];
+    if (hit) hit.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  function enterWalk() {
+    cur = 'walk';
+    walkbar.hidden = false;
+    document.body.classList.add('cp-walking');
+    /* walk 模式渲染全部行（时序不分组过滤） */
+    rowsEl.innerHTML = C.rows.map(function (r) {
+      return '<div class="cp-row"><div class="cp-topic"><b>' + esc(r.topic) + '</b></div>' +
+        '<div class="cp-cols">' + cellHtml('lte', r.lte) + cellHtml('nr', r.nr) + '</div>' +
+        '<div class="cp-diff"><b>差在哪：</b>' + esc(r.diff) + '</div></div>';
+    }).join('');
+    walkbar.innerHTML = '<span style="font:800 12px var(--mono);color:var(--tx3)">流程：</span>' +
+      C.walk.map(function (s, i) {
+        return '<button class="cp-walk-step" data-i="' + i + '">' + (i + 1) + '. ' + esc(s.t) + '</button>';
+      }).join('') +
+      '<span class="cp-walk-nav"><button id="cp-walk-prev">← 上一步</button><button id="cp-walk-next">下一步 →</button></span>';
+    walkStep(0);
+  }
+  function exitWalk() {
+    cur = 'all';
+    walkbar.hidden = true;
+    walkbar.innerHTML = '';
+    document.body.classList.remove('cp-walking');
+    render();
   }
   document.getElementById('cp-note').textContent = C.note;
   tabs.children[0].classList.add('on');

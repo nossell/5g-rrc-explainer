@@ -40,9 +40,16 @@
 </section>
 
 <div class="hub-tools" style="margin-top:18px">
-  <div class="filter"><input id="dict-q" placeholder="搜信元名 / 关键词（如：钥匙、能力、AMBR）…"></div>
+  <div class="filter"><input id="dict-q" placeholder="搜信元名 / 黑话 / 关键词（如：钥匙、能力、AMBR、掉话、乒乓）…"></div>
 </div>
-<div id="dict-list"></div>
+
+<section id="slang-sec" style="margin-top:22px">
+  <h2 style="font-size:19px;margin:0 0 6px">网优黑话小词典 <span style="font-weight:500;font-size:13px;opacity:.75">（工程口语 · <span id="slang-count"></span> 条）</span></h2>
+  <p class="sub" style="margin:0 0 12px;font-size:12.5px">⚠️ <b>免责声明</b>：这里是<b>工程口语</b>词典，不是 3GPP 术语表——各地叫法不一、含义随团队浮动；条目只做大白话解释、<b>不含协议论断与数值</b>，任何协议细节请点"详见"跳回对应课程读已审计原文。一切以 3GPP 正式文本为准。</p>
+  <div id="slang-list"></div>
+</section>
+
+<div id="dict-list" style="margin-top:26px"></div>
 
 <footer>
   <div class="flinks"><a href="index.html">目录</a><a href="anim.html">动画资产</a><a href="timer-net.html">定时器网</a></div>
@@ -145,6 +152,45 @@
   }
   inp.oninput = render;
   render();
+  /* ---------- 网优黑话小词典（v8 块 3）：独立命名空间 RRC_SLANG ----------
+     qref=站内课程 id；ID2LABEL 是 dict 页静态展示标签（课程数与编号以
+     课程体系为准：num+1=人类 M 号，此处标签与 player.js HUB_GROUPS 口径一致）。 */
+  var ID2LABEL = {
+    m0: 'M1 · 接入全流程', m4: 'M5 · 切换全流程', mc: 'M12 · MAC 随机接入',
+    mq: 'M30 · QoS 专课', my: 'M29 · 空闲态与小区重选', mv: 'M21 · IMS 与语音线',
+    m41: 'M41 · NG-RAN 架构总纲', m42: 'M42 · 测量与移动性控制', m43: 'M43 · MRO 与切换自愈'
+  };
+  var slangList = document.getElementById('slang-list');
+  document.getElementById('slang-count').textContent = RRC_SLANG.size();
+  function renderSlang() {
+    var kw = (inp.value || '').trim().toLowerCase();
+    var items = RRC_SLANG.all().filter(function (it) {
+      if (!kw) return true;
+      return (it.t + (it.alt || '') + it.mean).toLowerCase().indexOf(kw) >= 0;
+    });
+    if (!items.length) { slangList.innerHTML = '<p class="sec-sub">没有匹配的黑话。</p>'; return; }
+    slangList.innerHTML = items.map(function (it) {
+      var lab = ID2LABEL[it.qref] || it.qref;
+      return '<div class="dict-card"><div class="dc-head" role="button" tabindex="0" aria-expanded="false">' +
+        '<span class="dc-term">' + esc(it.t) + '</span><span class="dc-spec">' + esc(it.alt || '工程口语') + '</span>' +
+        '<span class="dc-tog" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M9 5.5l7 6.5-7 6.5z"/></svg></span></div>' +
+        '<div class="dc-brief">' + esc(it.mean) + '</div>' +
+        '<div class="dc-full" style="display:block"><a class="chip" style="text-decoration:none" href="app.html#' + it.qref + '">详见课程：' + esc(lab) + ' →</a></div>' +
+        '</div>';
+    }).join('');
+    slangList.querySelectorAll('.dict-card').forEach(function (c) {
+      function toggle() {
+        var cardEl = c;
+        cardEl.classList.toggle('open');
+        cardEl.querySelector('.dc-head').setAttribute('aria-expanded', cardEl.classList.contains('open'));
+      }
+      var h = c.querySelector('.dc-head');
+      h.onclick = toggle;
+      h.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } };
+    });
+  }
+  inp.addEventListener('input', renderSlang);
+  renderSlang();
   /* 锚点直达：dict.html#k=key —— 展开所在组与词条，滚动高亮 */
   function focusKey() {
     if (location.hash.indexOf('#k=') !== 0) return;

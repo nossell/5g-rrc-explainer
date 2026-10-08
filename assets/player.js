@@ -137,6 +137,14 @@
     bench.appendChild(panelL); bench.appendChild(panelC); bench.appendChild(panelR);
     root.appendChild(bench);
 
+    /* ---- 动手沙盘角标（v8 块 5）：仅测量两课显示，链参数沙盘 ---- */
+    if (moduleId === 'm3' || moduleId === 'm42') {
+      var sbJump = el('div', 'sb-jump');
+      sbJump.setAttribute('style', 'margin:10px 0 2px;padding:9px 14px;border:1px dashed var(--bd);border-radius:10px;font-size:12.5px;color:var(--tx2);background:var(--panel)');
+      sbJump.innerHTML = '🧪 <b>动手沙盘</b>：本课的 L3 滤波、A3 门限、TTT 判据与速度缩放可以在参数沙盘里亲手拖一拖 —— <a href="meas-sandbox.html">打开参数沙盘 →</a>';
+      root.appendChild(sbJump);
+    }
+
     /* ---- 左：锚点面板 ---- */
     panelL.appendChild(el('div', 'panel-head', m.panelTitle || '状态 / 阶段'));
     var cardEls = {}, edgeEls = [];
@@ -618,7 +626,7 @@
         '每步大白话讲解 + 面试考法标注 + 结课自测',
         '买一次，浏览器本地永久离线可用'
       ];
-      var price = gate.price || '完整版 43 模块（M0–M42）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
+      var price = gate.price || '完整版 44 模块（M0–M43）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
       root.innerHTML = '';
       var w = el('div', 'gate-wrap');
       var c = el('div', 'gate');
@@ -631,7 +639,7 @@
         '<div class="g-actions">' +
         '<button class="btn primary" data-act="unlock">完整版解锁码</button>' +
         '<a class="btn" href="index.html">返回目录</a></div>' +
-        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M42 共 41 个模块属完整版，获取方式见仓库 README。</p>';
+        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M43 共 42 个模块属完整版，获取方式见仓库 README。</p>';
       w.appendChild(c); root.appendChild(w);
       c.querySelector('[data-act="unlock"]').onclick = function () {
         store.setLicense({ demo: true });
@@ -645,7 +653,7 @@
      主线 → 空口信令（RRC）→ 接口运输 → 信封外层（NAS/核心网）→ 底层地基 → 横切对照 */
   var HUB_GROUPS = [
     { key: 'main', no: '01', short: '主线', name: '主线 · 免费起点', desc: '一部电影看完全程：从开机到注册能上网的每一条信令——全站的地图，也是所有课的前置。', mods: ['ma'] },
-    { key: 'rrc', no: '02', short: 'RRC 十课', name: 'RRC · 空口信令十课', desc: 'UE 与基站之间的对话全集：连接建立、系统消息、寻呼、测量、切换、承载重配、挂起、AS 安全、双连接，外加空闲态与小区重选专课（38.304）与测量机器深潜课——测量模型/配置四件套/L3 滤波/gap 与 38.133 秒表（38.331 §5.5 + 38.133）。', mods: ['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'my', 'm42'] },
+    { key: 'rrc', no: '02', short: 'RRC 十课', name: 'RRC · 空口信令十二课', desc: 'UE 与基站之间的对话全集：连接建立、系统消息、寻呼、测量、切换、承载重配、挂起、AS 安全、双连接，外加空闲态与小区重选专课（38.304）、测量机器深潜课（38.331 §5.5 + 38.133 秒表）与 MRO 切换自愈课——切换失败后的取证、判责与参数自优化（38.300 §15.5.2 + 38.331 §5.7.9/5.7.10 + 38.423）。', mods: ['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'my', 'm42', 'm43'] },
     { key: 'if', no: '03', short: '接口与用户面', name: '接口与用户面 · 信令离开基站之后', desc: '38.401 架构总纲课打底（NG-RAN 节点模型与协议栈分布的娘家）、NG/Xn/S1/X2/F1/E1 六本消息级接口台账一台凑齐、接口族收官课、数据面与 GTP-U 隧道——网络侧视角与比特流视角。', mods: ['mi', 'mx', 'mp', 'mz', 'mng', 'ms1', 'mx2', 'mf1', 'me1', 'm41'] },
     { key: 'nas', no: '04', short: 'NAS 与核心网', name: 'NAS 与核心网 · 信封的外层', desc: '注册与会话这一层的全套：5G NAS、5GC 会话流程、隧道与转发面信令（GTP-C/PFCP）、网络切片专课（S-NSSAI 的旅程）、EPS 侧 EMM/ESM 专章，加上 SBA 服务化架构（NRF/发现/token）、PDU 会话信令专课与 Service Request 专课。', mods: ['mn', 'mg', 'mb', 'me', 'mr', 'mo', 'mm', 'mns'] },
     { key: 'low', no: '05', short: '空口底层', name: '空口底层 · 信令脚下的地基', desc: '信令之前的那一秒：MAC 怎么敲门、物理层怎么把比特搬上无线帧、QoS 流怎么绑进承载（5QI/SDAP 专课）——学完上层再下井，豁然开朗。', mods: ['mc', 'mf', 'mq'] },
@@ -791,7 +799,7 @@
       function renderLic() {
         lic = store.license();
         licCard.innerHTML =
-          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0/M1 与全部工具页；完整版（M2–M42）获取方式见 README。</div></div>' +
+          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0/M1 与全部工具页；完整版（M2–M43）获取方式见 README。</div></div>' +
           '<div style="display:flex;gap:8px;align-items:center">' +
           '<span class="license-state' + (lic.demo ? ' on' : '') + '">' + (lic.demo ? '完整版用户' : '免费层') + '</span>' +
           '<button class="btn sm" data-act="export-progress" title="生成 Markdown 学习进度单（完成态/测验分/下一步建议）">导出学习进度</button>' +
@@ -855,7 +863,7 @@
       headRow.appendChild(expandBtn);
       root.appendChild(headRow);
       root.appendChild(viewbar);
-      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M42 属完整版。'));
+      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M43 属完整版。'));
       root.appendChild(tools);
       root.appendChild(pathView); pathView.style.display = 'none';
 
