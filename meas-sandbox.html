@@ -134,7 +134,7 @@
 
   <div class="sb-links">
     <a href="app.html#m3">课程 · 测量入门 M3（滤波递推式入门）</a>
-    <a href="app.html#m42">课程 · 测量机器 M42（判据机器 mob 路径：b2 TTT 判据机 / d2 速度缩放）</a>
+    <a href="app.html#m42">课程 · 测量机器 M42（判据机器 mob 路径：b3 TTT 判据机 / d2 速度缩放）</a>
     <a href="app.html#m4">课程 · 事件与切换 M4</a>
     <a href="app.html#m43">课程 · MRO 与切换自愈 M43（这些参数怎么被自优化）</a>
     <a href="dict.html#k=hysteresis">词条 · hysteresis</a>
@@ -149,7 +149,7 @@
     <span class="fm">L3 滤波（38.331 §5.5.3.2）：Fn = (1−a)·Fn−1 + a·Mn，a = 1/2^(k/4)；首样 F0 = M1；k=0 时 a=1——滤波输出恒等于最新采样，等效不滤波（NOTE 1）。本沙盘服务小区/邻区共用同一 k（教学简化；规范按测量量/RS 类型经 quantityConfig 各配各的 filterCoefficient，波束另有同款逐波束滤波），采样间隔取 200ms 合成值（规范刻度假设一个 38.133 同频 L1 测量周期，随频段范围不同）。</span>
     <span class="fm">速度缩放（38.331 §5.5.7.1 + §6.3.2 SpeedStateScaleFactors）：只缩放 timeToTrigger 一个参数——高速态乘 sf-High、中速态乘 sf-Medium；枚举 {oDot25, oDot5, oDot75, lDot0} = 0.25/0.5/0.75/1.0，只会缩短或保持，"放大延迟"在规范里不存在；未配 speedStatePars 则整条机制不存在，TTT 原值跑。</span>
     <span class="fm">档位直证（38.331 §6.3.2，在库语料 38331-j30）：TimeToTrigger 枚举 ms0/ms40/ms64/ms80/ms100/ms128/ms160/ms256/ms320/ms480/ms512/ms640/ms1024/ms1280/ms2560/ms5120；Hysteresis INTEGER (0..30)；a3-Offset（MeasTriggerQuantityOffset）INTEGER (-30..30)；FilterCoefficient 枚举 fc0–fc9、fc11–fc19 奇数档。</span>
-    上方信号轨迹为合成数据，仅供判读练习；TTT 计时规则（进入条件须对 TTT 期间每一次 L3 滤波后测量成立，中途破一次从头再计）见 M42 mob 路径 b2 帧与 §5.5.4.1。
+    上方信号轨迹为合成数据，仅供判读练习；TTT 计时规则（进入条件须对 TTT 期间每一次 L3 滤波后测量成立，中途破一次从头再计）见 M42 mob 路径 b3 帧与 §5.5.4.1。
   </p>
 </div>
 

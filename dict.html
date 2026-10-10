@@ -170,12 +170,15 @@
     });
     if (!items.length) { slangList.innerHTML = '<p class="sec-sub">没有匹配的黑话。</p>'; return; }
     slangList.innerHTML = items.map(function (it) {
-      var lab = ID2LABEL[it.qref] || it.qref;
+      var link = '';
+      if (it.qref) {
+        var lab = ID2LABEL[it.qref] || it.qref;
+        link = '<div class="dc-full" style="display:block"><a class="chip" style="text-decoration:none" href="app.html#' + it.qref + '">详见课程：' + esc(lab) + ' →</a></div>';
+      }
       return '<div class="dict-card"><div class="dc-head" role="button" tabindex="0" aria-expanded="false">' +
         '<span class="dc-term">' + esc(it.t) + '</span><span class="dc-spec">' + esc(it.alt || '工程口语') + '</span>' +
         '<span class="dc-tog" aria-hidden="true"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M9 5.5l7 6.5-7 6.5z"/></svg></span></div>' +
-        '<div class="dc-brief">' + esc(it.mean) + '</div>' +
-        '<div class="dc-full" style="display:block"><a class="chip" style="text-decoration:none" href="app.html#' + it.qref + '">详见课程：' + esc(lab) + ' →</a></div>' +
+        '<div class="dc-brief">' + esc(it.mean) + '</div>' + link +
         '</div>';
     }).join('');
     slangList.querySelectorAll('.dict-card').forEach(function (c) {

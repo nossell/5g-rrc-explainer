@@ -626,7 +626,7 @@
         '每步大白话讲解 + 面试考法标注 + 结课自测',
         '买一次，浏览器本地永久离线可用'
       ];
-      var price = gate.price || '完整版 44 模块（M0–M43）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
+      var price = gate.price || '完整版 45 模块（M0–M44）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
       root.innerHTML = '';
       var w = el('div', 'gate-wrap');
       var c = el('div', 'gate');
