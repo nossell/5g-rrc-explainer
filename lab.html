@@ -4519,9 +4519,13 @@ function rowPresence(p) {
 }
 
 // IEI 列 → 数值；不可解析 → null（该行不可编解码）。合法单元格：'' / '5B-' / 'B-' 这类
-// 1-2 位十六进制（可带尾短横）；'TBD' / 'FFS'（早期 Rel-8 占位）/ '72C'（规范笔误）都拒绝。
+// 1-2 位十六进制（可带尾短横）；'8x'/'Cx'/'Ax' 半八位组 IEI 通配（44.018 §10.5 type1 TV
+// 写法，低半是取值域——CHANNEL RELEASE 实证）取高半；'TBD' / 'FFS'（早期 Rel-8 占位）/
+// '72C'（规范笔误）都拒绝。
 function rowIei(r) {
   const s = (r.iei || '').trim().replace(/-$/, '').trim();
+  const xw = /^([0-9a-fA-F])x$/i.exec(s);
+  if (xw) return parseInt(xw[1], 16);
   if (!/^[0-9a-fA-F]{1,2}$/.test(s)) return null;
   const v = parseInt(s, 16);
   return isNaN(v) ? null : v;
@@ -4530,13 +4534,17 @@ function rowIei(r) {
 const EPD = { 24501: 0x7e, 24301: null }; // 24301：半八位组 PD，按消息族取值（见 nasPD）
 
 // 24.301 半八位组 protocol discriminator：EMM 消息=7、ESM 消息=5（按规范 §8.2/§8.3 节前缀）；
-// 24.008：建库时按 §9.x 族写入 inst.pd（RR=6/MM=5/CC=3/GMM=8/SM=9）
+// 24.008：建库时按 §9.x 族写入 inst.pd（RR=6/MM=5/CC=3/GMM=8/SM=9）；
+// 44.018（RR=6）/24.080（SS=11）：同样建库写入。24080 的 inst.pd 覆盖 8.3 前缀猜测——
+// 24080 消息节是 2.x，会误判 7，故 inst.pd 必须先命中。
 function nasPD(inst) {
   if (inst.pd != null) return inst.pd;
   return /^8\.3/.test(inst.section || '') ? 5 : 7;
 }
 // 半八位组行名是否为 protocol discriminator（24.301 表头行）
 const isPDRow = (name) => /^protocol discriminator$/.test(name);
+// 哪些 spec 的半八位组行做 PD 语义校验（值固定，错位即暴露——防 run 位序反转的自洽盲区）
+const VH_PD_SPECS = new Set(['24301', '24008', '44018', '24080']);
 
 // 半八位组 run 位序计划（TS 24.007 §11.2.1：连续半八位组 IE 序列中，先出现者占
 // bits 1-4（低半），第二个占 bits 5-8，交替；内容表行序 = 出现序，规范 §8.1 b)）。
@@ -4632,7 +4640,7 @@ function decOnce(inst, u8, spec, force) {
         const pname = (p.row.name || '').toLowerCase();
         const byte = u8[off + p.oct];
         const n = p.half === 'high' ? byte >> 4 : byte & 0x0f;
-        if ((spec === '24301' || spec === '24008') && isPDRow(pname) && n !== nasPD(inst)) {
+        if (VH_PD_SPECS.has(spec) && isPDRow(pname) && n !== nasPD(inst)) {
           throw new Error(`PD 不匹配: ${n} ≠ ${nasPD(inst)}`);
         }
         parts.push({ row: p.row, rowIdx: p.rowIdx, value: /spare half octet/i.test(pname) ? null : n });
@@ -4755,7 +4763,7 @@ function encMsg(inst, parts = [], spec = '24501') {
       for (const p of positions) {
         const pname = (p.row.name || '').toLowerCase();
         let v;
-        if ((spec === '24301' || spec === '24008') && isPDRow(pname)) v = nasPD(inst);
+        if (VH_PD_SPECS.has(spec) && isPDRow(pname)) v = nasPD(inst);
         else if (/spare half octet/i.test(pname)) v = 0;
         else v = byRow.has(p.rowIdx) ? byRow.get(p.rowIdx) : 0;
         if (v == null || typeof v !== 'number') v = 0;
@@ -5004,14 +5012,23 @@ function diffMessageRows(name, li, ri, findings) {
   }
 }
 
+// 消息显示名 → 类型值查找：msgTypes 键与 messages 键的形态随建库器而异——
+// 24501/24301 类型表名小写 vs 显示名大写；44018 键名去非字母数字（'handovercommand'）；
+// 24080 三常量键（'release complete'）。依次试原键 / 小写 / 归一化（与 resolveMsgType44018 同则）。
+function msgTypeOf(schema, name) {
+  const mt = schema.msgTypes || {};
+  const hit = mt[name] || mt[name.toLowerCase()] || mt[name.toLowerCase().replace(/[^a-z0-9]/g, '')];
+  return hit && hit.type != null ? hit.type : null;
+}
+
 function diffNasSchema(left, right) {
   const findings = [];
   const lmsg = left.messages || {};
   const rmsg = right.messages || {};
   for (const name of Object.keys(rmsg)) {
     if (!lmsg[name]) {
-      const mt = (right.msgTypes || {})[name];
-      findings.push({ severity: 'info', kind: 'nas-msg-add', msg: `新增消息 ${name}（${mt?.type != null ? `类型 0x${mt.type.toString(16)}` : '附件/保护类'}）` });
+      const mt = msgTypeOf(right, name);
+      findings.push({ severity: 'info', kind: 'nas-msg-add', msg: `新增消息 ${name}（${mt != null ? `类型 0x${mt.toString(16)}` : '附件/保护类'}）` });
       continue;
     }
     // 同名消息：逐实例配对（MO/MT 变体按 direction 匹配，失配则按下标）
@@ -6000,14 +6017,23 @@ function wsHexToBytes(str) {
   return OCT(hex);
 }
 
-// 平文本 NAS 的 msgType 位置：24.501 = [EPD, SHT/spare, msgType, …]；24.301/24.008 = [PD|SHT/TI, msgType, …]
+// 平文本 NAS 的 msgType 位置：24.501 = [EPD, SHT/spare, msgType, …]；24.301/24.008/24.080
+// = [PD|SHT/TI, msgType, …]；44.018 按实例 mtOff（CCCH 消息头部多 L2 Pseudo Length → 2，
+// 其余 1，建库写入）。
 function plainMsgType(bytes, spec) {
   return spec === '24501' ? bytes[2] : bytes[1];
 }
 
-// msgType 命中：24008 类型表含通配位（TI/序号，msgMask），24501/24301 精确比较——与 codec.js 口径一致
-function typeHit(insts, mt) {
-  return insts.some((i) => i.msgType != null && (i.msgMask != null ? (mt & i.msgMask) === (i.msgType & i.msgMask) : i.msgType === mt));
+// msgType 命中：24008/44018 类型表含通配或掩码（msgMask），其余精确比较——与 codec.js 口径一致。
+// off 取实例级 mtOff（缺省按 spec 旧口径）。
+function typeHit(insts, mt, bytes, spec) {
+  return insts.some((i) => {
+    if (i.msgType == null) return false;
+    const off = i.mtOff ?? (spec === '24501' ? 2 : 1);
+    const b = bytes[off];
+    if (b == null) return false;
+    return i.msgMask != null ? (b & i.msgMask) === (i.msgType & i.msgMask) : b === i.msgType;
+  });
 }
 
 // 候选字节 → { schemas: [{key, spec, ver, via, names, namesSecure}], best } | null
@@ -6024,7 +6050,7 @@ function wsMatchSchema(schemas, bytes, helpers) {
     const mt = plainMsgType(bytes, spec);
     if (mt != null) {
       for (const [name, insts] of Object.entries(schema.messages || {})) {
-        if (typeHit(insts, mt)) names.push(name);
+        if (typeHit(insts, mt, bytes, spec)) names.push(name);
       }
     }
     // 安全帧：结构解码（SHT≠0）；可读载荷再按 msgType 派发（不要求全行解码成功）
@@ -6036,7 +6062,7 @@ function wsMatchSchema(schemas, bytes, helpers) {
         const smt = plainMsgType(d.payload, spec);
         if (smt != null && !namesSecure.length) {
           for (const [name, insts] of Object.entries(schema.messages || {})) {
-            if (typeHit(insts, smt)) namesSecure.push(name);
+            if (typeHit(insts, smt, d.payload, spec)) namesSecure.push(name);
           }
         }
       }
@@ -6074,13 +6100,21 @@ function splitHeading(text) {
 }
 
 // caption 段：'Table 8.2.6.1.1: …'（24.501/24.301）或 'Table 9.2.12/3GPP TS 24.008: …'（24.008）→ 元数据
+// 取窗口内最后一个 Table 段（最贴近表格的即本表 caption）——24.080 实证：相邻两表只隔
+// 一段说明文字，上一表的 caption 会滞留在 3 段窗口里，取第一个会把 REGISTER MT 的表
+// 标成 FACILITY（caption 与内容错位）。
 function parseCaption(paras) {
-  const cap = (paras || []).find((p) => /^Table\s/i.test(p));
+  const cap = (paras || []).filter((p) => /^Table\s/i.test(p)).pop();
   if (!cap) return null;
-  let m = /^Table\s+([\w.]+)\s*:\s*(.+)$/i.exec(cap);
-  if (!m) m = /^Table\s+([\w.]+)\/[^:]*:\s*(.+)$/i.exec(cap);
+  // caption 内嵌换行（44.018 9.1.15b 实证 '…HANDOVER\nCOMMAND message content'）→ 拍平再匹配
+  const flat = cap.replace(/\s*\n\s*/g, ' ').trim();
+  let m = /^Table\s+([\w.]+)\s*:\s*(.+)$/i.exec(flat);
+  if (!m) m = /^Table\s+([\w.]+)\/[^:]*:\s*(.+)$/i.exec(flat);
   // 24.008 部分表题无冒号（'Table 9.2.18/3GPP TS 24.008 MM INFORMATION message content'）
-  if (!m) m = /^Table\s+([\w.]+)\/\s*3GPP TS [\w.]+\s*:?\s*(.+)$/i.exec(cap);
+  if (!m) m = /^Table\s+([\w.]+)\/\s*3GPP TS [\w.]+\s*:?\s*(.+)$/i.exec(flat);
+  // 缺冒号且表号与名称直接连写（44.018 9.1.51 实证 'Table 9.1.51.1EXTENDED MEASUREMENT
+  // ORDER message content'）——纯数字节号（小写字母后缀，大写 E 属于名称）+ 大写名称首字母为界
+  if (!m) m = /^Table\s+(\d+(?:\.\d+)+[a-z]?)([A-Z].+)$/.exec(flat);
   if (!m) return { caption: cap };
   let name = m[2];
   const kind = /message content/i.test(name) ? 'message' : 'other';
@@ -6120,8 +6154,8 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
       }
       continue;
     }
-    // 消息类型值表：24.501 §9.7 / 24.301 §9.8 / 24.008 §10.4 一类——原样保留行文本供建库解析
-    const ttRe = spec === '24008' ? /^10\.4[a-z]?\b/ : /^9\.[78]\b/;
+    // 消息类型值表：24.501 §9.7 / 24.301 §9.8 / 24.008 与 44.018 §10.4 一类——原样保留行文本供建库解析
+    const ttRe = spec === '24008' || spec === '44018' ? /^10\.4[a-z]?\b/ : /^9\.[78]\b/;
     if (curH3 && ttRe.test(curH3.num) && /message type/i.test(curH3.title)) {
       typeTables.push({ section: curH3.num, title: curH3.title, rows: it.rows.map((r) => r.map((c) => c.text)) });
       continue;
@@ -6248,6 +6282,8 @@ function buildMessages(msgs, msgTypes, bits) {
 // 结构化 → schema（codec 消费形态）+ 建库问题清单
 function buildSchema(structured) {
   if (structured.spec === '24008') return buildSchema24008(structured);
+  if (structured.spec === '44018') return buildSchema44018(structured);
+  if (structured.spec === '24080') return buildSchema24080(structured);
   const msgTypes = parseTypeTables(structured.typeTables);
   const ies = buildIes(structured.bits);
   const { out: messages, problems } = buildMessages(structured.msgs, msgTypes, structured.bits);
@@ -6341,6 +6377,57 @@ function resolveMsgType24008(name, msgTypes, direction) {
 // 域归属：每个子表与"行名命中最多的消息族"配对（数据驱动，版本鲁棒），resolve 时先查域表。
 const DOM24008 = [['9.2', 'mm'], ['9.3', 'cc'], ['9.4', 'gmm'], ['9.5', 'sm']];
 
+// 消息内容表双物理行合并 + 名称清理 + def 解析（24008/44018/24080 三族共用）。
+// 引用行（名称全空，仅 ref）与名称续行（长 IE 名跨两物理行，如 'Ciphering key sequence'
+// +'number'）都并入前行。续行不占字节，但若不并会把相邻半八位组行拆成两个独立 VH run
+// 各吞整字节——wire oracle 实证多算 1 字节。引用有两种落点：ref 列（r.ref）或直接把
+// 节号写进 name 列（'10.5.3.5a'）——都收。
+const REF_ONLY = /^\d+(?:\.\d+)+[A-Za-z]?$/;
+
+function mergeContentRows(structured, rows) {
+  const merged = [];
+  for (const r of rows) {
+    const prev = merged[merged.length - 1];
+    if (prev && !(r.iei || '').trim() && !(r.presence || '').trim() && !(r.format || '').trim() && !(r.len || '').trim()) {
+      const nm = (r.name || '').trim();
+      // 'TS 24.008' 跨规范引用拆出的 'TS' 是规范指称不是名称续词（24.080 RELEASE COMPLETE
+      // 的 Cause 行），不并入名称
+      const refInName = !r.ref && REF_ONLY.test(nm) ? nm : null;
+      if (nm && !refInName && !/^TS\b/i.test(nm) && !(prev.name || '').toLowerCase().includes(nm.toLowerCase())) {
+        prev.name = `${(prev.name || '').trim()} ${nm}`.replace(/\s+/g, ' ');
+      }
+      const ref = r.ref || refInName;
+      if (ref && !prev.def && !prev.ref) {
+        prev.ref = ref;
+        prev.def = structured.bits.find((b) => b.section === ref) ? ref : null;
+      }
+      continue;
+    }
+    merged.push({ ...r });
+  }
+  // IE 名去协议组前缀行（'Mobility management\nProtocol discriminator' → 取末行）
+  for (const r of merged) {
+    if (r.name && r.name.includes('\n')) {
+      const lines = r.name.split('\n').map((s) => s.trim()).filter(Boolean);
+      if (lines.length > 1) r.name = lines[lines.length - 1];
+    }
+    // def 解析：精确节号 → 字母后缀变体回退基表（'10.5.7.4a' GPRS Timer 3 值域格式
+    // 与 10.5.7.4 同族，语义展示用）；名称尾带节号的（'… 10.5.5.15a'）拆出。
+    if (!r.ref) {
+      const sm = /^(.*?)\s+(\d+(?:\.\d+)+[A-Za-z]?)$/.exec((r.name || '').trim());
+      if (sm) { r.name = sm[1].trim(); r.ref = sm[2]; }
+    }
+    if (r.ref && !r.def) {
+      r.def = structured.bits.find((b) => b.section === r.ref)
+        ? r.ref
+        : structured.bits.find((b) => b.section === r.ref.replace(/[A-Za-z]$/, ''))
+          ? r.ref.replace(/[A-Za-z]$/, '')
+          : null;
+    }
+  }
+  return merged;
+}
+
 function buildSchema24008(structured) {
   const msgTypes = parseTypeTables24008(structured.typeTables);
   const domNames = {};
@@ -6363,49 +6450,7 @@ function buildSchema24008(structured) {
   const problems = [];
   for (const m of structured.msgs) {
     if (!m.name || m.kind !== 'message') continue;
-    // 双物理行合并：引用行（名称全空，仅 ref）与名称续行（长 IE 名跨两物理行，如
-    // 'Ciphering key sequence'+'number'）都并入前行。续行不占字节，但若不并会把相邻
-    // 半八位组行拆成两个独立 VH run 各吞整字节——wire oracle 实证多算 1 字节。
-    // 引用有两种落点：ref 列（r.ref）或直接把节号写进 name 列（'10.5.3.5a'）——都收。
-    const merged = [];
-    const REF_ONLY = /^\d+(?:\.\d+)+[A-Za-z]?$/;
-    for (const r of m.rows) {
-      const prev = merged[merged.length - 1];
-      if (prev && !(r.iei || '').trim() && !(r.presence || '').trim() && !(r.format || '').trim() && !(r.len || '').trim()) {
-        const nm = (r.name || '').trim();
-        const refInName = !r.ref && REF_ONLY.test(nm) ? nm : null;
-        if (nm && !refInName && !(prev.name || '').toLowerCase().includes(nm.toLowerCase())) {
-          prev.name = `${(prev.name || '').trim()} ${nm}`.replace(/\s+/g, ' ');
-        }
-        const ref = r.ref || refInName;
-        if (ref && !prev.def && !prev.ref) {
-          prev.ref = ref;
-          prev.def = structured.bits.find((b) => b.section === ref) ? ref : null;
-        }
-        continue;
-      }
-      merged.push({ ...r });
-    }
-    // IE 名去协议组前缀行（'Mobility management\nProtocol discriminator' → 取末行）
-    for (const r of merged) {
-      if (r.name && r.name.includes('\n')) {
-        const lines = r.name.split('\n').map((s) => s.trim()).filter(Boolean);
-        if (lines.length > 1) r.name = lines[lines.length - 1];
-      }
-      // def 解析：精确节号 → 字母后缀变体回退基表（'10.5.7.4a' GPRS Timer 3 值域格式
-      // 与 10.5.7.4 同族，语义展示用）；名称尾带节号的（'… 10.5.5.15a'）拆出。
-      if (!r.ref) {
-        const sm = /^(.*?)\s+(\d+(?:\.\d+)+[A-Za-z]?)$/.exec((r.name || '').trim());
-        if (sm) { r.name = sm[1].trim(); r.ref = sm[2]; }
-      }
-      if (r.ref && !r.def) {
-        r.def = structured.bits.find((b) => b.section === r.ref)
-          ? r.ref
-          : structured.bits.find((b) => b.section === r.ref.replace(/[A-Za-z]$/, ''))
-            ? r.ref.replace(/[A-Za-z]$/, '')
-            : null;
-      }
-    }
+    const merged = mergeContentRows(structured, m.rows);
     const pd = PD24008[Object.keys(PD24008).find((k) => (m.section || '').startsWith(k))] ?? null;
     const dom = DOM24008.find(([p]) => (m.section || '').startsWith(p));
     const domMap = (dom && tableOf[dom[1]]) || null;
@@ -6430,6 +6475,166 @@ function buildSchema24008(structured) {
   }
   return {
     schema: { spec: '24008', version: structured.version, msgTypes, ies, messages: out },
+    problems,
+  };
+}
+
+// ---- 44.018（GSM RR）建库 -----------------------------------------------------------------
+// 24.007 半八位组头家族：PD(V 1/2 低半) + Skip Indicator(V 1/2 高半) + Message type(V 1)；
+// CCCH/BCCH 消息（paging/immediate assignment/SI）头部多一行 L2 Pseudo Length(V 1)——
+// 通用定长 V 行处理，无需特判；消息尾 Rest Octets（CSN.1）为可变 V 行吞尾。
+// 类型值来源 §10.4：10.4.1 主表为多行单元格（类别行 + 'b b b b b b b b NAME' 模式行，全固定位）；
+// 10.4.2 为 SACCH 子类型（分离数字格 5 位 + 隐含高位 000：bit8 扩展位恒 0、bit7-6 恒 0）；
+// 10.4.3（GTTP）模式行会被收进映射但无消息实例引用；10.4.4/10.4.5（EC-GSM）模式行不足
+// 8 位，天然跳过（对应 pycrate 亦无这些 RR 类，wire oracle 同步豁免）。
+const PD44018 = 6; // TS 24.007 §11.2.3.1.3：RR=6
+
+function parseTypeTables44018(tables) {
+  const out = {};
+  const LINE = /^([01]) ([01]) ([01]) ([01]) ([01]) ([01]) ([01]) ([01])\s+(.+)$/;
+  const normKey = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (const t of tables || []) {
+    if (!/^10\.4/.test(t.section || '')) continue;
+    for (const cells of t.rows) {
+      for (const cell of cells) {
+        for (const line of String(cell).split('\n')) {
+          const m = LINE.exec(line.trim());
+          if (!m) continue;
+          const name = m[9].trim().replace(/[.…\s]+$/, '');
+          if (!name || /^reserved/i.test(name)) continue; // 'Reserved (see NOTE)' 占位
+          const type = parseInt(m.slice(1, 9).join(''), 2);
+          out[normKey(name)] = { type, mask: 0xff };
+        }
+      }
+      // 形态二：SACCH 子类型（≥4 个分离 0/1 数字格 + 末格名称；表头只有 bits 5-1）
+      const digs = [];
+      let name = null;
+      for (const c of cells) {
+        const s = String(c).trim();
+        if (!name && /^[01]$/.test(s)) digs.push(s);
+        else if (s) name = s;
+      }
+      if (digs.length >= 4 && name && digs.length <= 7) {
+        const bits8 = '0'.repeat(8 - digs.length) + digs.join('');
+        out[normKey(name)] = { type: parseInt(bits8, 2), mask: 0xff };
+      }
+    }
+  }
+  return out;
+}
+
+// 名称对齐（跨表名称形态差异实证）：'CDMA 2000 …' vs 'CDMA2000 …'（去非字母数字）、
+// 'CONFIGURATION CHANGE ACK.' vs '… ACKNOWLEDGE'（规范化后前缀匹配，最长优先）、
+// 内容表偶漏 'TYPE' 词（'SYSTEM INFORMATION 15'，j00 9.1.43j）→ 双侧均试去 type 形态。
+function resolveMsgType44018(name, msgTypes) {
+  const normKey = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const key = normKey(name);
+  const keyT = key.replace(/type/g, '');
+  for (const c of [key, keyT]) if (msgTypes[c]) return msgTypes[c];
+  let best = null;
+  for (const [k, v] of Object.entries(msgTypes)) {
+    for (const kk of new Set([k, k.replace(/type/g, '')])) {
+      for (const c of [key, keyT]) {
+        if ((kk.startsWith(c) || c.startsWith(kk)) && Math.min(kk.length, c.length) >= 8) {
+          if (!best || kk.length > best[0]) best = [kk.length, v];
+        }
+      }
+    }
+  }
+  return best ? best[1] : null;
+}
+
+function buildSchema44018(structured) {
+  const msgTypes = parseTypeTables44018(structured.typeTables);
+  const ies = buildIes(structured.bits);
+  const out = {};
+  const problems = [];
+  for (const m of structured.msgs) {
+    if (!m.name || m.kind !== 'message') continue;
+    const merged = mergeContentRows(structured, m.rows);
+    const t = resolveMsgType44018(m.name, msgTypes);
+    const inst = {
+      section: m.section,
+      tableId: m.tableId,
+      direction: m.direction,
+      pd: PD44018,
+      mtOff: mtOffset(merged),
+      rows: merged,
+    };
+    if (t) {
+      inst.msgType = t.type;
+      inst.msgMask = t.mask;
+    } else {
+      inst.msgType = null;
+      problems.push(`${m.section} ${m.name}: 无消息类型值`);
+    }
+    if (!out[m.name]) out[m.name] = [];
+    out[m.name].push(inst);
+  }
+  return {
+    schema: { spec: '44018', version: structured.version, msgTypes, ies, messages: out },
+    problems,
+  };
+}
+
+// Message type 行的八位组偏移（wireshark 平文本派发用；44.018 CCCH 消息头部多 L2 Pseudo
+// Length → 2，其余 → 1）。行序累计：VH 0.5、定长 V 按字节数，遇 message type 行为止。
+function mtOffset(rows) {
+  let acc = 0;
+  for (const r of rows) {
+    if (/message (identity|type)/i.test((r.name || ''))) break;
+    const f = rowFormat(r);
+    if (f === 'VH') acc += 0.5;
+    else if (f === 'V') acc += fixedLen(r.len) ?? 0;
+  }
+  return Math.round(acc);
+}
+
+// ---- 24.080（SS/USSD）建库 -----------------------------------------------------------------
+// 24.007 半八位组头家族：PD(V 1/2 低半) + Transaction identifier(V 1/2 高半) + Message type(V 1)。
+// 三消息（FACILITY/REGISTER/RELEASE COMPLETE）的 IE 全是 TLV/LV 不透明载荷（Facility 的
+// ROSE 组件是 BER 编码，不在位表管线范围）。
+// 消息类型值（表 3.1，x/. 通配形态不机读；高两位 CS 域序号位编码 0）：FACILITY=0x3A、
+// REGISTER=0x3B、RELEASE COMPLETE=0x2A——与 24.008 §10.3.2 同源且分配恒定，pycrate
+// TS24080 出帧实证（0b3a/0b3b/0b2a）。三常量硬编码与 PD24008 同一待遇。
+const PD24080 = 11; // TS 24.007 §11.2.3.1.3：SS=11
+
+const SS_MSG_TYPES = {
+  facility: { type: 0x3a, mask: 0xff },
+  register: { type: 0x3b, mask: 0xff },
+  'release complete': { type: 0x2a, mask: 0xff },
+};
+
+function buildSchema24080(structured) {
+  const ies = buildIes(structured.bits);
+  const msgTypes = {};
+  for (const [k, v] of Object.entries(SS_MSG_TYPES)) msgTypes[k] = { ...v, group: null };
+  const out = {};
+  const problems = [];
+  for (const m of structured.msgs) {
+    if (!m.name || m.kind !== 'message') continue;
+    const merged = mergeContentRows(structured, m.rows);
+    const t = SS_MSG_TYPES[m.name.toLowerCase()] || null;
+    const inst = {
+      section: m.section,
+      tableId: m.tableId,
+      direction: m.direction,
+      pd: PD24080,
+      mtOff: 1,
+      rows: merged,
+    };
+    if (t) {
+      inst.msgType = t.type;
+      inst.msgMask = t.mask;
+    } else {
+      inst.msgType = null;
+      problems.push(`${m.section} ${m.name}: 无消息类型值`);
+    }
+    if (!out[m.name]) out[m.name] = [];
+    out[m.name].push(inst);
+  }
+  return {
+    schema: { spec: '24080', version: structured.version, msgTypes, ies, messages: out },
     problems,
   };
 }
@@ -6611,7 +6816,7 @@ if (args.schema && args.out) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, buildSchema, parseTypeTables24008, ingestDocxZip, sampleSchema };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, buildSchema, parseTypeTables24008, mergeContentRows, parseTypeTables44018, ingestDocxZip, sampleSchema };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
@@ -6812,7 +7017,7 @@ function renderShell() {
 <header class="topbar">
   <div class="logo">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1" y="1" width="7" height="7" rx="1.5" fill="#0f62fe"/><rect x="10" y="1" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="1" y="10" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="10" y="10" width="7" height="7" rx="1.5" fill="#0f62fe"/></svg>
-    RRC&nbsp;Workbench <span class="dim">v1.10</span>
+    RRC&nbsp;Workbench <span class="dim">v1.11</span>
   </div>
   <nav class="tabs">
     <button class="tab on" data-page="encode">帧生成器</button>
@@ -6823,7 +7028,7 @@ function renderShell() {
     <button class="tab" data-page="library">规范库</button>
     <button class="tab" data-page="about">关于</button>
   </nav>
-  <span class="ver">v1.10 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
+  <span class="ver">v1.11 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
 </header>
 <main>
   <section class="page on" id="page-encode"></section>
@@ -6834,7 +7039,7 @@ function renderShell() {
   <section class="page" id="page-library"></section>
   <section class="page" id="page-about"></section>
 </main>
-<div class="foot">RRC Workbench v1.10 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
+<div class="foot">RRC Workbench v1.11 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => goto(t.dataset.page)));
 }
 function goto(id) {
@@ -7848,7 +8053,7 @@ function registryAddVersion(label) {
 // 官方 docx/zip → schema/ASN.1 全程本机：NAS 走 ingestDocxZip（与 CLI 同一纯函数，
 // 导出 JSON 与 nasdef 产物逐字节一致）；ASN.1 走 extractFromDocumentXml（ASN1START 块拼接）。
 const ingestState = { results: [], seq: 0 };
-const NAS_SPECS = ['24501', '24301', '24008'];
+const NAS_SPECS = ['24501', '24301', '24008', '44018', '24080'];
 
 function ingestAutoName(fname) {
   const m = /^(?:[3GPP ]*)?(\d{5})-([0-9a-z]+)\.(?:zip|docx)$/i.exec(fname.trim());
@@ -8178,7 +8383,7 @@ function renderNasPage() {
         </div>
         <div id="nasWsRows" style="margin-top:8px"></div>
       </div></div>
-      <div class="card"><div class="card-h">安全保护帧与完整性验证（SHT≠0 · 33.501 §6.4 / 33.401 §8.1）</div><div class="card-b">
+      <div class="card" id="nasSecCard"><div class="card-h">安全保护帧与完整性验证（SHT≠0 · 33.501 §6.4 / 33.401 §8.1）</div><div class="card-b">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button class="btn" id="nasSecDec">解安全帧（左侧 hex 输入）</button>
         </div>
@@ -8378,6 +8583,10 @@ function nasRefreshSelectors() {
   $('nasMsgNote').textContent = s
     ? `${nasKey(nasState.spec, nasState.ver)}：${Object.keys(s.messages).length} 消息 / ${Object.keys(s.msgTypes || {}).length} 消息类型值 / ${Object.keys(s.ies || {}).length} IE 节`
     : '尚未导入 schema——用 tools/nasdef.mjs 从官方 docx 表格生成（见手册 §7）。';
+  // 33.501/33.401 SHT 安全帧封装仅 LTE/5G NAS 有：GSM RR 的 A5 在 RR 层（44.018 无
+  // SHT 帧形态）、SS 消息不加密——这两族隐藏安全卡
+  const secCard = $('nasSecCard');
+  if (secCard) secCard.style.display = (nasState.spec === '44018' || nasState.spec === '24080') ? 'none' : '';
   $('nasDiffL').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${k}</option>`).join('');
   $('nasDiffR').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${k}</option>`).join('');
   nasSecRefreshAlgos();
