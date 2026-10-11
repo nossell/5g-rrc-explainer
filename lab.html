@@ -5406,6 +5406,127 @@ function bcdEncode(digits) {
   return out;
 }
 
+// ---- SMS（23.040 TPDU / 23.038 字母表）------------------------------------------
+// GSM 7-bit 默认字母表（23.038 §6.2.1，0x00-0x7F）与扩展表（0x1B 转义）。
+const GSM7_ALPHABET = '@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\x1bÆæßÉ !"#¤%&\'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà';
+const GSM7_EXT = { 0x0a: '\n', 0x14: '^', 0x28: '{', 0x29: '}', 0x2f: '\\', 0x3c: '[', 0x3d: '~', 0x3e: ']', 0x40: '|', 0x65: '€' };
+
+// 7 位打包解包：bitOffset 起按 7 位一个字符连续取 septets 个（UDH 时数据从
+// (1+UDHL)*8 + 填充位 起——填充使 (1+UDHL)*8+fill 为 7 的倍数）。
+function gsm7Unpack(bytes, septets, bitOffset = 0) {
+  const u8 = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes ?? []);
+  let bit = bitOffset;
+  let out = '';
+  let ext = false;
+  for (let i = 0; i < septets; i++) {
+    const b0 = u8[bit >> 3] ?? 0;
+    const b1 = u8[(bit >> 3) + 1] ?? 0;
+    const shift = bit & 7;
+    const v = ((b0 >> shift) | (b1 << (8 - shift))) & 0x7f;
+    bit += 7;
+    if (ext) {
+      out += GSM7_EXT[v] ?? '';
+      ext = false;
+      continue;
+    }
+    if (v === 0x1b) {
+      ext = true;
+      continue;
+    }
+    out += GSM7_ALPHABET[v] ?? String.fromCharCode(v);
+  }
+  return out;
+}
+
+// TP-User Data 语义解码（23.038 TP-DCS 编码组选择字母表）：
+//   通用组 00xx 与 1111 组：bits 3-2 选字母表（00=7bit 01=8bit 10=UCS2 11=保留）；
+//   消息等待组 1100/1101 = 默认字母表、1110 = UCS2（bit3 是 MW 激活位）。
+// udhi = octet1 的 TP-UDHI 位（0x40）；udl = TP-User-Data-Length 行值。
+// 返回 { alphabet, text }；text 为 null 表示该编码组不可机读（保留/压缩）。
+function smsTpUdText({ ud, udl = null, dcs = 0, udhi = false }) {
+  const u8 = ud instanceof Uint8Array ? ud : Uint8Array.from(ud ?? []);
+  const grp = dcs & 0xc0;
+  let alpha = null;
+  if (grp === 0x00 || grp === 0xf0) alpha = (dcs >> 2) & 0x03;
+  else if (grp === 0xc0 || grp === 0xd0) alpha = 0;
+  else if (grp === 0xe0) alpha = 2;
+  if (alpha === 3 || alpha == null) return { alphabet: 'unknown', text: null };
+  if (alpha === 2) {
+    let t = '';
+    for (let i = 0; i + 1 < u8.length; i += 2) t += String.fromCharCode((u8[i] << 8) | u8[i + 1]); // UTF-16BE
+    return { alphabet: 'UCS2', text: t };
+  }
+  if (alpha === 1) return { alphabet: '8bit', text: null };
+  // 7-bit：UDL 计 septets（含 UDH 头）；UDH 时数据从头部后的 septet 边界起
+  if (udhi) {
+    const hdr = 1 + (u8[0] ?? 0);
+    const fill = (7 - (hdr % 7)) % 7;
+    const hdrSeptets = Math.ceil((hdr * 8) / 7);
+    const septets = Math.max(0, (udl ?? hdrSeptets + u8.length) - hdrSeptets);
+    return { alphabet: 'GSM 7-bit', text: gsm7Unpack(u8, septets, hdr * 8 + fill) };
+  }
+  const septets = udl ?? Math.floor((u8.length * 8) / 7);
+  return { alphabet: 'GSM 7-bit', text: gsm7Unpack(u8, septets) };
+}
+
+// TP-OA/TP-DA/TP-RA 地址行解码：[有效半八位组数][TOA][数字 BCD]。
+function smsAddrDecode(value) {
+  const u8 = value instanceof Uint8Array ? value : Uint8Array.from(value ?? []);
+  if (u8.length < 2) throw new Error('TP 地址须 ≥2 八位组');
+  const n = u8[0];
+  const toa = u8[1];
+  const digits = bcdDecode(u8.slice(2)).slice(0, n);
+  const ton = (toa >> 4) & 0x07;
+  const prefix = ton === 1 ? '+' : '';
+  return { number: prefix + digits, ton, npi: toa & 0x0f };
+}
+
+// TP-SCTS/TP-DT 时间戳：7 个半八位组交换十进制 YY MM DD HH MM SS + 时区
+// （时区首半八位组 bit3 = 符号，值为刻钟数）。
+function smsSctsDecode(value) {
+  const u8 = value instanceof Uint8Array ? value : Uint8Array.from(value ?? []);
+  if (u8.length < 7) throw new Error('TP 时间戳须 7 八位组');
+  const d = (b) => `${b & 0x0f}${b >> 4}`;
+  const tz = u8[6];
+  const quarters = (tz >> 4) + (tz & 0x07) * 10;
+  const sign = tz & 0x08 ? '-' : '+';
+  return `20${d(u8[0])}-${d(u8[1])}-${d(u8[2])} ${d(u8[3])}:${d(u8[4])}:${d(u8[5])} GMT${sign}${quarters / 4}`;
+}
+
+// 23.040 消息级语义摘要（解码树的汇总行）：从 parts 里找 MTI/DCS/UDL/UD/PI 行算 TP-UD 原文。
+// 返回字符串数组（无 SMS 语义时为空）。
+function smsMsgSemantics(parts) {
+  const find = (re) => parts.find((p) => re.test(p.row.name || ''));
+  const mti = find(/TP-Message Type Indicator/i);
+  const udRow = find(/^TP-UD$|TP-PI bit gated/i);
+  if (!mti || !udRow || udRow.value == null || !(udRow.value instanceof Uint8Array) || !udRow.value.length) return [];
+  const oct1 = mti.value instanceof Uint8Array ? mti.value[0] : mti.value;
+  const udhi = !!(Number(oct1) & 0x40);
+  const dcsRow = find(/^TP-DCS$/);
+  const udlRow = find(/^TP-UDL$/);
+  let dcs = dcsRow && dcsRow.value instanceof Uint8Array ? dcsRow.value[0] : 0;
+  let udl = udlRow && udlRow.value instanceof Uint8Array ? udlRow.value[0] : null;
+  let udBytes = udRow.value;
+  // 门控尾行（TP-PI bit gated）时 UD 藏在 [PI][PID?][DCS?][UDL?][UD] 串里——按 PI 位取段
+  if (/TP-PI bit gated/i.test(udRow.row.name || '')) {
+    const v = udRow.value;
+    const pi = v[0] ?? 0;
+    let off = 1;
+    if (pi & 0x01) off += 1; // TP-PID
+    if (pi & 0x02) {
+      if (dcsRow == null) dcs = v[off - 1];
+      off += 1;
+    }
+    if (!(pi & 0x04)) return []; // TP-UD 不在
+    udl = v[off];
+    off += 1;
+    udBytes = v.slice(off);
+  }
+  const { alphabet, text } = smsTpUdText({ ud: udBytes, udl, dcs, udhi });
+  if (text == null || !text.length) return [];
+  return [`TP-UD（${alphabet}）：${JSON.stringify(text)}`];
+}
+
 // ==== src/nas/crypto.js ====
 // crypto.js — NAS 完整性/机密性算法层（clean-room，锚定规范测试向量）。
 //
@@ -7171,7 +7292,7 @@ if (args.schema && args.out) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, buildSchema, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, buildSchema, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
@@ -9074,6 +9195,12 @@ function nasValueHtml(r, value) {
   if (/PLMN/i.test(lname)) {
     try { const p2 = plmnDecode(value); sem.push(['PLMN', `MCC ${p2.mcc} / MNC ${p2.mnc}`]); } catch {}
   }
+  if (/^TP-(OA|DA|RA)$/.test(lname)) {
+    try { const a = smsAddrDecode(value); sem.push(['号码', `${a.number}（TON ${a.ton} / NPI ${a.npi}）`]); } catch {}
+  }
+  if (/^TP-(SCTS|DT)$/.test(lname)) {
+    try { sem.push(['时间', smsSctsDecode(value)]); } catch {}
+  }
   const cur = nasCur();
   const ref = r.def || (r.ref && cur && cur.ies[r.ref] ? r.ref : null);
   let fieldRows = '';
@@ -9101,9 +9228,11 @@ function nasDecodeFrom(hex) {
     const { parts } = decMsg(inst, OCT(hex), nasState.spec);
     nasState.decoded = parts;
     nasState._decodedCtx = { inst, spec: nasState.spec, ver: nasState.ver, msg: nasState.msg, instIdx: nasState.instIdx, hex, parts };
+    const smsSem = smsMsgSemantics(parts);
     $('nasDecOut').innerHTML = `<table style="width:100%;font:11.5px var(--mono);border-collapse:collapse">
       <tr style="color:var(--t4)"><th style="text-align:left;padding:3px">行</th><th style="text-align:left;padding:3px">IE</th><th style="text-align:left;padding:3px">值</th></tr>
       ${parts.map((p) => `<tr><td style="padding:3px;color:var(--t4)">${p.rowIdx}</td><td style="padding:3px">${p.row.name}</td><td style="padding:3px">${nasValueHtml(p.row, p.value)}</td></tr>`).join('')}
+      ${smsSem.length ? `<tr><td colspan="3" style="padding:3px;font:400 11px var(--sans);color:#198038">${smsSem.map((s) => `📩 ${s}`).join('<br>')}</td></tr>` : ''}
     </table>`;
   } catch (e) {
     nasState.decoded = null;
@@ -9123,6 +9252,8 @@ function nasValueText(r, value) {
   const lname = r.name || '';
   if (/DNN/i.test(lname)) { try { sem.push(`APN: ${apnDecode(value)}`); } catch {} }
   if (/PLMN/i.test(lname)) { try { const p2 = plmnDecode(value); sem.push(`PLMN: MCC ${p2.mcc} / MNC ${p2.mnc}`); } catch {} }
+  if (/^TP-(OA|DA|RA)$/.test(lname)) { try { const a = smsAddrDecode(value); sem.push(`号码: ${a.number} (TON ${a.ton}/NPI ${a.npi})`); } catch {} }
+  if (/^TP-(SCTS|DT)$/.test(lname)) { try { sem.push(`时间: ${smsSctsDecode(value)}`); } catch {} }
   const cur = nasCur();
   const ref = r.def || (r.ref && cur && cur.ies[r.ref] ? r.ref : null);
   if (ref) {
@@ -9148,6 +9279,7 @@ function nasExportDecode(format) {
       app: 'rrc-workbench', exportedAt: new Date().toISOString(),
       spec: ctx.spec, version: ctx.ver, message: ctx.msg, instance: ctx.instIdx,
       section: ctx.inst.section, frameHex: ctx.hex,
+      sms: smsMsgSemantics(ctx.parts).length ? smsMsgSemantics(ctx.parts) : undefined,
       parts: ctx.parts.map((p) => ({
         row: p.rowIdx, ie: p.row.name, iei: p.row.iei || '', format: p.row.format || '',
         presence: p.row.presence || '', ref: p.row.ref || undefined,
@@ -9168,8 +9300,9 @@ function nasExportDecode(format) {
     '| 行 | IE | 格式 | 值 |',
     '|---:|---|---|---|',
     ...ctx.parts.map((p) => `| ${p.rowIdx} | ${p.row.name.replace(/\|/g, '\\|')} | ${p.row.format || ''} | ${nasValueText(p.row, p.value).replace(/\|/g, '\\|')} |`),
+    ...(smsMsgSemantics(ctx.parts).length ? ['', ...smsMsgSemantics(ctx.parts).map((s) => `> 📩 ${s}`)] : []),
     '',
-    '> 由 RRC Workbench 导出；值列含 APN/PLMN 语义与位布局字段展开（ref 已连位表的行）。',
+    '> 由 RRC Workbench 导出；值列含 APN/PLMN/TP 地址/TP 时间戳语义与位布局字段展开（ref 已连位表的行）；TP-UD 原文见 SMS 语义行（23.038 字母表）。',
   ];
   ingestDownload(`nas-decode-${ctx.spec}-${ctx.ver || 'x'}-${stamp}.md`, lines.join('\n'), 'text/markdown');
 }
@@ -9247,6 +9380,10 @@ window.RW.plmnEncode = plmnEncode;
 window.RW.plmnDecode = plmnDecode;
 window.RW.bcdDecode = bcdDecode;
 window.RW.layoutUnpack = layoutUnpack;
+window.RW.gsm7Unpack = gsm7Unpack;
+window.RW.smsTpUdText = smsTpUdText;
+window.RW.smsAddrDecode = smsAddrDecode;
+window.RW.smsSctsDecode = smsSctsDecode;
 
 // 行内提示（替代 alert；与结果区风格一致，可被下次输出自然覆盖）
 function inlineMsg(elId, msg, isErr = true) {

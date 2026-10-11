@@ -43,7 +43,7 @@
   /* ---------- 岗位模拟卷（卅六轮）：三套固定卷——seed 固定，同 key 每次同一套 ----------
      求职场景要的是"我下周面网优岗，给我一套固定卷"，不是每次都变的随机抽。 */
   var JOB_PAPERS = [
-    { key: 'opt', name: '无线网优岗', blurb: '空闲态/接入/切换/重建/寻呼与定时器网——RRC 主战场', domains: ['RRC 十课', '空口底层'], seed: 39 },
+    { key: 'opt', name: '无线网优岗', blurb: '空闲态/接入/切换/重建/寻呼与定时器网——RRC 主战场', domains: ['RRC 空口', '空口底层'], seed: 39 },
     { key: 'core', name: '核心网岗', blurb: '注册/会话/切片/SBA/接口族台账', domains: ['NAS 与核心网', '接口与用户面'], seed: 40 },
     { key: 'test', name: '协议测试岗', blurb: '一致性测试/卡与终端/安全与跨层排障', domains: ['测试与终端', '安全与对照'], seed: 41 }
   ];
@@ -55,7 +55,7 @@
      词表是工程配置（现有域名与课程主题的同义表达），不是协议内容——零新论断。
      纯函数实时匹配，JD 文本不落盘（零新 localStorage 键）。 */
   var JD_KEYWORDS = [
-    { kws: ['网优', '网络优化', '覆盖', '掉话', '切换', '乒乓', 'rsrp', 'rsrq', 'sinr', '路测', 'kpi', '驻留', '重选', '寻呼', '无线侧'], domain: 'RRC 十课', paper: 'opt', w: 2 },
+    { kws: ['网优', '网络优化', '覆盖', '掉话', '切换', '乒乓', 'rsrp', 'rsrq', 'sinr', '路测', 'kpi', '驻留', '重选', '寻呼', '无线侧'], domain: 'RRC 空口', paper: 'opt', w: 2 },
     { kws: ['核心网', 'amf', 'smf', 'upf', '会话', '切片', 's-nssai', '注册', '5gc', 'epc', '漫游', 'pdu'], domain: 'NAS 与核心网', paper: 'core', w: 2 },
     { kws: ['协议测试', '一致性', '仪表', '用例', '终端测试', 'usim', 'sim卡', '信令跟踪', '抓包', '日志分析'], domain: '测试与终端', paper: 'test', w: 2 },
     { kws: ['ngap', 'xnap', 'x2ap', 's1ap', 'f1ap', 'e1ap', 'gtp', 'sctp', '接口信令', '站间'], domain: '接口与用户面', paper: 'core', w: 2 },
