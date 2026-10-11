@@ -356,7 +356,31 @@
       { q: '这个成功口径怎么接进判责？LTM 场景的判词叫什么？',
         a: '判责定义直接吸收（38.300 §15.5.2.2.2）：MCG LTM cell switch 场景的「成功切换」=RACH-based 的 RA 成功、或 RACH-less 的首个 UL 数据被网络收到——判 Too Early/Wrong Cell 都踩在这块地基上；timer 两支量法=自上次切换初始化、或自 **CHO/LTM 执行**到失败；换名句明文：**Too Late LTM cell switch、Too Early LTM cell switch、LTM cell switch to Wrong Cell**。文书链 M43 讲过。',
         ref: '38.300#15.5.2.2.2' }
-    ] }
+    ] },
+    'm48:q0': { levels: [
+      { q: 'LTE 的连接建立跟 NR 差在哪？',
+        a: '骨架同构（M1/M48）：都是三段式、Request 都走 CCCH、都靠随机接入送 Msg3。差异在**消息名与细节**：LTE 叫 **RRCConnectionRequest/RRCConnectionSetup/RRCConnectionSetupComplete**（NR 是 RRCSetupRequest 系，少个 Connection 前缀）；LTE 的 Request 带 **establishmentCause** 与 **ue-Identity**（上层给 S-TMSI 就用、没给就抽随机数）——IE 枚举在 36.331 §6。面试时两套名字一口气对上，就是「两代差在哪」最省力的答案。',
+        ref: '36.331#5.3.3.1' },
+      { q: 'T300 到期 UE 具体记什么账？',
+        a: '记进 **VarConnEstFailReport**（36.331 §5.3.3.6）：失败小区全局标识、失败时刻本小区 RSRP/RSRQ、邻区测量，还专门记随机接入三件——**numberOfPreamblesSent**（前导发了几根）、**contentionDetected**（有没有撞竞争）、**maxTxPowerReached**（最后一根是否顶到最大功率）。支持临时惩罚的 UE，同一小区连续 **connEstFailCount** 次到期后按 connEstFailOffset 给该小区挂一段时期的 Qoffsettemp——抬高重选门槛缓解反复失败。重建时 Complete 带 connEstFailInfoAvailable 告诉网络账在。',
+        ref: '36.331#5.3.3.6' }
+    ] },
+    'm48:q1': { levels: [
+      { q: 'LTE 安全激活为什么是「完整性先行、加密随后」？',
+        a: '因为 SecurityModeCommand 自身就是第一块试金石（36.331 §5.3.4.3）：UE 按命令带的算法派生 **KRRCint** 先验**命令自身的完整性**——命令本身还是明文，验不过就说明链路上有假货。验过才派生 KRRCenc/KUPenc 并**立即启用完整性保护**（含 SecurityModeComplete 自身），**加密等过程完成后生效**——原文 except for the SecurityModeComplete message which is sent unciphered，Complete 本身不加密。',
+        ref: '36.331#5.3.4.3' },
+      { q: '安全激活失败连接会断吗？UE 怎么办？',
+        a: '不断。36.331 §5.3.4.3：校验不过——**继续使用收到命令之前的旧配置**（既不启用完整性也不启用加密）、发 **SecurityModeFailure** 收场——SRB1 还在明文跑，连接保持。条款**未设重试**，补救靠网络重新发起安全激活（工程口径）。集中失败要查算法配置与密钥同步，偶发常见于覆盖边缘的丢包乱序。',
+        ref: '36.331#5.3.4.3' }
+    ] },
+    'm48:q3': { levels: [
+      { q: '重建请求里 UE 带什么「对账暗号」？',
+        a: '三件（36.331 §5.3.7.4）：**C-RNTI**（源 PCell 用的，切换失败场景）或触发重建小区的、**physCellId**、**shortMAC-I**——原文=**MAC-I 的低 16 位**，用源 PCell 的 KRRCint 密钥与完整性算法算出。这是 UE 的对账暗号：目标站拿它验「你是不是我认识的那只 UE」——防 PCI 混淆后冒领上下文，验不过就回 Reject。',
+        ref: '36.331#5.3.7.4' },
+      { q: '为什么说重建成功只回到「够说话的最小态」？',
+        a: '因为只救回 **SRB1**（36.331 §5.3.7.1 原句：SRB1 operation resumes while the operation of other radio bearers remains suspended）——SRB2 和全部 DRB 挂起，用户面断着。要恢复业务得等**重建后的第一条 RRCConnectionReconfiguration**（36.331 §5.3.5.3：第一条重配 resume SRB2 与挂起的 DRB）；安全侧按 nextHopChainingCount 更新 KeNB、重派生三把钥匙、算法不变（§5.3.7.5）——「最小态」+一次重配，重建的恢复闭环就这两步。',
+        ref: '36.331#5.3.7.5' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
