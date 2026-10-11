@@ -4198,12 +4198,24 @@ function parseMessageTable(rowsRaw) {
   const alt = ['iei', 'information element', 'type', 'reference', 'presence', 'format', 'length'];
   let cols = null;
   let trJoin = false; // 7 列变体：Type 与 Reference 是两个相邻单元格，需拼接
+  let gsm = false; // GSM 变体：IE 名取自 Information element 列（Type/Reference 列是 'Clause 8.2.2' 引用）
   if (head.length === want.length && want.every((w, i) => head[i].includes(w))) {
     cols = ['iei', 'information element', 'typeref', 'presence', 'format', 'length'];
   } else if (head.length === alt.length && alt.every((w, i) => head[i].includes(w))) {
     // type/reference 拆两列的变体：合并 2、3 列处理
     cols = ['iei', 'information element', 'typeref', 'typeref', 'presence', 'format', 'length'];
     trJoin = true;
+  } else if (head.length === 6
+    && head[0].length <= 3
+    && head[1].includes('information element')
+    && head[2].includes('reference')
+    && head[3].includes('presence')
+    && head[4].includes('format')
+    && head[5].includes('length')) {
+    // 24.011 消息表头形态：首列表头为空（RP-ACK 等带 IEI 的表写 'IEI'，长度同判），
+    // 第 3 列表头是 'Reference'（无 'Type/' 前缀）。
+    cols = ['iei', 'information element', 'typeref', 'presence', 'format', 'length'];
+    gsm = true;
   }
   if (!cols) return null;
   const col = {};
@@ -4214,10 +4226,49 @@ function parseMessageTable(rowsRaw) {
     if (!r.length) continue;
     const g = (c) => (col[c] !== undefined && r[col[c]] ? r[col[c]].text : '');
     const tr = trJoin ? normWs(g('typeref') + (r[col.typeref + 1] ? r[col.typeref + 1].text : '')) : g('typeref');
-    const { name, ref } = splitNameRef(tr);
+    let name;
+    let ref;
+    if (gsm) {
+      // GSM 变体：IE 名在 Information element 列；Reference 列是 'Clause 8.2.2' / 'Subclause
+      // 8.1.4.1'（本规范节号）或 '3GPP TS 24.007'（跨规范引用 → ref 置空，防误挂节号）
+      name = normWs(g('information element').replace(/\n/g, ' '));
+      const rm = /TS\s*\d{2}\.\d{3}/i.test(tr) ? null : SECTION_TAIL.exec(tr);
+      ref = rm ? rm[2] : null;
+    } else {
+      ({ name, ref } = splitNameRef(tr));
+    }
     out.push({ iei: g('iei'), name, ref, presence: g('presence'), format: g('format'), len: g('length') });
   }
   return capText ? { rows: out, capText } : { rows: out };
+}
+
+// 23.040 TPDU 参数表识别与解析：表头 ['Abbr.','Reference','P1)','R2)','Description']
+// （表示法列表头有 'R2)'/'P2)' 两种排版，第 4 列恒为表示法；'Abbr'/'Abbr.' 两写）。
+// 返回行 [{ iei:'', name:<abbr>, ref:<全称>, presence, format:<表示法>, len:<表示法> }]，
+// 表示法原文留给 buildSchema23040 翻译（'b'/'2b'/'o'/'7o'/'I'/'2-12o'/'o/7o'/脚注）。
+function parseSmsElementsTable(rowsRaw) {
+  if (!rowsRaw.length) return null;
+  const head = rowsRaw[0].map((c) => normWs(c.text).toLowerCase().replace(/\s*\d+\)\s*$/, '').trim());
+  if (!(head[0] === 'abbr' || head[0] === 'abbr.') || !head[1].includes('reference')) return null;
+  const pIdx = head.findIndex((h, i) => i >= 2 && /^p/.test(h));
+  if (pIdx < 0) return null;
+  let rIdx = head.findIndex((h, i) => i >= 2 && i !== pIdx && /^r/.test(h));
+  if (rIdx < 0) {
+    rIdx = pIdx + 1; // 'P2)' 排版变体：表示法列紧跟 presence 列
+    if (!head[rIdx] || head[rIdx].includes('description')) return null;
+  }
+  const out = [];
+  for (let ri = 1; ri < rowsRaw.length; ri++) {
+    const r = rowsRaw[ri];
+    if (!r.length) continue;
+    const cell = (i) => (r[i] ? r[i].text : '');
+    const name = normWs(cell(0).replace(/\n/g, ' '));
+    if (!name) continue;
+    const presence = normWs(cell(pIdx).split('\n')[0]);
+    const repr = normWs(cell(rIdx).split('\n')[0]);
+    out.push({ iei: '', name, ref: normWs(cell(1).replace(/\n/g, ' ')), presence, format: repr, len: repr });
+  }
+  return out.length ? out : null;
 }
 
 // ==== src/nas/docxzip.js ====
@@ -4496,6 +4547,10 @@ function rowFormat(r) {
   if (fmt === 'LV') return 'LV';
   if (fmt === 'TLV-E') return 'TLV-E';
   if (fmt === 'LV-E') return 'LV-E';
+  // 23.040 TPDU 专用（buildSchema23040 生成）：ADDR = 自描述地址（[长度(半八位组)][TOA][数字]），
+  // VP = TP-VP（长度由 octet1 的 TP-VPF 位定：0/1/7 八位组）
+  if (fmt === 'ADDR') return 'ADDR';
+  if (fmt === 'VP') return 'VP';
   // 'FFS'（早期 Rel-8 占位）/ 其他未知写法 → UNK（不可编解码，解码时跳过）
   return 'UNK';
 }
@@ -4544,7 +4599,7 @@ function nasPD(inst) {
 // 半八位组行名是否为 protocol discriminator（24.301 表头行）
 const isPDRow = (name) => /^protocol discriminator$/.test(name);
 // 哪些 spec 的半八位组行做 PD 语义校验（值固定，错位即暴露——防 run 位序反转的自洽盲区）
-const VH_PD_SPECS = new Set(['24301', '24008', '44018', '24080']);
+const VH_PD_SPECS = new Set(['24301', '24008', '44018', '24080', '24011']);
 
 // 半八位组 run 位序计划（TS 24.007 §11.2.1：连续半八位组 IE 序列中，先出现者占
 // bits 1-4（低半），第二个占 bits 5-8，交替；内容表行序 = 出现序，规范 §8.1 b)）。
@@ -4710,6 +4765,30 @@ function decOnce(inst, u8, spec, force) {
       } else if (pres === 'M') throw new Error(`必配行缺失: ${r.name} (IEI 0x${ieiVal.toString(16)})`);
       continue;
     }
+    if (f === 'ADDR') {
+      // 23.040 TP-OA/TP-DA/TP-RA：[长度（有效半八位组数 0-12）][TOA][数字半八位组]
+      if (off >= u8.length) {
+        if (pres === 'M') throw new Error('消息截断（TP 地址）');
+        break;
+      }
+      const total = 2 + Math.ceil(u8[off] / 2);
+      if (off + total > u8.length) throw new Error('消息截断（TP 地址）');
+      parts.push({ row: r, rowIdx: ri, value: u8.slice(off, off + total) });
+      off += total;
+      continue;
+    }
+    if (f === 'VP') {
+      // 23.040 TP-VP：长度由 octet1 的 TP-VPF 位定（位5-4：00 无 / 10 相对 1 八位组 /
+      // 01 增强 7 / 11 绝对 7）——u8[0] 恒为 TPDU 首字节（TP-MTI 行所在）
+      const vpf = (u8[0] >> 3) & 0x03;
+      const vlen = vpf === 0 ? 0 : vpf === 2 ? 1 : 7;
+      if (vlen) {
+        if (off + vlen > u8.length) throw new Error('消息截断（TP-VP）');
+        parts.push({ row: r, rowIdx: ri, value: u8.slice(off, off + vlen) });
+        off += vlen;
+      }
+      continue;
+    }
     if (f === 'LV' || f === 'LV-E') {
       // 无 IEI 的长度前置行。M：必须消费；C/O：消息尾部的可选 LV 自定位——
       // 有余字节即在并消费（NAS 中可选非 IEI 行只出现在表尾），无则缺席。
@@ -4792,6 +4871,15 @@ function encMsg(inst, parts = [], spec = '24501') {
       const ieiVal = rowIei(r);
       if (ieiVal == null || !has) { if (ieiVal != null && pres === 'M') throw new Error(`必配 TV1 行缺值: ${r.name}`); continue; }
       out.push(encIE('TV1', ieiVal, val)[0]);
+      continue;
+    }
+    if (f === 'ADDR' || f === 'VP') {
+      // 23.040：值原样回写（ADDR 含长度/TOA；VP 按 VPF 定长的字节串）；VP 缺席 = VPF 为 0
+      if (!has) {
+        if (pres === 'M') throw new Error(`必配行缺值: ${r.name}`);
+        continue;
+      }
+      out.push(...val);
       continue;
     }
     if (f === 'TV' || f === 'TLV' || f === 'TLV-E' || f === 'LV' || f === 'LV-E') {
@@ -6154,9 +6242,13 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
       }
       continue;
     }
-    // 消息类型值表：24.501 §9.7 / 24.301 §9.8 / 24.008 与 44.018 §10.4 一类——原样保留行文本供建库解析
-    const ttRe = spec === '24008' || spec === '44018' ? /^10\.4[a-z]?\b/ : /^9\.[78]\b/;
-    if (curH3 && ttRe.test(curH3.num) && /message type/i.test(curH3.title)) {
+    // 消息类型值表：24.501 §9.7 / 24.301 §9.8 / 24.008 与 44.018 §10.4 / 24.011 §8.1-8.2
+    // 一类——原样保留行文本供建库解析。23.040 的 TP-MTI 值是散文（§9.2.3.1），无类型值表。
+    const ttRe = spec === '24008' || spec === '44018' ? /^10\.4[a-z]?\b/
+      : spec === '24011' ? /^8\.[12]\b/
+      : spec === '23040' ? null
+      : /^9\.[78]\b/;
+    if (ttRe && curH3 && ttRe.test(curH3.num) && /message type/i.test(curH3.title)) {
       typeTables.push({ section: curH3.num, title: curH3.title, rows: it.rows.map((r) => r.map((c) => c.text)) });
       continue;
     }
@@ -6166,11 +6258,44 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
       bits.push({ section: sh.num, name: sh.title, figure: it.paras?.find((p) => /^Figure/i.test(p)) || null, octets: bt.octets });
       continue;
     }
+    // 23.040 TPDU 参数表（Abbr./Reference/P/R/Description）→ 原样入 msgs，行翻译在 buildSchema23040
+    if (spec === '23040') {
+      const pt = parseSmsElementsTable(it.rows);
+      if (pt) {
+        const sh = it.heading ? splitHeading(it.heading.text) : { num: null, title: null };
+        // 同节双变体（RP-ERROR / RP-ACK）靠正文 '(i) … for RP-ERROR' 行区分，后缀进名称
+        const variant = (it.paras || []).map((p) => /^\((?:i|ii|iii)+\)\s+.+?\s+for\s+(RP-ACK|RP-ERROR)\s*\.?$/i.exec(p)).find(Boolean);
+        // 节号字母后缀（'9.2.2.1a'）被 splitHeading 拆进标题 → 剥小写字母前缀
+        const base = (sh.title || '').replace(/^[a-z]\s+/, '').replace(/\s*type\s*$/i, '').trim();
+        msgs.push({
+          section: sh.num,
+          tableId: null,
+          name: variant ? `${base} (${variant[1].toUpperCase()})` : base,
+          kind: 'message',
+          direction: null,
+          rows: pt,
+        });
+        continue;
+      }
+    }
     const mt = parseMessageTable(it.rows);
     if (mt) {
       const cap = parseCaption(it.paras) || (mt.capText ? parseCaption([mt.capText]) : null);
       const sh = it.heading ? splitHeading(it.heading.text) : { num: null, title: null };
       const dirP = (it.paras || []).find((p) => /^Direction:/i.test(p));
+      // 24.011 无 'Direction:' 段——方向在正文 'sent in MSC -> MS direction'（RP 消息按方向
+      // 分 MTI 值，解析失手则建库按类型表全方向展开，wire 仍正确）
+      let direction = dirP ? dirP.replace(/^Direction:\s*/i, '') : null;
+      if (!direction && (spec === '24011' || spec === '23040')) {
+        for (const p of it.paras || []) {
+          const dm = /\b(MSC|network|mobile station|MS)\s*(?:->|—)\s*(MSC|network|mobile station|MS)\b/i.exec(p);
+          if (dm) {
+            const side = (s) => /^msc$|^network$/i.test(s) ? 'network' : 'ms';
+            direction = `${side(dm[1])} to ${side(dm[2])}`;
+            break;
+          }
+        }
+      }
       // 24.008 的消息名在正文段 'Message type: IDENTITY REQUEST'（caption 名是大写下划线形态）
       const mtName = (it.paras || []).map((p) => /^Message type:\s*(.+)$/i.exec(p)).find(Boolean);
       const name = (spec === '24008' && mtName ? mtName[1].trim() : null) || cap?.name || sh.title;
@@ -6179,7 +6304,7 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
         tableId: cap?.tableId || null,
         name,
         kind: cap?.kind || 'other',
-        direction: dirP ? dirP.replace(/^Direction:\s*/i, '') : null,
+        direction,
         rows: mt.rows,
       });
       continue;
@@ -6284,6 +6409,8 @@ function buildSchema(structured) {
   if (structured.spec === '24008') return buildSchema24008(structured);
   if (structured.spec === '44018') return buildSchema44018(structured);
   if (structured.spec === '24080') return buildSchema24080(structured);
+  if (structured.spec === '24011') return buildSchema24011(structured);
+  if (structured.spec === '23040') return buildSchema23040(structured);
   const msgTypes = parseTypeTables(structured.typeTables);
   const ies = buildIes(structured.bits);
   const { out: messages, problems } = buildMessages(structured.msgs, msgTypes, structured.bits);
@@ -6639,6 +6766,227 @@ function buildSchema24080(structured) {
   };
 }
 
+// ---- 24.011（SMS CP/RP 层）建库 -------------------------------------------------------------
+// CP 消息（§7.2.x）：24.007 半八位组头家族 PD(V 1/2 低半) + Transaction identifier(V 1/2 高半)
+// + Message type(V 1)，PD=9（SMS）；CP-User data = LV、CP-Cause = V 1（消息表 + pycrate
+// Type4LV/Type3V 双证——§8.1.4.x 元素图里的 'IEI' 行是遗迹，线上无 IEI 字节）。
+// RP 消息（§7.3.x）：无 PD——octet1 = RP-Message Type（3 位 MTI + spare，整字节常量）；
+// 地址/载荷全 LV，RP-ACK/RP-ERROR 的 RP-User data = TLV(0x41)。RP-MTI 值来自表 8.3
+// （3 位 + 方向 + 名称），方向编码 ms->n/n->ms；表缺项时用常量兜底（五版表 8.3 全赋值）。
+const PD24011_CP = 9; // TS 24.007 §11.2.3.1.3：SMS=9
+
+const CP24011_TYPES = { 'cp-data': 0x01, 'cp-ack': 0x04, 'cp-error': 0x10 };
+const RP24011_TYPES = {
+  'rp-data|ms->n': 0x00,
+  'rp-data|n->ms': 0x01,
+  'rp-ack|ms->n': 0x02,
+  'rp-ack|n->ms': 0x03,
+  'rp-error|ms->n': 0x04,
+  'rp-error|n->ms': 0x05,
+  'rp-smma|ms->n': 0x06,
+};
+
+// CP 表 8.1：多行单元格位模式（'0 0 0 0 0 0 0 1 CP-DATA'，44.018 §10.4.1 同款）；
+// RP 表 8.3：['0 0 0','ms -> n','RP-DATA'] 三元行（3 位 + 方向 + 名称，Reserved 跳过）。
+function parseTypeTables24011(tables) {
+  const out = {};
+  const LINE = /^([01]) ([01]) ([01]) ([01]) ([01]) ([01]) ([01]) ([01])\s+(.+)$/;
+  for (const t of tables || []) {
+    for (const cells of t.rows) {
+      for (const cell of cells) {
+        for (const line of String(cell).split('\n')) {
+          const m = LINE.exec(line.trim());
+          if (!m) continue;
+          const name = m[9].trim().replace(/[.…\s]+$/, '');
+          if (!name) continue;
+          out[`${name.toLowerCase()}|`] = { type: parseInt(m.slice(1, 9).join(''), 2), mask: 0xff, dir: null };
+        }
+      }
+      const digs = String(cells[0] || '').trim();
+      if (/^[01] [01] [01]$/.test(digs) && cells.length >= 3) {
+        const dir = String(cells[1] || '').replace(/\s+/g, '');
+        const nm = String(cells[2] || '').trim();
+        if (dir && nm && !/^reserved/i.test(nm)) {
+          out[`${nm.toLowerCase()}|${dir}`] = { type: parseInt(digs.replace(/ /g, ''), 2), mask: 0xff, dir };
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// CP 类型表键带 '|' 后缀（无方向），与 RP 方向键 'name|dir' 统一前缀查找。
+// 实例方向已知 → 单值；未知（RP-ACK/RP-ERROR 双向共用一张内容表）→ 每方向一实例。
+function resolveMsgType24011(name, direction, msgTypes) {
+  const key = `${name.toLowerCase()}|`;
+  const dirEntries = Object.entries(msgTypes).filter(([k]) => k.startsWith(key));
+  if (dirEntries.some(([, v]) => v.dir)) {
+    const dirKey = direction
+      ? (/network to ms/i.test(direction) ? 'n->ms' : /ms to network/i.test(direction) ? 'ms->n' : null)
+      : null;
+    if (dirKey) {
+      const hit = dirEntries.find(([k]) => k.endsWith(`|${dirKey}`));
+      if (hit) return [hit[1]];
+    }
+    return dirEntries.map(([, v]) => v);
+  }
+  const e = msgTypes[key] || null;
+  return e ? [e] : [];
+}
+
+// len 列归一化：'1/2 octet'→'1/2'、'2-3 octets'→'2-3'、'3 bits'→'1'（RP-MTI 3 位 + spare 位 0）。
+function normRow24011(r) {
+  const len = (r.len || '').trim();
+  const nl = /^3 bits$/i.test(len) ? '1' : len.replace(/\s*octets?\s*$/i, '').trim();
+  return { ...r, len: nl };
+}
+
+function buildSchema24011(structured) {
+  const parsed = parseTypeTables24011(structured.typeTables);
+  const msgTypes = {};
+  for (const [k, v] of Object.entries(CP24011_TYPES)) if (!parsed[`${k}|`]) msgTypes[`${k}|`] = { type: v, mask: 0xff, dir: null };
+  for (const [k, v] of Object.entries(RP24011_TYPES)) if (!parsed[k]) msgTypes[k] = { type: v, mask: 0xff, dir: k.split('|')[1] };
+  for (const [k, v] of Object.entries(parsed)) msgTypes[k] = { ...v };
+  const ies = buildIes(structured.bits);
+  const out = {};
+  const problems = [];
+  for (const m of structured.msgs) {
+    if (!m.name || m.kind !== 'message') continue;
+    const merged = mergeContentRows(structured, m.rows).map(normRow24011);
+    const cands = resolveMsgType24011(m.name, m.direction, msgTypes);
+    if (!cands.length) problems.push(`${m.section} ${m.name}: 无消息类型值`);
+    for (const t of cands.length ? cands : [null]) {
+      const inst = {
+        section: m.section,
+        tableId: m.tableId,
+        direction: t?.dir ? (t.dir === 'ms->n' ? 'ms to network' : 'network to ms') : m.direction,
+        pd: t && !t.dir ? PD24011_CP : null,
+        mtOff: mtOffset(merged),
+        rows: merged,
+      };
+      inst.msgType = t ? t.type : null;
+      inst.msgMask = t ? t.mask : null;
+      (out[m.name] = out[m.name] || []).push(inst);
+    }
+  }
+  return {
+    schema: { spec: '24011', version: structured.version, msgTypes, ies, messages: out },
+    problems,
+  };
+}
+
+// ---- 23.040（SMS TPDU 层）建库 --------------------------------------------------------------
+// TPDU 参数表（Abbr./Reference/P/R/Description）→ codec 行。与 IE 行表的结构差异：
+//   1) octet1 是位打包（TP-MTI 2 位 + 若干 1 位参数）→ 单一 V 1 行，名称取规范全称
+//      'TP-Message Type Indicator'（含 'message type' 词 → codec 自动行 + 掩码匹配），
+//      msgMask=0x03；其余位参数并入该字节（problems 记录，解码显示原始八位组）；
+//   2) TP-OA/TP-DA/TP-RA 自描述地址（长度按半八位组计）→ 行格式 ADDR（codec 扩展）；
+//   3) TP-VP 长度由 octet1 的 TP-VPF 位定（0/1/7）→ 行格式 VP（codec 扩展）；
+//   4) 最后一个 M 行之后的 O 行折叠为消息尾可变 V 行——TP-PI 位门控的
+//      TP-PID/TP-DCS/TP-UDL/TP-UD 整段有字节则吞入、无则缺席（wire 级精确；
+//      位级展开留语义层）；
+//   5) TP-MTI 值：§9.2.3.1 散文（00/01/10 两两按方向成对，按名唯一）→ 常量；
+//   6) TP-CD：k00 表丢行（f00 有）——按 TP-CDL 定义补可变 V 尾行，problems 记录。
+const SMS23040_TYPES = {
+  'sms-deliver': { type: 0x00, mask: 0x03 },
+  'sms-deliver-report': { type: 0x00, mask: 0x03 },
+  'sms-submit': { type: 0x01, mask: 0x03 },
+  'sms-submit-report': { type: 0x01, mask: 0x03 },
+  'sms-status-report': { type: 0x02, mask: 0x03 },
+  'sms-command': { type: 0x02, mask: 0x03 },
+};
+
+const SMS23040_ADDR = new Set(['TP-OA', 'TP-DA', 'TP-RA']);
+
+function rows23040(rows, problems, section, name) {
+  const abbrOf = (r) => (r.name || '').replace(/\s*\d+\)\s*$/, '').trim().replace(/\s+/g, ' ');
+  const presOf = (r) => (/^[MO]/i.test((r.presence || '').trim()) ? r.presence.trim().charAt(0).toUpperCase() : 'O');
+  const isBit = (r) => /^(?:1|2)?b$/i.test((r.format || '').trim()); // 'b'（1 位）/ '2b'（TP-VPF）；TP-MTI 先行分支
+  let lastM = -1;
+  rows.forEach((r, i) => { if (presOf(r) === 'M' && !isBit(r)) lastM = i; });
+  const out = [];
+  const bits = [];
+  const tail = [];
+  let hasCD = false;
+  rows.forEach((r, i) => {
+    const abbr = abbrOf(r);
+    if (abbr === 'TP-CD') hasCD = true;
+    const pres = presOf(r);
+    const ref = r.ref && /^TP-/i.test(r.ref) ? r.ref : null; // ref 列是参数全称，非节号
+    if (abbr === 'TP-MTI') {
+      out.push({ iei: '', name: 'TP-Message Type Indicator', ref, presence: 'M', format: 'V', len: '1' });
+      return;
+    }
+    if (i > lastM) { tail.push({ abbr, pres, ref }); return; }
+    if (isBit(r)) { bits.push(`${abbr}${pres === 'O' ? '(O)' : ''}`); return; }
+    if (SMS23040_ADDR.has(abbr)) {
+      out.push({ iei: '', name: abbr, ref, presence: pres, format: 'ADDR', len: (r.len || '').trim() });
+      return;
+    }
+    if (abbr === 'TP-VP') {
+      out.push({ iei: '', name: abbr, ref, presence: pres, format: 'VP', len: (r.len || '').trim() });
+      return;
+    }
+    if (abbr === 'TP-CD') {
+      // 长度 = TP-CDL（f00 表标 'o' 不准）——可变尾行
+      out.push({ iei: '', name: abbr, ref, presence: pres, format: 'V', len: '' });
+      return;
+    }
+    const m = /^(\d+)o$/i.exec((r.format || '').trim());
+    out.push({ iei: '', name: abbr, ref, presence: pres, format: 'V', len: m ? m[1] : '1' });
+  });
+  if (tail.length) {
+    const gated = tail.length > 1 || tail[0].abbr === 'TP-PI';
+    out.push({
+      iei: '',
+      name: gated ? `${tail.map((t) => t.abbr).join(' / ')} (TP-PI bit gated)` : tail[0].abbr,
+      ref: tail[0].ref,
+      presence: tail.some((t) => t.pres === 'M') ? 'M' : 'O',
+      format: 'V',
+      len: '',
+    });
+  } else if (hasCD) {
+    out.push({ iei: '', name: 'TP-CD', ref: null, presence: 'O', format: 'V', len: '' });
+  }
+  if (name === 'SMS-COMMAND' && !tail.length && !hasCD) {
+    // k00 表丢了 TP-CD 行（f00 有，TP-CDL 定义 'length of the TP-CD field'）——补尾行
+    out.push({ iei: '', name: 'TP-CD', ref: null, presence: 'O', format: 'V', len: '' });
+    problems.push(`${section} ${name}: 表缺 TP-CD 行（k00 编辑遗漏，f00 有）——按 TP-CDL 定义补可变尾行`);
+  }
+  if (bits.length) problems.push(`${section} ${name}: octet1 位参数并入 TP-MTI 字节（${bits.join(', ')}）`);
+  return out;
+}
+
+function buildSchema23040(structured) {
+  const msgTypes = {};
+  for (const [k, v] of Object.entries(SMS23040_TYPES)) msgTypes[k] = { ...v, group: null };
+  const ies = buildIes(structured.bits);
+  const out = {};
+  const problems = [];
+  for (const m of structured.msgs) {
+    if (!m.name || m.kind !== 'message') continue;
+    const rows = rows23040(m.rows, problems, m.section, m.name);
+    const base = m.name.toLowerCase().replace(/\s*\(.*\)$/, '');
+    const t = msgTypes[base] || null;
+    const inst = {
+      section: m.section,
+      tableId: m.tableId,
+      direction: m.direction,
+      pd: null,
+      mtOff: 0,
+      rows,
+    };
+    inst.msgType = t ? t.type : null;
+    inst.msgMask = t ? t.mask : null;
+    if (!t) problems.push(`${m.section} ${m.name}: 无消息类型值`);
+    (out[m.name] = out[m.name] || []).push(inst);
+  }
+  return {
+    schema: { spec: '23040', version: structured.version, msgTypes, ies, messages: out },
+    problems,
+  };
+}
+
 // ---- 浏览器/通用入口：docx（或内含 docx 的 zip）→ { schema, structured, problems, stats } ----
 // zipBytes: .docx 自身即 zip；也接受包着一个 .docx 的外层 zip（3GPP 官方分发形态），
 // 或解开的 docx 目录 zip（含 word/document.xml）。.doc 老格式浏览器侧不处理。
@@ -6775,9 +7123,16 @@ function sampleSchema(schema, N, seed, msgRe = null) {
             if (iei && r.iei.includes('TBD')) continue; // 规范 TBD 占位行不可编码
             if (fmt === 'UNK') { if (!mandatory) continue; ok = false; break; } // NOTE 行跳过；FFS 必配行不可采样
             if (!mandatory && rng() > (fmt === 'T' ? 0.3 : 0.4)) continue; // 可选行随机缺席
+            if (fmt === 'VP') continue; // TP-VP 长度随 octet1 的 VPF 位：自动 MTI 行写 msgType（VPF=0）→ 恒缺席
             let value;
             if (fmt === 'VH' || fmt === 'TV1') { value = rnd(16); }
             else if (fmt === 'T') { value = null; }
+            else if (fmt === 'ADDR') {
+              const n = rnd(7) * 2; // 偶数个有效半八位组（免半字节填充）
+              const a = [n, 0x91];
+              for (let i = 0; i < n / 2; i++) a.push(rnd(256));
+              value = Uint8Array.from(a);
+            }
             else {
               value = sampleRowValue(r, fmt, flen);
               if (value == null) { ok = false; break; }
@@ -6816,7 +7171,7 @@ if (args.schema && args.out) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, buildSchema, parseTypeTables24008, mergeContentRows, parseTypeTables44018, ingestDocxZip, sampleSchema };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, buildSchema, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
@@ -8053,7 +8408,7 @@ function registryAddVersion(label) {
 // 官方 docx/zip → schema/ASN.1 全程本机：NAS 走 ingestDocxZip（与 CLI 同一纯函数，
 // 导出 JSON 与 nasdef 产物逐字节一致）；ASN.1 走 extractFromDocumentXml（ASN1START 块拼接）。
 const ingestState = { results: [], seq: 0 };
-const NAS_SPECS = ['24501', '24301', '24008', '44018', '24080'];
+const NAS_SPECS = ['24501', '24301', '24008', '44018', '24080', '24011', '23040'];
 
 function ingestAutoName(fname) {
   const m = /^(?:[3GPP ]*)?(\d{5})-([0-9a-z]+)\.(?:zip|docx)$/i.exec(fname.trim());
@@ -8586,7 +8941,7 @@ function nasRefreshSelectors() {
   // 33.501/33.401 SHT 安全帧封装仅 LTE/5G NAS 有：GSM RR 的 A5 在 RR 层（44.018 无
   // SHT 帧形态）、SS 消息不加密——这两族隐藏安全卡
   const secCard = $('nasSecCard');
-  if (secCard) secCard.style.display = (nasState.spec === '44018' || nasState.spec === '24080') ? 'none' : '';
+  if (secCard) secCard.style.display = ['44018', '24080', '24011', '23040'].includes(nasState.spec) ? 'none' : '';
   $('nasDiffL').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${k}</option>`).join('');
   $('nasDiffR').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${k}</option>`).join('');
   nasSecRefreshAlgos();
