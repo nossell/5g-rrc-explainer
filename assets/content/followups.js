@@ -264,6 +264,38 @@
       { q: '判责用的 Tstore_UE_cntxt 归谁管？',
         a: '条款明文：为支撑移动性优化的检测解法，**Tstore_UE_cntxt 应（shall）可由 OAM 系统配置**——判责的标尺刻度也在 OAM 手里。全部自动修改 + 判责门限三样（标尺、圈、节奏）都归 OAM，自优化的一切自由都是圈内的自由。',
         ref: '38.300#15.5.2.5' }
+    ] },
+    'm45:q0': { levels: [
+      { q: '接通率掉了，第一步怎么把「拒绝」和「失败」分开？',
+        a: '**看 RRCReject 与 T300 到期的占比**（分桶为工程口径，非 3GPP 条款）：收到 RRCReject 且带 waitTime→UE 起 T302 被门禁——这是网络主动限流（准入/拥塞），不是无线故障；T300 到期→无线面失败（reset MAC、记 VarConnEstFailReport、同小区连败达 connEstFailCount 次触发 connEstFailOffset 临时退避）。拒绝型看时段特征（忙时集中），失败型看 RACH 与覆盖。',
+        ref: '38.331#5.3.15.2' },
+      { q: 'T300 到期后，UE 手里留下什么证据？',
+        a: '**VarConnEstFailReport 一本账**：PLMN、失败小区全局标识/TAC、小区级与 SSB 级 RSRP/RSRQ、按重选排序的邻区测量（至多每频点 6 同频+3 异频+3 异 RAT）、perRAInfoList（按 §5.7.10.5 填）；支持多份的 UE 挪进 VarConnEstFailReportList 再写新条目；**48 小时可弃**，等 UEInformationRequest 的 connEstFailReportReq 来取——取证要趁早。',
+        ref: '38.331#5.3.3.7' }
+    ] },
+    'm45:q1': { levels: [
+      { q: '掉线率分解的第一刀切在哪？',
+        a: '**先看 RLF 频次、再看重建成功率**（分桶为工程口径，非 3GPP 条款）：N310 连续 out-of-sync 起 T310（§5.3.10.1），T310 到期/连接态随机接入问题/RLC 达最大重传才判 RLF（§5.3.10.3）；N311 连续 in-sync 还能静默恢复——失步次数远多于 RLF 次数。重建成=连接保住（用户面短暂中断），不成回 IDLE（release cause「RRC connection failure」）才是真掉线。',
+        ref: '38.331#5.3.10.3' },
+      { q: '重建请求为什么带「PCI+C-RNTI+shortMAC-I」三样？',
+        a: '**网络靠这三样找回并验证 UE context**：physCellId 定位源小区、c-RNTI 对号上下文、shortMAC-I（MAC-I 的低 16 位）计算比对验真；reestablishmentCause 三值（reconfigurationFailure/handoverFailure/otherFailure）。重建发到哪个小区同时决定 M43 三分类判责的归属——同一台 UE、同一场失败，落点不同责任站就不同。',
+        ref: '38.331#5.3.7.4' }
+    ] },
+    'm45:q3': { levels: [
+      { q: '「切换成功率」里的"成功"，协议上怎么判？',
+        a: '**四条 KPI 链里唯一一个"成功"被条款写死的**（KPI 本身为工程口径，非 3GPP 条款）：38.300 §15.5.2.2.2 明文 the "successful handover" refers to the UE state, namely the successful completion of the RA procedure——看 **UE 是否完成目标小区随机接入**，不看网络收没收到 ReconfigurationComplete。切换失败的协议现场因此在目标侧 RA：T304 到期（reconfiguration with sync 失败，§5.3.5.8.3）就是最常见的现场。',
+        ref: '38.300#15.5.2.2.2' },
+      { q: 'T304 怎么起表、到期意味着什么？',
+        a: '**执行 reconfiguration with sync 时、以其中的 t304 为目标 SpCell 起表**（§5.3.5.5.2 实文：start timer T304 for the corresponding SpCell with the timer value set to t304, as included in the reconfigurationWithSync）；到期=切换失败：释放 rach-ConfigDedicated 专用前导、revert 回源 PCell 配置、失败信息存 VarRLF-Report、发 §5.3.7 重建。成功切换后 T304 的 elapsed/configured 比率超门限还会触发 SHR（§5.7.10.6）——成功也要复盘。',
+        ref: '38.331#5.3.5.5.2' }
+    ] },
+    'm45:d2': { levels: [
+      { q: '面试官追问：四条 KPI 链的排障优先级怎么排？',
+        a: '**果→因→证一张图**（分桶与优先级为工程口径，非 3GPP 条款）：**接通率**先分拒绝型/失败型（RRCReject 的 T302 门禁 vs T300 到期→RA Report+connEstFailReport 取证）→**掉线率**拆 RLF 频次与重建成功率（rlf-Report+mobilityHistory，48h/PLMN 门禁先过）→**切换率**按三分类分桶（HANDOVER REPORT 判责+SHR 抓"成功但险些失败"）→**干扰覆盖**两套口径并看（网元聚合 vs UE 抽样不能互代）。指标告诉你哪里疼，报告告诉你为什么疼。',
+        ref: '38.331#5.7.10.3' },
+      { q: '话统干扰统计和 UE 测量报告，为什么不能互相替代？',
+        a: '**两套口径**（工程口径，非 3GPP 条款）：话统是网元聚合统计（全网全样本、网管自带时间聚合、看统计面）；UE 测量是触发式抽样（过判据才报、L3 滤波 Fn=(1−a)Fn−1+a·Mn 之后才进判据）——**样本集、采样点、平滑方式都不同**。测量报告是前哨、话统是事后账；排查覆盖问题先看失败前有没有报丧式的测量事件，再对掉线记录，时序对上了才好下结论。',
+        ref: '38.331#5.5.3.2' }
     ] }
   };
   g.RRC_FOLLOWUPS = {
