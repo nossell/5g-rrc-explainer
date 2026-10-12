@@ -4076,66 +4076,92 @@ function parseOctetLabel(text) {
   return { label: `${a}-${b}`, count: nb - na + 1, optional, open: false };
 }
 
-// 位布局表识别与解析：首行含按序 8..1 ruler。返回 { octets:[{octet, count, fields:[{name,bits,hi,lo}]}], warnings }，
-// 非位表格返回 null。
+// 位布局表识别与解析：首行含按序 8..1（整八位组）或 4..1（半八位组）ruler。
+// 返回 { octets:[{octet, count, half?, fields:[{name,bits,hi,lo,pre?}]}], warnings }，非位表格返回 null。
 // 位宽双路径（v1.9）：
 //   ruler 数字格等宽（24.501/24301 全部、24.008 大半）→ 比例法（v1.5 原算法，位=span×8/Σ，
-//   产物逐字节不变）；ruler 数字格跨列不均（24.008 figure 式位图，'6','5' 占 2 格等）→
-//   数字格计数法：字段格与连续数字格边界精确对齐，位数=覆盖格数，部分压格整表拒绝。
-//   两法都做 gutter 裁剪（24.008 10.3.1 等表 ruler 前有空白列——10.3.1 skip 指示符在
-//   bits 5-8，前导列不算位）。
+//   产物逐字节不变）；ruler 数字格跨列不均（24.008 figure 式位图，'5','3' 等占 2 格）→
+//   数字格相交计数法（v1.13）：字段格映射为与其相交的数字格集合，起点允许落在跨列数字格
+//   内部（10.5.5.1 '5' 加宽实证），末位压格沿用 v1.9 容差。加宽区列宽会膨胀 → 行位宽合计
+//   不合时整行跳过（诚实拒绝），正确位号由建库侧值域表锚点走查恢复（ingest.js correctIes）。
+//   两法都做 gutter 裁剪（24.008 10.3.1 等表 ruler 前有空白列）。
 // 行 = 一个 octet 区间：标签多行（'octet 3'+'octet 6'）表示跨 count octet 的行（压缩画法
 // 位合计=8；全画=8×count）。开区间（'octet n'）count=1、open。
+// 无标签行模式（v1.13）：10.5.2.76 Feature Indicator 等半八位组图整表无 'octet n' 标签列
+// ——行按序充当 octet 1..n，4 位标尺行带 half:true（值域 = 半八位组，消费端按 nibble 解）。
+// 空文本格 = 未标注 spare：记入该 field 的 pre（前导空位），列派生位号在 buildIes 走查时
+// 据此回退；图内 0/1 字面值格（10.5.4.3 画值风格）同 spare 处理。
 function parseBitTable(rowsRaw) {
   if (!rowsRaw.length) return null;
   const rows = resolveVMerge(rowsRaw);
   const ruler = rows[0];
-  const digits = []; // { start, end, span }（grid 前缀和区间，按出现序 = bit8→bit1）
+  const digits = []; // { start, end, span }（grid 前缀和区间，按出现序 = bit8→bit1 或 bit4→bit1）
+  let nbits = 0;
   for (let i = 0; i < ruler.length; i++) {
     const s = ruler.slice(0, i).reduce((a, c) => a + c.span, 0);
-    if (/^[1-8]$/.test(ruler[i].text) && digits.length < 8 && +ruler[i].text === 8 - digits.length) {
+    const t = ruler[i].text.trim();
+    if (!digits.length) {
+      // 前导 gutter 列跳过；首个数字格定标尺宽（8..1 整八位组 / 4..1 半八位组）
+      if (/^[48]$/.test(t)) {
+        nbits = +t;
+        digits.push({ start: s, end: s + ruler[i].span, span: ruler[i].span });
+      }
+      continue;
+    }
+    if (/^[1-8]$/.test(t) && digits.length < nbits && +t === nbits - digits.length) {
       digits.push({ start: s, end: s + ruler[i].span, span: ruler[i].span });
-    } else if (digits.length === 8) break;
-    else if (digits.length) return null; // ruler 中断
+      if (digits.length === nbits) break;
+    } else if (digits.length === nbits) break;
+    else return null; // ruler 中断
   }
-  if (digits.length < 8) return null;
+  if (!nbits || digits.length !== nbits) return null;
   const sum = digits.reduce((a, d) => a + d.span, 0);
   const width = Math.max(...rows.map((r) => r.reduce((s, c) => s + c.span, 0)));
-  if (sum <= 0 || sum >= width) return null; // 无标签槽位 → 非布局表
+  // 标签列探测：任一数据行末格是 'octet n' → 带标签模式（需标签槽位）；否则无标签行模式
+  const hasLabel = rows.slice(1).some((r) => r.length && parseOctetLabel(r[r.length - 1].text));
+  if (hasLabel ? sum >= width : sum !== width) return null; // 无槽位 / 标尺未铺满整宽 → 非布局表
   const d0 = digits[0].start;
+  const dLast = digits[digits.length - 1].end;
   const uniform = digits.every((d) => d.span === digits[0].span);
   const bitsOf = (s, e) => {
     const s2 = Math.max(s, d0); // gutter 裁剪
-    if (e <= s2) return 0; // 纯空白列
+    if (e <= s2 || s2 >= dLast) return 0; // 纯空白列 / 标尺区间外
     if (uniform) {
-      const b = ((e - s2) * 8) / sum;
+      const b = ((e - s2) * nbits) / sum;
       return Number.isInteger(b) ? b : -1;
     }
-    // 非均匀 ruler：对齐数字格计数（起点须精确对齐；末位数字跨多列（排版加宽）时，
-    // 字段边界落在其内部也计入——10.5.2.87 RA Type 实证：数字 '2' 跨 2 列压在字段边界上）
-    const first = digits.findIndex((d) => d.start === s2);
-    if (first < 0) return -1;
+    // 非均匀 ruler：相交数字格计数。起点允许落在跨列数字格内部（'5' 加宽实证）；
+    // 末位数字跨多列（排版加宽）时字段边界落在其内部也计入——10.5.2.87 RA Type 实证。
     let n = 0;
-    for (let i = first; i < 8 && digits[i].start < e; i++) n++;
+    let last = null;
+    for (const d of digits) {
+      if (d.start < e && d.end > s2) { n++; last = d; }
+    }
     if (!n) return 0;
-    const last = digits[first + n - 1];
     if (last.end === e) return n;
     if (last.span > 1 && last.start < e && e < last.end) return n; // 跨列数字格的边界压格
     return -1;
   };
+  const isDocLiteral = (t) => /^[01x]$/.test(t.replace(/\n/g, ' ').trim()); // 画值字面格
   const octets = [];
+  const pending = []; // 门禁不过但含命名字段的行：待建库侧值域表锚点走查（v1.13）
   const warnings = [];
+  let unlabeledNo = 0;
   for (let ri = 1; ri < rows.length; ri++) {
     const row = rows[ri];
     if (!row.length) continue;
     const last = row[row.length - 1];
     const lab = parseOctetLabel(last.text);
-    if (!lab) break; // 无 octet 标签 → 布局到此为止（松散值段尾巴/图示行）；严格布局保留
+    if (!lab && hasLabel) break; // 带标签表失去标签 → 布局到此为止（松散值段尾巴/图示行）
+    unlabeledNo += 1;
+    const label = lab ? lab.label : String(unlabeledNo);
+    const count = lab ? lab.count : 1;
     const fields = [];
     let acc = 0;
     let off = 0;
     let cellFail = false;
-    for (let ci = 0; ci < row.length - 1; ci++) {
+    let pre = 0;
+    for (let ci = 0; ci < row.length - (lab ? 1 : 0); ci++) {
       const c = row[ci];
       const bits = bitsOf(off, off + c.span);
       off += c.span;
@@ -4143,49 +4169,75 @@ function parseBitTable(rowsRaw) {
         cellFail = true;
         break;
       }
-      if (!c.text) {
-        acc += bits;
-        continue;
-      }
-      fields.push({ name: c.text.replace(/\n/g, ' '), bits });
+      const txt = c.text.replace(/\n/g, ' ').trim();
+      if (!txt || isDocLiteral(txt)) { pre += bits; acc += bits; continue; }
+      fields.push({ name: c.text.replace(/\n/g, ' '), bits, pre });
+      pre = 0;
       acc += bits;
     }
-    // 行语义：全画（acc = 8×count）或压缩画（acc = 8，跨 count 个布局相同的 octet，如 MAC
-    // 'octet 3'+'octet 6' 只画一个 octet 列）。
+    // 行语义：全画（acc = 8×count）或压缩画（acc = 8，跨 count 个布局相同的 octet）；无标签
+    // 4 位行 = 半八位组（half）。
     let compressed = false;
-    let frame;
-    if (!cellFail && acc === 8 * lab.count) frame = 8 * lab.count;
-    else if (!cellFail && acc === 8 && lab.count > 1) {
+    let half = false;
+    let frame = null;
+    if (!cellFail && acc === 8 * count) frame = 8 * count;
+    else if (!cellFail && acc === 8 && count > 1) {
       compressed = true;
       frame = 8;
-    } else if (lab.count === 1 && row.slice(0, -1).filter((c) => c.text).length === 1) {
+    } else if (!cellFail && !lab && acc === nbits) {
+      frame = nbits;
+      half = nbits === 4;
+    } else if (lab && lab.count === 1 && row.slice(0, -1).filter((c) => c.text && !isDocLiteral(c.text.replace(/\n/g, ' ').trim())).length === 1) {
       // 行网格与标尺网格不齐（如 10.5.2.82：行内 IEI 单元格跨 9 列 vs 标尺 9 列）——
       // 单字段行按整八位组处理
-      const only = row.slice(0, -1).find((c) => c.text);
+      const only = row.slice(0, -1).find((c) => c.text && !isDocLiteral(c.text.replace(/\n/g, ' ').trim()));
       fields.length = 0;
-      fields.push({ name: only.text.replace(/\n/g, ' '), bits: 8, hi: 8, lo: 1 });
+      fields.push({ name: only.text.replace(/\n/g, ' '), bits: 8, pre: 0 });
       warnings.push(`octet ${lab.label}: 行网格与标尺不齐，按整八位组单字段处理`);
       frame = 8;
+    }
+    if (frame != null) {
+      // 列派生位号：字段按序自 MSB 游标堆叠（pre = 前导空位）；位号越界（lo<1，加宽区
+      // 列宽膨胀恰凑满 acc 的行）→ 不硬解，转挂起
+      let okPos = true;
+      for (let i = 0, bit = frame; i < fields.length; i++) {
+        const f = fields[i];
+        bit -= f.pre || 0;
+        if (bit - f.bits + 1 < 1) { okPos = false; break; }
+        f.hi = bit;
+        f.lo = bit - f.bits + 1;
+        bit = f.lo - 1;
+      }
+      if (okPos) {
+        for (const f of fields) if (!f.pre) delete f.pre;
+        octets.push({
+          octet: label + (lab && lab.optional ? '*' : ''),
+          count,
+          open: (lab && lab.open) || false,
+          compressed,
+          ...(half ? { half: true } : {}),
+          fields,
+        });
+        continue;
+      }
+    }
+    // 无法对齐的行（加宽区列宽膨胀、位号越界等）：有命名字段的行挂起（_pending），交建库
+    // 侧值域表锚点走查恢复；走查不收敛则在建库侧放弃。无字段的行直接跳过。
+    if (fields.length) {
+      pending.push({
+        octet: label + (lab && lab.optional ? '*' : ''),
+        count,
+        ...(nbits === 4 && !lab ? { half: true } : {}),
+        _pending: true,
+        fields: fields.map(({ name, bits, pre }) => ({ name, bits, ...(pre ? { pre } : {}) })),
+      });
+      warnings.push(`octet ${label}: 位宽不合（${cellFail ? '单元格越界' : `acc=${acc}`}），行挂起待锚点走查`);
     } else {
-      // 无法对齐的行（多字段压格等）→ 跳过该行保其余（无一行可解析则整表拒绝）
-      warnings.push(`octet ${lab.label}: 位宽不合（${cellFail ? '单元格越界' : `acc=${acc}`}），行跳过`);
-      continue;
+      warnings.push(`octet ${label}: 位宽不合（${cellFail ? '单元格越界' : `acc=${acc}`}），行跳过`);
     }
-    for (let i = 0, bit = frame; i < fields.length; i++) {
-      const f = fields[i];
-      f.hi = bit;
-      f.lo = bit - f.bits + 1;
-      bit -= f.bits;
-    }
-    octets.push({
-      octet: lab.label + (lab.optional ? '*' : ''),
-      count: lab.count,
-      open: lab.open || false,
-      compressed,
-      fields,
-    });
   }
-  if (!octets.length) return null;
+  if (!octets.length && !pending.length) return null;
+  if (pending.length) octets.push(...pending);
   return { octets, warnings };
 }
 
@@ -4970,6 +5022,7 @@ function isLenRow(row) {
 function packRow(row, fields, rng, rep, reps) {
   const out = [];
   let acc = 0;
+  let bits = 0;
   for (const f of row.fields) {
     let v;
     if (/spare/i.test(f.name) || f.name === '0' || f.name === '') v = 0;
@@ -4978,16 +5031,15 @@ function packRow(row, fields, rng, rep, reps) {
       const key = reps > 1 ? `${f.name}[${rep}]` : f.name;
       fields[key] = v;
     }
-    acc = (acc << f.bits) | v;
+    acc = (acc << ((f.pre || 0) + f.bits)) | v;
+    bits += (f.pre || 0) + f.bits;
   }
-  // 行内字段按 hi→lo（MSB first）已依序拼装；若行不满 8*count 位，高位补 0 由调用方保证
-  const totalBits = 8 * (row.compressed ? 1 : row.count || 1);
-  // acc 可能不足 totalBits（压缩行只画 8 位）——直接按 8 位推字节
-  let bits = 0;
-  for (const f of row.fields) bits += f.bits;
+  // 行内字段按 hi→lo（MSB first）已依序拼装（pre = 前导空位补 0）；若行不满 8*count 位，
+  // 低位补 0 由调用方保证
+  const totalBits = row.half ? 4 : 8 * (row.compressed ? 1 : row.count || 1);
   const pad = Math.max(0, totalBits - bits);
   acc <<= pad;
-  const nb = totalBits / 8;
+  const nb = row.half ? 1 : totalBits / 8;
   for (let i = 0; i < nb; i++) out.push((acc >> (8 * (nb - 1 - i))) & 0xff);
   return out;
 }
@@ -5009,12 +5061,12 @@ function layoutPack(octets, fieldVals, framed = false) {
       for (const f of row.fields) {
         const key = n > 1 ? `${f.name}[${k}]` : f.name;
         const v = (fieldVals[key] ?? (isSpare(f) ? 0 : 0));
-        acc = (acc << f.bits) | (v & ((1 << f.bits) - 1));
-        bits += f.bits;
+        acc = (acc << ((f.pre || 0) + f.bits)) | (v & ((1 << f.bits) - 1));
+        bits += (f.pre || 0) + f.bits;
       }
-      const totalBits = 8 * (row.compressed ? 1 : row.count || 1);
+      const totalBits = row.half ? 4 : 8 * (row.compressed ? 1 : row.count || 1);
       acc <<= Math.max(0, totalBits - bits);
-      const nb = totalBits / 8;
+      const nb = row.half ? 1 : totalBits / 8;
       for (let i = 0; i < nb; i++) bytes.push((acc >> (8 * (nb - 1 - i))) & 0xff);
     }
   }
@@ -5027,9 +5079,9 @@ function isSpare(f) {
 
 // ---- 位布局反解（layoutPack/layoutSample 的逆） --------------------------------
 // bytes → 命名字段值。framed=true 时先剥离首部 IEI 行与 Length 行（TV/TLV/LV 值域）。
+// 半八位组布局（half 行）：VH/TV1 行的值是 nibble 数值（0-15）——直接按 4 位域解。
 // 字节不足/剩余未知字节 → 抛错（调用方回退原始 hex 展示）。
 function layoutUnpack(octets, bytes, framed = false) {
-  const u8 = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
   const rows = [...octets];
   if (framed) {
     while (rows.length && isIeiRow(rows[0])) rows.shift();
@@ -5037,9 +5089,32 @@ function layoutUnpack(octets, bytes, framed = false) {
   }
   const fields = {};
   const warnings = [];
+  if (typeof bytes === 'number') {
+    let acc = bytes & 0x0f;
+    let shift = 4;
+    for (const row of rows) {
+      if (!row.half) throw new Error('布局反解：数值输入仅适用于半八位组布局');
+      for (const f of row.fields) {
+        shift -= f.pre || 0;
+        if (f.pre) {
+          const pv = (acc >> shift) & ((1 << f.pre) - 1);
+          if (pv) warnings.push(`${f.name} 前导空位应为 0，实为 ${pv}`);
+        }
+        shift -= f.bits;
+        const v = (acc >> shift) & ((1 << f.bits) - 1);
+        if (isSpare(f)) {
+          if (v !== 0) warnings.push(`${f.name} 应为 spare 0，实为 ${v}`);
+          continue;
+        }
+        fields[f.name] = v;
+      }
+    }
+    return { fields, warnings };
+  }
+  const u8 = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
   let pos = 0;
   for (const row of rows) {
-    const rowBytes = row.compressed ? 1 : row.count || 1;
+    const rowBytes = row.half ? 1 : row.compressed ? 1 : row.count || 1;
     const n = row.compressed ? 1 : row.count || 1;
     // 可选 octet（标签带 *）在字节耗尽时缺席
     const optional = /\*$/.test(row.octet);
@@ -5049,12 +5124,18 @@ function layoutUnpack(octets, bytes, framed = false) {
       if (pos + rowBytes > u8.length) throw new Error(`布局反解：字节不足（${row.octet} 行）`);
       let acc = 0;
       for (let i = 0; i < rowBytes; i++) acc = (acc << 8) | u8[pos++];
-      let shift = rowBytes * 8;
+      let shift = row.half ? 4 : rowBytes * 8;
+      if (row.half) acc &= 0x0f;
       for (const f of row.fields) {
+        shift -= f.pre || 0;
+        if (f.pre) {
+          const pv = (acc >> shift) & ((1 << f.pre) - 1);
+          if (pv) warnings.push(`${f.name} 前导空位应为 0，实为 ${pv}`);
+        }
         shift -= f.bits;
         const v = (acc >> shift) & ((1 << f.bits) - 1);
         const key = n > 1 || row.open ? `${f.name}[${k}]` : f.name;
-        if (/spare/i.test(f.name) || f.name === '0' || f.name === '') {
+        if (isSpare(f)) {
           if (v !== 0) warnings.push(`${key} 应为 spare 0，实为 ${v}`);
           continue; // spare 不进字段表
         }
@@ -6435,6 +6516,7 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
   const bits = [];
   const msgs = [];
   const typeTables = [];
+  const valueTables = [];
   let other = 0;
   const sections = [];
   let curH3 = null;
@@ -6516,6 +6598,13 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
       });
       continue;
     }
+    // 值域表（位图 figure 的配套 prose 表）：'Follow-on proceed (octet 1)' + 'Bit' + '4'
+    // 行组 / 'CS Domain TSC Set (octet 2): …\nBit\n1 2' 巨格——位号锚点来源（v1.13 走查纠偏）
+    if (it.rows.some((r) => r.some((c) => /\(\s*octet\s+\d+\s*[,)]/i.test(c.text) || /^\s*bits?\s*:?\s*$/i.test(c.text.trim())))) {
+      const sh = it.heading ? splitHeading(it.heading.text) : { num: null, title: null };
+      valueTables.push({ section: sh.num, title: sh.title, rows: it.rows.map((r) => r.map((c) => c.text)) });
+      continue;
+    }
     other++;
   }
   return {
@@ -6525,6 +6614,7 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
     bits,
     msgs,
     typeTables,
+    valueTables,
     stats: { bitTables: bits.length, msgTables: msgs.length, otherTables: other },
   };
 }
@@ -6577,12 +6667,280 @@ function resolveMsgType(name, direction, msgTypes) {
 }
 
 // ---- IE 布局库 ---------------------------------------------------------------
-function buildIes(bits) {
+// _pending 行（parseBitTable 位宽门禁不过的挂起行）：有锚点的节交给 walkRow 走查恢复，
+// 无锚点的节放弃（诚实拒绝）。走查/纠偏统一后经 correctIes 收口。
+function buildIes(bits, valueTables) {
   const ies = {};
+  const anchorsBySection = extractBitAnchors(valueTables);
   for (const b of bits) {
     if (!b.section) continue;
+    const anchors = anchorsBySection[b.section];
+    const octs = [];
+    const notes = [];
+    for (const row of b.octets || []) {
+      if (!row._pending) { octs.push(row); continue; }
+      if (!anchors || !anchors.length) continue;
+      const rowTotal = row.half ? 4 : 8 * (row.count || 1);
+      if (rowTotal !== 4 && rowTotal !== 8) continue;
+      const wnotes = [];
+      const fixed = walkRow(row.fields, rowTotal, anchors, row.octet, wnotes);
+      if (!fixed || !fixed.some((f) => f.anchor)) { notes.push(`octet ${row.octet}: 锚点走查未收敛，行放弃`); continue; }
+      const { _pending, ...clean } = row;
+      clean.fields = fixed.map(({ spare, anchor, ...rest }) => {
+        if (!rest.pre) delete rest.pre;
+        return rest;
+      });
+      octs.push(clean);
+      notes.push(...wnotes);
+    }
+    if (!octs.length) continue;
     if (!ies[b.section]) ies[b.section] = { name: b.name, layouts: [] };
-    ies[b.section].layouts.push({ figure: b.figure, octets: b.octets });
+    ies[b.section].layouts.push({
+      figure: b.figure,
+      octets: octs,
+      ...((b.warnings && b.warnings.length) || notes.length ? { warnings: [...new Set([...(b.warnings || []), ...notes])] } : {}),
+    });
+  }
+  return correctIes(ies, anchorsBySection);
+}
+
+// ---- 值域表位号锚点（v1.13）--------------------------------------------------------
+// 位图 figure 的配套 prose 表给出明文位号，两种形态：
+//   跨行：['Follow-on proceed (octet 1)',''] → ['Bit'] → ['4']；
+//         ['Type of attach (octet 1, bit 1 to 3)',…]（位号内联在名称格里）；
+//         ['CSMT (1 bit field)'] → ['Bit'] → ['1']（无 octet 号——单八位组图省略）。
+//   内嵌：'CS Domain TSC Set (octet 2): …\nBit\n1 2\n0 0 TSC set 1…'（10.5.2.82 巨格）。
+// 产物：{ 节号: [{ name, octet, hi, lo }] }；octet=null 表示适用该节任一单八位组行。
+function extractBitAnchors(valueTables) {
+  const out = {};
+  const normText = (t) => (t || '').replace(/\s*\n\s*/g, ' ').trim();
+  const bitsFromSpec = (spec) => {
+    const nums = (spec.match(/\d+/g) || []).map(Number).filter((n) => n >= 1 && n <= 8);
+    if (!nums.length) return null;
+    if (/to|-|—/.test(spec)) return { hi: Math.max(...nums), lo: Math.min(...nums) };
+    const hi = Math.max(...nums);
+    const lo = Math.min(...nums);
+    if (nums.length > 1 && hi - lo + 1 !== nums.length) return null; // 非连续位号 → 不作锚
+    return { hi, lo };
+  };
+  const NAME_OCT = /^(.{2,70}?)\s*\(\s*octet\s+(\d+)\s*(?:,\s*bits?\s+([\d\- to]+?)\s*)?\)\s*:?\s*$/i;
+  const NAME_FIELD = /^(.{2,70}?)\s*\(\s*(\d+)\s*bit\s+field\s*\)\s*:?\s*$/i;
+  const generic = (n) => /^(the|value|information|element|note|bits?)\b/i.test(n || '');
+  const push = (sec, name, octet, spec) => {
+    const b = bitsFromSpec(spec || '');
+    if (!b || !name || generic(name)) return;
+    (out[sec] = out[sec] || []).push({ name: normText(name), octet: octet == null ? null : Number(octet), hi: b.hi, lo: b.lo });
+  };
+  for (const vt of valueTables || []) {
+    const sec = vt.section;
+    if (!sec) continue;
+    for (let ri = 0; ri < (vt.rows || []).length; ri++) {
+      for (const cellText of vt.rows[ri]) {
+        if (!cellText) continue;
+        // 形态 A：巨格内嵌——按行扫：name(octet N): 散文… 行挂起（冒号后可接散文，44.018
+        // 10.5.2.82 实证），'Bit(s)' 裸行武装或 'bit N' 内联位号（44.018 10.5.2.49 实证），
+        // 数字行收锚
+        if (cellText.includes('\n')) {
+          let pending = null;
+          for (const line of cellText.split('\n')) {
+            const t = line.trim();
+            const nm = /^(.{2,70}?)\s*\(\s*octet\s+(\d+)\s*(?:,\s*bits?\s+([\d\- to]+?)\s*)?\)\s*:?\s*(.*)$/i.exec(t);
+            if (nm && !generic(nm[1])) {
+              if (pending && pending.spec) push(sec, pending.name, pending.octet, pending.spec);
+              const inline = nm[3] && /^[\d ]+(?:\s*to\s*\d+)?$/i.test(nm[3].trim()) ? nm[3].trim() : null;
+              pending = { name: normText(nm[1]), octet: Number(nm[2]), spec: inline };
+              continue;
+            }
+            const bt = /^bits?\s*[:=]?\s*(\d[\d ]*(?:\s*to\s*\d+)?)$/i.exec(t);
+            if (bt) {
+              if (pending) { push(sec, pending.name, pending.octet, bt[1]); pending = null; }
+              continue;
+            }
+            if (/^bits?\s*:?\s*$/i.test(t)) { if (pending && !pending.spec) pending.armed = true; continue; }
+            const dm = /^([\d ]+)$/.exec(t);
+            if (dm && pending && (pending.armed || pending.spec)) {
+              push(sec, pending.name, pending.octet, pending.spec || t);
+              pending = null;
+            }
+          }
+          if (pending && pending.spec) push(sec, pending.name, pending.octet, pending.spec);
+          continue;
+        }
+        const t = normText(cellText);
+        const nm = NAME_OCT.exec(t);
+        if (nm) {
+          // 形态 B：名称格 → 向下找 Bit 行 → 数字行（位号也可能已内联）
+          const name = normText(nm[1]);
+          const octet = Number(nm[2]);
+          if (nm[3]) { push(sec, name, octet, nm[3]); continue; }
+          const bj = vt.rows.findIndex((r, k) => k > ri && r.some((c) => /^bits?\s*:?$/i.test(normText(c))));
+          if (bj < 0) continue;
+          const dig = (vt.rows[bj + 1] || []).map(normText).filter((c) => /^\d{1,2}$/.test(c) && +c <= 8);
+          if (dig.length) push(sec, name, octet, dig.join(' '));
+          continue;
+        }
+        const nf = NAME_FIELD.exec(t);
+        if (nf) {
+          const bj = vt.rows.findIndex((r, k) => k > ri && r.some((c) => /^bits?\s*:?$/i.test(normText(c))));
+          if (bj < 0) continue;
+          const dig = (vt.rows[bj + 1] || []).map(normText).filter((c) => /^\d{1,2}$/.test(c) && +c <= 8);
+          if (dig.length) push(sec, normText(nf[1]), null, dig.join(' '));
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// ---- 布局锚点走查（v1.13）----------------------------------------------------------
+// 加宽数字格区列宽膨胀（10.5.5.x 实证：FOP 画 3 格实占 1 位）→ parseBitTable 行位宽合计
+// 不合而跳过。此处用同节值域表锚点恢复：字段按序自 MSB 游标堆叠（pre = 前导空位）；锚点
+// 字段钉在锚点位号；后续锚点位区被上游字段侵入时，回缩最近的无锚/弹性（spare）字段——
+// spare 收缩到锚点上沿，无锚命名字段收缩至锚点上沿（FOP→bit4、10.5.2.82 TSC Value 收缩
+// 至 8-6 实证）。走查失败（溢出/锚点倒序）→ 返回 null，行保持跳过（诚实拒绝）。
+function walkRow(fields, rowTotal, anchors, octetNo, notes, mode = 'flex') {
+  const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const tokens = (s) => (s || '').toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 2 || /\d/.test(t));
+  const isSpareName = (n) => /spare/i.test(n) || n === '0' || n === '';
+  const octetOk = (a) => !(a.octet != null && octetNo != null && Number(a.octet) !== Number(octetNo));
+  const placed = fields.map((f) => ({ ...f, spare: isSpareName(f.name) }));
+  // 锚点三遍独占匹配：精确 → 字符包含（FOP↔Follow-on proceed、TMSI↔TMSI flag 实证）→
+  // 词子集（Type of algorithm ↔ Type of ciphering algorithm 实证）；每锚至多一字段。
+  // 精确轮先行防贪心：'X IEI' 与 'X' 同现时 'X' 先锁锚（10.5.4.12 实证）
+  const used = new Set();
+  const assigned = new Map();
+  for (const f of placed) {
+    if (f.spare) continue;
+    const n = norm(f.name);
+    const a = anchors.find((x) => !used.has(x) && octetOk(x) && norm(x.name) === n);
+    if (a) { used.add(a); assigned.set(f, a); }
+  }
+  for (const f of placed) {
+    if (f.spare || assigned.has(f)) continue;
+    const n = norm(f.name);
+    let best = null;
+    for (const x of anchors) {
+      if (used.has(x) || !octetOk(x)) continue;
+      const an = norm(x.name);
+      if (an && (an.includes(n) || n.includes(an)) && (!best || an.length > norm(best.name).length)) best = x;
+    }
+    if (best) { used.add(best); assigned.set(f, best); }
+  }
+  for (const f of placed) {
+    if (f.spare || assigned.has(f)) continue;
+    const ft = tokens(f.name);
+    if (!ft.length) continue;
+    let best = null;
+    for (const x of anchors) {
+      if (used.has(x) || !octetOk(x)) continue;
+      const xt = tokens(x.name);
+      const [short, long] = ft.length <= xt.length ? [ft, xt] : [xt, ft];
+      if (short.length && short.every((t) => long.includes(t)) && (!best || xt.length > tokens(best.name).length)) best = x;
+    }
+    if (best) { used.add(best); assigned.set(f, best); }
+  }
+  // 放置：非 spare 字段按序自 MSB 游标堆叠；锚点字段钉在锚点位号——游标与锚点顶之间的
+  // 空隙归该字段前导 spare（pre 桥接，取 min）；锚点位区被上游无锚字段侵入时回缩最近的
+  // 无锚字段。mode='flex'（挂起行救援）：spare 字段不占游标，段末重排进空隙；
+  // mode='keep'（已解析行校验）：spare 字段宽度已过 acc 门禁，按列宽正常占游标。
+  let cursor = rowTotal;
+  for (let i = 0; i < placed.length; i++) {
+    const f = placed[i];
+    if (f.spare && mode === 'flex') continue;
+    const a = assigned.get(f);
+    if (a) {
+      if (a.hi > cursor) {
+        // 回缩：自尾端向前找可收缩的无锚命名字段，收缩至锚点上沿
+        let j = i - 1;
+        for (; j >= 0; j--) {
+          const p = placed[j];
+          if (p.spare || assigned.has(p)) continue;
+          if (p.lo != null && p.lo <= a.hi && a.hi < p.hi) {
+            p.lo = a.hi + 1;
+            notes.push(`字段 ${p.name} 列宽与锚点冲突，收缩至 bit ${a.hi + 1}（锚点 ${a.name}）`);
+            break;
+          }
+          return null; // 无可收缩字段 → 锚点倒序，放弃
+        }
+        if (j < 0) return null;
+        cursor = a.hi; // 回缩后游标贴锚点上沿（下方 hi0 再减 pre）
+      }
+      if (a.lo > a.hi || a.lo < 1) return null;
+      // pre 桥接取 min（列宽 pre 伪影截断到真实空隙）；空隙大于图内 pre 时多余部分由
+      // 重排段归还给 spare 字段（10.5.6.4 '0 0 0 0 spare'[8-5] 保留实证）
+      f.pre = Math.min(f.pre || 0, cursor - a.hi);
+      notes.push(`字段 ${f.name} 锚定 bit ${a.hi}${a.hi === a.lo ? '' : '-' + a.lo}`);
+      f.hi = a.hi;
+      f.lo = a.lo;
+      f.anchor = true;
+      cursor = a.lo - 1;
+    } else {
+      const hi0 = cursor - (f.pre || 0);
+      const lo = hi0 - f.bits + 1;
+      if (lo < 1) return null;
+      f.hi = hi0;
+      f.lo = lo;
+      cursor = lo - 1;
+    }
+  }
+  if (cursor < 0) return null;
+  if (mode === 'keep') return placed; // 已解析行：列宽受 acc 门禁保护，不做段末重排
+  // spare 字段在锚点回缩后可能越界/重叠——按序重排进空隙，段内最后一个 spare 吞剩余
+  let top = rowTotal;
+  const out = [];
+  for (let i = 0; i < placed.length; i++) {
+    const f = placed[i];
+    if (!f.spare) {
+      if (f.hi > top) return null;
+      out.push(f);
+      top = f.lo - 1;
+      continue;
+    }
+    const nxt = placed.slice(i + 1).find((g) => !g.spare);
+    const floor = nxt ? nxt.hi + (nxt.pre || 0) + 1 : 1;
+    let avail = top - floor + 1;
+    if (avail < 0) return null;
+    const run = [f];
+    for (let k = i + 1; k < placed.length && placed[k].spare; k++) run.push(placed[k]);
+    const consumed = run.length; // 段内原始 spare 数（splice 丢弃后仍按原占用推进游标）
+    let wTop = top;
+    for (let k = 0; k < run.length; k++) {
+      const w = k === run.length - 1 ? Math.max(0, Math.min(run[k].bits, avail)) : Math.min(run[k].bits, avail);
+      run[k].hi = wTop;
+      run[k].lo = Math.max(floor, wTop - w + 1);
+      if (run[k].lo > run[k].hi) { run.splice(k, 1); k--; continue; } // 空隙耗尽的 spare 丢弃
+      wTop = run[k].lo - 1;
+      avail = wTop - floor + 1;
+      out.push(run[k]);
+    }
+    top = wTop;
+    i += consumed - 1;
+  }
+  return out;
+}
+
+// 锚点走查入口（已解析行的校验层）：列派生位号经 acc 门禁 + 图网格一致，为本——走查
+// 仅校验，与锚点不一致时记告警、不改位（Classmark 1 octet2 实证：改写会丢 spare 字段并
+// 顶错 Revision）。挂起行的救援走查在 buildIes（mode='flex'，覆写位号）。
+function correctIes(ies, anchorsBySection) {
+  for (const [sec, ie] of Object.entries(ies || {})) {
+    const anchors = anchorsBySection[sec];
+    if (!anchors || !anchors.length) continue;
+    for (const lay of ie.layouts) {
+      for (const row of lay.octets || []) {
+        if (row.compressed || row._pending) continue;
+        const rowTotal = row.half ? 4 : 8 * (row.count || 1);
+        if (rowTotal !== 4 && rowTotal !== 8) continue;
+        const notes = [];
+        const fixed = walkRow(row.fields, rowTotal, anchors, row.octet, notes, 'keep');
+        if (!fixed || !fixed.some((f) => f.anchor)) continue; // 无锚命中不校验
+        const cur = row.fields.map((f) => `${f.hi}-${f.lo}`).join(',');
+        const nex = fixed.map((f) => `${f.hi}-${f.lo}`).join(',');
+        if (cur !== nex) {
+          (lay.warnings = lay.warnings || []).push(`octet ${row.octet}: 锚点走查与列派生位号不一致，保持列派生（${cur} vs ${nex}）`);
+        }
+      }
+    }
   }
   return ies;
 }
@@ -6614,12 +6972,12 @@ function buildMessages(msgs, msgTypes, bits) {
 // 结构化 → schema（codec 消费形态）+ 建库问题清单
 function buildSchema(structured, opts = {}) {
   if (structured.spec === '24008') return buildSchema24008(structured);
-  if (structured.spec === '44018') return buildSchema44018(structured, opts.fillBits);
+  if (structured.spec === '44018') return buildSchema44018(structured, opts.fillBits, opts.fillValueTables);
   if (structured.spec === '24080') return buildSchema24080(structured);
   if (structured.spec === '24011') return buildSchema24011(structured);
   if (structured.spec === '23040') return buildSchema23040(structured);
   const msgTypes = parseTypeTables(structured.typeTables);
-  const ies = buildIes(structured.bits);
+  const ies = buildIes(structured.bits, structured.valueTables);
   const { out: messages, problems } = buildMessages(structured.msgs, msgTypes, structured.bits);
   return {
     schema: { spec: structured.spec, version: structured.version, msgTypes, ies, messages },
@@ -6784,7 +7142,7 @@ function buildSchema24008(structured) {
       tableOf[scored[0][0]] = { ...(tableOf[scored[0][0]] || {}), ...map }; // 同域多表合并（MO/MT 同名同值）
     }
   }
-  const ies = buildIes(structured.bits);
+  const ies = buildIes(structured.bits, structured.valueTables);
   const out = {};
   const problems = [];
   for (const m of structured.msgs) {
@@ -6883,15 +7241,19 @@ function resolveMsgType44018(name, msgTypes) {
   return best ? best[1] : null;
 }
 
-function buildSchema44018(structured, fillBits) {
+function buildSchema44018(structured, fillBits, fillValueTables) {
   // 跨规范位表并入：44.018 §10.5.1.x（Mobile Identity / Classmark / LAI 等）正文只有
   // 'See 3GPP TS 24.008.'——节号与 24.008 §10.5.1.x 同编，用 24.008 摄取产物的位表补齐
-  // （只并本地缺失的节号，本地优先）。
+  // （只并本地缺失的节号，本地优先）。并入节的值域表随行并入（挂起行的锚点走查依赖）。
   const localBits = new Set(structured.bits.map((b) => b.section));
   const extraBits = (fillBits || []).filter((b) => b.section && !localBits.has(b.section));
   const allBits = structured.bits.concat(extraBits);
+  const localVt = new Set((structured.valueTables || []).map((v) => v.section));
+  const allValueTables = (structured.valueTables || []).concat(
+    (fillValueTables || []).filter((v) => v.section && !localVt.has(v.section))
+  );
   const msgTypes = parseTypeTables44018(structured.typeTables);
-  const ies = buildIes(allBits);
+  const ies = buildIes(allBits, allValueTables);
   const out = {};
   const problems = [];
   for (const m of structured.msgs) {
@@ -6951,7 +7313,7 @@ const SS_MSG_TYPES = {
 };
 
 function buildSchema24080(structured) {
-  const ies = buildIes(structured.bits);
+  const ies = buildIes(structured.bits, structured.valueTables);
   const msgTypes = {};
   for (const [k, v] of Object.entries(SS_MSG_TYPES)) msgTypes[k] = { ...v, group: null };
   const out = {};
@@ -7065,7 +7427,7 @@ function buildSchema24011(structured) {
   for (const [k, v] of Object.entries(CP24011_TYPES)) if (!parsed[`${k}|`]) msgTypes[`${k}|`] = { type: v, mask: 0xff, dir: null };
   for (const [k, v] of Object.entries(RP24011_TYPES)) if (!parsed[k]) msgTypes[k] = { type: v, mask: 0xff, dir: k.split('|')[1] };
   for (const [k, v] of Object.entries(parsed)) msgTypes[k] = { ...v };
-  const ies = buildIes(structured.bits);
+  const ies = buildIes(structured.bits, structured.valueTables);
   const out = {};
   const problems = [];
   for (const m of structured.msgs) {
@@ -7178,7 +7540,7 @@ function rows23040(rows, problems, section, name) {
 function buildSchema23040(structured) {
   const msgTypes = {};
   for (const [k, v] of Object.entries(SMS23040_TYPES)) msgTypes[k] = { ...v, group: null };
-  const ies = buildIes(structured.bits);
+  const ies = buildIes(structured.bits, structured.valueTables);
   const out = {};
   const problems = [];
   for (const m of structured.msgs) {
@@ -7389,7 +7751,7 @@ if (args.schema && args.out) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, buildSchema, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, extractBitAnchors, walkRow, buildSchema, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
@@ -7590,7 +7952,7 @@ function renderShell() {
 <header class="topbar">
   <div class="logo">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1" y="1" width="7" height="7" rx="1.5" fill="#0f62fe"/><rect x="10" y="1" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="1" y="10" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="10" y="10" width="7" height="7" rx="1.5" fill="#0f62fe"/></svg>
-    RRC&nbsp;Workbench <span class="dim">v1.12.1</span>
+    RRC&nbsp;Workbench <span class="dim">v1.13.1</span>
   </div>
   <nav class="tabs">
     <button class="tab on" data-page="encode">帧生成器</button>
@@ -7601,7 +7963,7 @@ function renderShell() {
     <button class="tab" data-page="library">规范库</button>
     <button class="tab" data-page="about">关于</button>
   </nav>
-  <span class="ver">v1.12.1 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
+  <span class="ver">v1.13.1 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
 </header>
 <main>
   <section class="page on" id="page-encode"></section>
@@ -7612,7 +7974,7 @@ function renderShell() {
   <section class="page" id="page-library"></section>
   <section class="page" id="page-about"></section>
 </main>
-<div class="foot">RRC Workbench v1.12.1 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
+<div class="foot">RRC Workbench v1.13.1 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => goto(t.dataset.page)));
 }
 function goto(id) {
@@ -9283,7 +9645,7 @@ function nasValueHtml(r, value) {
   const raw = value == null ? '—'
     : typeof value === 'number' ? `0x${value.toString(16)}`
     : Array.from(value).map((b) => b.toString(16).padStart(2, '0')).join('');
-  if (value == null || typeof value === 'number' || !value.length) return raw;
+  if (value == null || (typeof value !== 'number' && !value.length)) return raw; // 数值放行：半八位组布局按 nibble 解
   const sem = [];
   const lname = r.name || '';
   if (/DNN/i.test(lname)) {
@@ -9353,7 +9715,7 @@ function nasValueText(r, value) {
   const raw = value == null ? '—'
     : typeof value === 'number' ? `0x${value.toString(16)}`
     : Array.from(value).map((b) => b.toString(16).padStart(2, '0')).join('');
-  if (value == null || typeof value === 'number' || !value.length) return raw;
+  if (value == null || (typeof value !== 'number' && !value.length)) return raw; // 数值放行：半八位组布局按 nibble 解
   const sem = [];
   const lname = r.name || '';
   if (/DNN/i.test(lname)) { try { sem.push(`APN: ${apnDecode(value)}`); } catch {} }

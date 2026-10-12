@@ -381,6 +381,30 @@
         a: '因为只救回 **SRB1**（36.331 §5.3.7.1 原句：SRB1 operation resumes while the operation of other radio bearers remains suspended）——SRB2 和全部 DRB 挂起，用户面断着。要恢复业务得等**重建后的第一条 RRCConnectionReconfiguration**（36.331 §5.3.5.3：第一条重配 resume SRB2 与挂起的 DRB）；安全侧按 nextHopChainingCount 更新 KeNB、重派生三把钥匙、算法不变（§5.3.7.5）——「最小态」+一次重配，重建的恢复闭环就这两步。',
         ref: '36.331#5.3.7.1' }
     ] },
+    'm49:q0': { levels: [
+      { q: 'NTN 的上行同步为什么有保质期？',
+        a: '因为卫星在动，网络广播的辅助信息只在一段时间内可信。UE 收 SIB19 就要 **start 或重启 T430**（38.331 §5.2.2.4.21）：定时值=该小区 **ntn-UlSyncValidityDuration**（s5..s900 共 16 档），起点=该小区 **epochTime** 指示的子帧。到期（§5.2.2.6）UE 告知下层 UL 同步丢失→重取 SIB19→成功后告知同步恢复——上行同步不是稳态，是一份要不断续期的账。',
+        ref: '38.331#5.2.2.4.21' },
+      { q: '这套机制跟地面网的上行同步差在哪？',
+        a: '地面网里 TA 配好基本不变，同步是「配好就一直在」的稳态；NTN 里服务链路传播延迟随卫星运动持续变化，广播的公共 TA、星历都只在 **epochTime 之后的有效期**内可用——所以 38.331 给它配了整套账本机制：保质期（T430/ntn-UlSyncValidityDuration）+时间基准（epochTime）+重取动作（表注：UE 应在有效期结束前重取 SIB19）。切换/重配到新小区还要按**新小区**的 NTN-Config 重启 T430（§5.3.5.5.2）——账本跟着小区走。',
+        ref: '38.331#5.2.2.6' }
+    ] },
+    'm49:q1': { levels: [
+      { q: '卫星切换跟地面切换差在哪？',
+        a: '最大差异：**预告式 vs 命令式**。地面切换是测量事件触发、网络下 RRC 切换命令（M5/M48）；NTN 的卫星切换（SatSwitchWithReSync，38.331 §5.7.19）由 SIB19 **广播预告**：t-Service 指示小区将停止覆盖当前区域的时刻，UE 到点**自主执行四动作**——停 T430、告知下层 UL 同步丢失、向新卫星服务的 SpCell 同步 DL、按新 NTN-Config 重启 T430。全程没有 RRC 切换消息。',
+        ref: '38.331#5.7.19' },
+      { q: 't-ServiceStart 到 t-Service 这段窗口是干嘛的？',
+        a: '给**软切换**用的（§5.7.19 原文）：支持 soft satellite switch with resynchronization 的 UE，在 t-ServiceStart 到 t-Service 之间就开始获取新卫星 SpCell 的 DL 同步——提前把新卫星下行锁住，t-Service 一到即换。硬切换语义下这就是「先听新台、到点换台」。表注明文：卫星切换后 UE 应重取 SIB19（时机 UE 实现）——新卫星的账本要重新领。',
+        ref: '38.331#5.7.19' }
+    ] },
+    'm49:q2': { levels: [
+      { q: 'RedCap 终端接入时怎么让网络认出来？',
+        a: '接入第一拍就亮身份（38.331 §5.7.10.5）：RA 由 **RedCap/SDT/Msg3 重复/Msg1 重复/eRedCap/切片**等特征触发时，UE 设 **triggeredFeatureCombination** 指示全部触发特征——网络按特征组合划分专用前导分区（feature combination-specific RACH 配置）。实际用的组合与触发组合不同时，另记 usedFeatureCombination 如实上报。',
+        ref: '38.331#5.7.10.5' },
+      { q: '小区不就绪时 RedCap 连驻留都进不去？',
+        a: '对。SIB1 接收动作里就有一道门（38.331 §5.2.2.4.2）：RedCap UE 发现 **intraFreqReselectionRedCap 缺失**、或只支持半双工 FDD 的 UE 发现 **halfDuplexRedCapAllowed 缺失**——按 38.304 判小区禁用并同频重选（eRedCap 对应 intraFreqReselection-eRedCap 一族；旗标在位再看 cellBarredRedCap1Rx/2Rx 按 Rx 分支评估）。组合场景另有关卡：SDT 五条件里 (e)RedCap 专属的 ncd-SSB-RedCapInitialBWP-SDT（§5.3.13.1b）——轻量终端在重选、接入、小数据三处都有专属规则。',
+        ref: '38.331#5.2.2.4.2' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

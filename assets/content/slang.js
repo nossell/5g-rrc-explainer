@@ -6,7 +6,7 @@
    1) 每条 mean 只做口语解释，零协议论断、零数值；任何协议细节
       一律靠 qref 跳回站内已审计课程去读；
    2) qref 只允许站内模块 id（渲染成"详见 Mxx"链接），不挂外部锚；
-      无贴切课程时留空、不硬挂（v13 2026-10-12 增 3 条 LTE 口语：重定向挂 m48、CSFB/TAU 概念出处挂 me——mean 内 IE 名与规则句经六轮审计 dump 直证，先例留档；v10 2026-10-11 复挂 15 条至 m45：8 条站点工程术语
+      无贴切课程时留空、不硬挂（v13 2026-10-12 增 3 条 LTE 口语：重定向挂 m48、CSFB/TAU 概念出处挂 me——mean 内 IE 名与规则句经六轮审计 dump 直证，先例留档；v14 2026-10-12 增 1 条 NTN 口语：星历挂 m49（EphemerisInfo/epochTime 经 v14 建课审计 dump 直证）；v10 2026-10-11 复挂 15 条至 m45：8 条站点工程术语
       取其为最近落点、11 条弱贴切中 7 条升级换挂；单通/MOD 干扰/导频污染/叠站四条
       经增量审计三轮回挂原课——单通讲承载/媒体面归 mv、三条 LTE/切换主题归 m4）；
    3) 各地叫法不一，以交流方便为准，一切以 3GPP 正式文本为准。
@@ -61,7 +61,8 @@
     { t: '通道校验', alt: '通道检查', mean: '核对基站的"发声通道"（收发信机到天线那段）是否各就各位——通道接错或坏一路，覆盖图形就歪一路。', qref: 'm45' },
     { t: '重定向', alt: 'redirection', mean: '释放时网络指路：RRCConnectionRelease 带 redirectedCarrierInfo，UE 按指示的频点/RAT 自己重选过去——负载均衡与语音回落的主力工具。', qref: 'm48' },
     { t: 'CSFB', alt: '电路域回落', mean: '4G 早年代不承载 2G/3G 语音的过渡招：打 VoLTE 之外的语音电话先释放 LTE 回落到旧网络——释放原因里专门有一档 cs-FallbackHighPriority。', qref: 'me' },
-    { t: 'TAU', alt: '跟踪区更新', mean: 'UE 挪窝换到新跟踪区后向核心网报到更新位置——负载过重时网络也会主动要求 UE 做 TAU（释放原因 loadBalancingTAURequired）。', qref: 'me' }
+    { t: 'TAU', alt: '跟踪区更新', mean: 'UE 挪窝换到新跟踪区后向核心网报到更新位置——负载过重时网络也会主动要求 UE 做 TAU（释放原因 loadBalancingTAURequired）。', qref: 'me' },
+    { t: '星历', alt: 'ephemeris', mean: '卫星的轨道「时刻表」：SIB19 的 EphemerisInfo 按二选一带卫星位置速度（ECEF）或轨道参数（ECI），以 epochTime 为基准（两坐标系在纪元时刻对齐）——UE 推算卫星在哪、公共 TA 与卫星切换预告都挂在这份账上。', qref: 'm49' }
   ];
   g.RRC_SLANG = {
     get: function (i) { return S[i] || null; },
