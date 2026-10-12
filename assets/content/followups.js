@@ -389,7 +389,7 @@
         a: '地面网里 TA 配好基本不变，同步是「配好就一直在」的稳态；NTN 里服务链路传播延迟随卫星运动持续变化，广播的公共 TA、星历都只在 **epochTime 之后的有效期**内可用——所以 38.331 给它配了整套账本机制：保质期（T430/ntn-UlSyncValidityDuration）+时间基准（epochTime）+重取动作（表注：UE 应在有效期结束前重取 SIB19）。切换/重配到新小区还要按**新小区**的 NTN-Config 重启 T430（§5.3.5.5.2）——账本跟着小区走。',
         ref: '38.331#5.2.2.6' }
     ] },
-    'm49:q1': { levels: [
+    'm49:q2': { levels: [
       { q: '卫星切换跟地面切换差在哪？',
         a: '最大差异：**预告式 vs 命令式**。地面切换是测量事件触发、网络下 RRC 切换命令（M5/M48）；NTN 的卫星切换（SatSwitchWithReSync，38.331 §5.7.19）由 SIB19 **广播预告**：t-Service 指示小区将停止覆盖当前区域的时刻，UE 到点**自主执行四动作**——停 T430、告知下层 UL 同步丢失、向新卫星服务的 SpCell 同步 DL、按新 NTN-Config 重启 T430。全程没有 RRC 切换消息。',
         ref: '38.331#5.7.19' },
@@ -397,7 +397,7 @@
         a: '给**软切换**用的（§5.7.19 原文）：支持 soft satellite switch with resynchronization 的 UE，在 t-ServiceStart 到 t-Service 之间就开始获取新卫星 SpCell 的 DL 同步——提前把新卫星下行锁住，t-Service 一到即换。硬切换语义下这就是「先听新台、到点换台」。表注明文：卫星切换后 UE 应重取 SIB19（时机 UE 实现）——新卫星的账本要重新领。',
         ref: '38.331#5.7.19' }
     ] },
-    'm49:q2': { levels: [
+    'm49:q3': { levels: [
       { q: 'RedCap 终端接入时怎么让网络认出来？',
         a: '接入第一拍就亮身份（38.331 §5.7.10.5）：RA 由 **RedCap/SDT/Msg3 重复/Msg1 重复/eRedCap/切片**等特征触发时，UE 设 **triggeredFeatureCombination** 指示全部触发特征——网络按特征组合划分专用前导分区（feature combination-specific RACH 配置）。实际用的组合与触发组合不同时，另记 usedFeatureCombination 如实上报。',
         ref: '38.331#5.7.10.5' },
@@ -413,7 +413,7 @@
         a: 'T400 到期就是 SL RLF 判据之一（§5.8.9.3）——重配悬而未决按直连断链处理。配置源是**三态规则**（§5.8.9.1.1 原文）：RRC_CONNECTED 用 RRCReconfiguration 给的参数，RRC_IDLE/INACTIVE 用系统信息（SIB12），其他场景用 SidelinkPreconfigNR 预配置；**拿到新状态的配置之后才应用新配置，之前继续用旧的**——切换瞬间不空窗。',
         ref: '38.331#5.8.9.1.1' }
     ] },
-    'm50:q1': { levels: [
+    'm50:q2': { levels: [
       { q: 'Sidelink 同步为什么要有优先组？',
         a: '因为直连里「跟谁对时」的候选源天生多元：**gNB 广播、GNSS、别的 UE（SyncRef UE）**都在发同步信息——没有排序就会各跟各的钟，时序一漂 HARQ 与 DRX 全错位。38.331 的解法是两层：先按 **sl-SyncPriority** 定大方向（gnbEnb=基站优先选小区、gnss=GNSS 可靠就选它），再在候选之间按**优先组**排座次（如 gnbEnb 组：inCoverage=true 的 UE→false→GNSS→SLSSID 0→其他）（§5.8.6.2/§5.8.6.2a）。',
         ref: '38.331#5.8.6.2' },
@@ -421,7 +421,7 @@
         a: '重选评估三条（§5.8.6.2b）：候选 PSBCH-RSRP 超最小要求之余 **sl-SyncRefMinHyst** 且属更高优先组；或同组最强候选超当前 **syncRefDiffHyst**；或 GNSS 变可靠。反向兜底：当前 SyncRef UE 低于最小要求、GNSS 变不可靠、所选小区检测不到——视为未选中，重跑全搜索；无候选时按 §5.8.5.3 从 OoC 集随机选 SLSSID（排除 336/337）当临时灯塔。',
         ref: '38.331#5.8.6.2b' }
     ] },
-    'm50:q2': { levels: [
+    'm50:q3': { levels: [
       { q: 'SL RLF 判什么？',
         a: '五判据（§5.8.9.3，全是对特定 destination）：SL RLC 实体指示**达最大重传次数**；**T400 到期**；MAC 指示 **HARQ-based SL RLF**；PDCP 指示 **SL-SRB2 或 SL-SRB3 完整性校验失败**；MAC 指示**所有 RB set 持续 LBT 失败**。命中任一即视为该 destination 的 sidelink radio link failure——注意它是**按连接（destination）判**的，不是全 UE 级。',
         ref: '38.331#5.8.9.3' },
