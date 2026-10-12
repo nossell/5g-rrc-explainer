@@ -362,7 +362,7 @@
         a: '骨架同构（M1/M48）：都是三段式、Request 都走 CCCH、都靠随机接入送 Msg3。差异在**消息名与细节**：LTE 叫 **RRCConnectionRequest/RRCConnectionSetup/RRCConnectionSetupComplete**（NR 是 RRCSetupRequest 系，少个 Connection 前缀）；LTE 的 Request 带 **establishmentCause** 与 **ue-Identity**（上层给 S-TMSI 就用、没给就抽随机数）——IE 枚举在 36.331 §6。面试时两套名字一口气对上，就是「两代差在哪」最省力的答案。',
         ref: '36.331#5.3.3.1' },
       { q: 'T300 到期 UE 具体记什么账？',
-        a: '记进 **VarConnEstFailReport**（36.331 §5.3.3.6）：失败小区全局标识、失败时刻本小区 RSRP/RSRQ、邻区测量，还专门记随机接入三件——**numberOfPreamblesSent**（前导发了几根）、**contentionDetected**（有没有撞竞争）、**maxTxPowerReached**（最后一根是否顶到最大功率）。支持临时惩罚的 UE，同一小区连续 **connEstFailCount** 次到期后按 connEstFailOffset 给该小区挂一段时期的 Qoffsettemp——抬高重选门槛缓解反复失败。重建时 Complete 带 connEstFailInfoAvailable 告诉网络账在。',
+        a: '记进 **VarConnEstFailReport**（36.331 §5.3.3.6）：失败小区全局标识、失败时刻本小区 RSRP/RSRQ、邻区测量，还专门记随机接入三件——**numberOfPreamblesSent**（前导发了几根）、**contentionDetected**（有没有撞竞争）、**maxTxPowerReached**（最后一根是否顶到最大功率）。支持临时惩罚的 UE，同一小区连续 **connEstFailCount** 次到期后按 connEstFailOffset 给该小区挂一段时期的 Qoffsettemp——抬高重选门槛缓解反复失败。重建时 Complete 带 rlf-InfoAvailable 等标志——账本信息在场即可用标志告知网络。',
         ref: '36.331#5.3.3.6' }
     ] },
     'm48:q1': { levels: [
@@ -375,11 +375,11 @@
     ] },
     'm48:q3': { levels: [
       { q: '重建请求里 UE 带什么「对账暗号」？',
-        a: '三件（36.331 §5.3.7.4）：**C-RNTI**（源 PCell 用的，切换失败场景）或触发重建小区的、**physCellId**、**shortMAC-I**——原文=**MAC-I 的低 16 位**，用源 PCell 的 KRRCint 密钥与完整性算法算出。这是 UE 的对账暗号：目标站拿它验「你是不是我认识的那只 UE」——防 PCI 混淆后冒领上下文，验不过就回 Reject。',
+        a: '三件（36.331 §5.3.7.4）：**C-RNTI**（源 PCell 用的，切换失败场景）或触发重建小区的、**physCellId**、**shortMAC-I**——原文=**MAC-I 的低 16 位**，用源 PCell 的 KRRCint 密钥与完整性算法算出。这是 UE 的对账暗号：目标站拿它与备好的上下文对账——对不上（小区没备好上下文）就回 Reject（m48f5 的场景）。',
         ref: '36.331#5.3.7.4' },
       { q: '为什么说重建成功只回到「够说话的最小态」？',
         a: '因为只救回 **SRB1**（36.331 §5.3.7.1 原句：SRB1 operation resumes while the operation of other radio bearers remains suspended）——SRB2 和全部 DRB 挂起，用户面断着。要恢复业务得等**重建后的第一条 RRCConnectionReconfiguration**（36.331 §5.3.5.3：第一条重配 resume SRB2 与挂起的 DRB）；安全侧按 nextHopChainingCount 更新 KeNB、重派生三把钥匙、算法不变（§5.3.7.5）——「最小态」+一次重配，重建的恢复闭环就这两步。',
-        ref: '36.331#5.3.7.5' }
+        ref: '36.331#5.3.7.1' }
     ] },
   };
   g.RRC_FOLLOWUPS = {
