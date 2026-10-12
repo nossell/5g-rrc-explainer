@@ -405,6 +405,30 @@
         a: '对。SIB1 接收动作里就有一道门（38.331 §5.2.2.4.2）：RedCap UE 发现 **intraFreqReselectionRedCap 缺失**、或只支持半双工 FDD 的 UE 发现 **halfDuplexRedCapAllowed 缺失**——按 38.304 判小区禁用并同频重选（eRedCap 对应 intraFreqReselection-eRedCap 一族；旗标在位再看 cellBarredRedCap1Rx/2Rx 按 Rx 分支评估）。组合场景另有关卡：SDT 五条件里 (e)RedCap 专属的 ncd-SSB-RedCapInitialBWP-SDT（§5.3.13.1b）——轻量终端在重选、接入、小数据三处都有专属规则。',
         ref: '38.331#5.2.2.4.2' }
     ] },
+    'm50:q0': { levels: [
+      { q: 'PC5 侧的 RRC 重配跟 Uu 侧差在哪？',
+        a: '骨架像，对等体换了：Uu 侧重配的对端是网络，PC5 侧 **RRCReconfigurationSidelink 的对端是对等 UE**（SL-SRB3 承载，PC5-S 安全建立后才发）。发起方组好消息要 **per destination 起 T400**（§5.8.9.1.2）；接收方逐列表执行增删改，**sl-DRX-ConfigUC-PC5 要 UE 接受才配下层**，无法遵从（部分）就继续用旧配置并回 RRCReconfigurationFailureSidelink（§5.8.9.1.3）。',
+        ref: '38.331#5.8.9.1.3' },
+      { q: '收不到响应怎么办？UE 配置从哪来？',
+        a: 'T400 到期就是 SL RLF 判据之一（§5.8.9.3）——重配悬而未决按直连断链处理。配置源是**三态规则**（§5.8.9.1.1 原文）：RRC_CONNECTED 用 RRCReconfiguration 给的参数，RRC_IDLE/INACTIVE 用系统信息（SIB12），其他场景用 SidelinkPreconfigNR 预配置；**拿到新状态的配置之后才应用新配置，之前继续用旧的**——切换瞬间不空窗。',
+        ref: '38.331#5.8.9.1.1' }
+    ] },
+    'm50:q1': { levels: [
+      { q: 'Sidelink 同步为什么要有优先组？',
+        a: '因为直连里「跟谁对时」的候选源天生多元：**gNB 广播、GNSS、别的 UE（SyncRef UE）**都在发同步信息——没有排序就会各跟各的钟，时序一漂 HARQ 与 DRX 全错位。38.331 的解法是两层：先按 **sl-SyncPriority** 定大方向（gnbEnb=基站优先选小区、gnss=GNSS 可靠就选它），再在候选之间按**优先组**排座次（如 gnbEnb 组：inCoverage=true 的 UE→false→GNSS→SLSSID 0→其他）（§5.8.6.2/§5.8.6.2a）。',
+        ref: '38.331#5.8.6.2' },
+      { q: '什么时候会换同步源？',
+        a: '重选评估三条（§5.8.6.2b）：候选 PSBCH-RSRP 超最小要求之余 **sl-SyncRefMinHyst** 且属更高优先组；或同组最强候选超当前 **syncRefDiffHyst**；或 GNSS 变可靠。反向兜底：当前 SyncRef UE 低于最小要求、GNSS 变不可靠、所选小区检测不到——视为未选中，重跑全搜索；无候选时按 §5.8.5.3 从 OoC 集随机选 SLSSID（排除 336/337）当临时灯塔。',
+        ref: '38.331#5.8.6.2b' }
+    ] },
+    'm50:q2': { levels: [
+      { q: 'SL RLF 判什么？',
+        a: '五判据（§5.8.9.3，全是对特定 destination）：SL RLC 实体指示**达最大重传次数**；**T400 到期**；MAC 指示 **HARQ-based SL RLF**；PDCP 指示 **SL-SRB2 或 SL-SRB3 完整性校验失败**；MAC 指示**所有 RB set 持续 LBT 失败**。命中任一即视为该 destination 的 sidelink radio link failure——注意它是**按连接（destination）判**的，不是全 UE 级。',
+        ref: '38.331#5.8.9.3' },
+      { q: '判完之后做什么？',
+        a: '一条善后链走到底：释放该 destination 的 SL DRB→SL SRB→PC5 Relay RLC 信道→丢弃其 SL 配置→重置 sidelink specific MAC→**视为该 PC5-RRC 连接已释放**→向上层指示（PC5 unavailable）。RRC_CONNECTED 的 UE 还要经 SidelinkUEInformationNR 把 **sl-Failure=rlf** 报给网络（§5.8.3.3）——直连断了，网络要知情。',
+        ref: '38.331#5.8.3.3' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

@@ -4597,6 +4597,1011 @@ function decIE(format, iei, bytes, off = 0) {
   }
 }
 
+// ==== src/nas/csn1.js ====
+// csn1.js — CSN.1 位级运行时：AST（tools/csn1parse.js 产物）→ 解码树 + 编码回放。
+// 记法权威：TS 24.007 Annex B；L/H = 填充位值/另一值（GSM 全零填充 → L='0'、H='1'）。
+// 关键解码策略：
+//   - 截断假定（44.018 'truncation … bits "L" assumed'）：越界读按 L(0) 假定并告警一次
+//   - <spare padding> 吞到区域尾（接收方任意位可接受），编码按 GSM 填充八位组 0x2B 补齐
+//   - 外部结构引用（44.060 等）→ Csn1External：部分解码 + 原始尾位保留（诚实降级）
+//   - choice 判别折叠：候选支前导固定终端（0/1/L/H/null）即判别位；null 支仅在位耗尽时选中
+// trace 形态（编码回放序）：{d,kind,...}
+//   fixed {bits} ｜ field {name,bits,value} ｜ choice {alt} ｜ mark {name,value}（零位记录）
+//   spare {bits} ｜ pad {start} ｜ rep {n} ｜ bitstring {name,value(hex)} ｜ ext {name,bits}
+
+class Csn1External extends Error {
+  constructor(name) {
+    super('外部结构引用: ' + name);
+    this.name = 'Csn1External';
+    this.extName = name;
+  }
+}
+
+// ---------- 位读取 ----------
+class Csn1BitReader {
+  constructor(bytes, bitOff = 0, areaBits = (bytes.length * 8) - bitOff) {
+    this.bytes = bytes;
+    this.pos = bitOff;
+    this.end = bitOff + areaBits; // 区域位界（消息尾即区域尾）
+    this.truncated = false;
+  }
+  get left() { return this.end - this.pos; }
+  get exhausted() { return this.pos >= this.end; }
+  readBit() {
+    if (this.pos >= this.end) {
+      this.truncated = true;
+      return 0; // 截断假定：缺失位按 L(0)
+    }
+    const byte = this.bytes[this.pos >> 3];
+    const bit = (byte >> (7 - (this.pos & 7))) & 1;
+    this.pos++;
+    return bit;
+  }
+  peekBit() {
+    if (this.pos >= this.end) return null; // 无位可窥（区别于截断假定）
+    return (this.bytes[this.pos >> 3] >> (7 - (this.pos & 7))) & 1;
+  }
+  readBits(n) {
+    let v = 0;
+    for (let k = 0; k < n; k++) v = v * 2 + this.readBit();
+    return v; // ≤53 位精确（VSTK_RAND 36 / TLLI 32 均覆盖）
+  }
+  readBitsStr(n) {
+    let s = '';
+    for (let k = 0; k < n; k++) s += this.readBit();
+    return s;
+  }
+}
+
+// ---------- 值表达式（A2：val(Name) 与 + - * /） ----------
+function evalExpr(e, scope) {
+  if (e == null) return 0;
+  if (e.t === 'num') return e.v;
+  if (e.t === 'val') {
+    const v = scope.get(String(e.name || '').replace(/\s+/g, ' ').trim().toLowerCase());
+    if (v == null) throw new Csn1External('val(' + e.name + ')');
+    return v;
+  }
+  if (e.t === 'bin') {
+    const a = evalExpr(e.a, scope);
+    const b = evalExpr(e.b, scope);
+    switch (e.op) {
+      case '+': return a + b;
+      case '-': return a - b;
+      case '*': return a * b;
+      case '/': return b ? Math.floor(a / b) : 0;
+      default: throw new Error('未知运算符 ' + e.op);
+    }
+  }
+  throw new Error('表达式不可求值');
+}
+function countOf(n, scope) {
+  if (n == null) return 1;
+  if (n.k === 'num') return n.v;
+  return evalExpr(n.e, scope);
+}
+
+// ---------- 解码 ----------
+// defs: Map(normName → body AST)；areaBytes 为 rest octets 区域字节数（编码回填用）
+function csn1Decode(defs, root, bytes, { bitOff = 0, areaBytes = bytes.length - (bitOff >> 3) } = {}) {
+  const warnings = [];
+  const trace = [];
+  const scope = new Map(); // 字段值 val() 查找表（名字归一）
+  const r = new Csn1BitReader(bytes, bitOff, areaBytes * 8);
+  let extHit = null;
+  let depth = 0;
+
+  const warn = (m) => { if (warnings.length < 40 && !warnings.includes(m)) warnings.push(m); };
+
+  // 支路判别折叠：返回 {tag, tagLen, eqField, valtag, body} 或 null（无判别）
+  function altTag(alt) {
+    if (!alt) return { tag: '', tagLen: 0, headCount: 0, body: alt }; // null 支
+    const items = alt.t === 'seq' && alt.items ? alt.items : [alt];
+    // 前导 fixed 终端整串为判别（'{ LL <…> }' 两位判别实测——只取首项会把 LL 误作单位 L；
+    // LL 粘词解析产物是内嵌 seq，下钻一层收齐）
+    let tag = '';
+    let i = 0;
+    while (i < items.length && items[i]) {
+      const it = items[i];
+      if (it.t === 'fixed') { tag += it.bits; i++; continue; }
+      if (it.t === 'seq' && it.items && it.items.every((x) => x && x.t === 'fixed')) {
+        tag += it.items.map((x) => x.bits).join('');
+        i++;
+        continue;
+      }
+      break;
+    }
+    if (tag) return { tag, tagLen: tag.length, headCount: i, body: alt };
+    const first = items[0];
+    if (first && first.t === 'eqbit') return { tag: first.eq === 'L' ? 'L' : 'H', tagBits: first.eq === 'L' ? '0' : '1', tagLen: 1, headCount: 1, eqField: first, body: alt };
+    if (first && first.t === 'valtag') {
+      const len = first.values[0].length;
+      return { tag: first.values[0], tagBits: null, tagLen: len, headCount: 1, valtag: first, body: alt };
+    }
+    return null;
+  }
+
+  function decodeNode(node) {
+    if (extHit) return;
+    switch (node.t) {
+      case 'null':
+        return;
+      case 'seq': {
+        for (const it of node.items) decodeNode(it);
+        return;
+      }
+      case 'fixed': {
+        const n = node.bits.length;
+        const got = r.readBitsStr(n);
+        const want = [...node.bits].map((c) => (c === 'L' ? '0' : c === 'H' ? '1' : c)).join('');
+        if (got !== want && !r.truncated) warn(`固定位不符: 期望 ${want} 读到 ${got}`);
+        trace.push({ d: depth, kind: 'fixed', bits: node.bits, got, at: r.pos - n });
+        return;
+      }
+      case 'bits': {
+        if (process.env.CSN1_DEBUG) console.error('[bits]', node.name, 'pos-before', r.pos);
+        const n = countOf(node.n, scope);
+        if (n <= 0) return;
+        const v = r.readBits(n);
+        if (node.exclude != null) {
+          if (v.toString(2).padStart(n, '0') === expand(node.exclude)) {
+            warn(`字段 ${node.name} 取到排除值 ${node.exclude}（保留值）`);
+          }
+        }
+        if (node.name) scope.set(csn1ScopeKey(node.name), v);
+        trace.push({ d: depth, kind: 'field', name: node.name, bits: n, value: v, at: r.pos - n });
+        return;
+      }
+      case 'octets': {
+        const n = countOf(node.n, scope) * 8;
+        if (n <= 0) return;
+        const v = r.readBits(n);
+        if (node.name) scope.set(csn1ScopeKey(node.name), v);
+        trace.push({ d: depth, kind: 'field', name: node.name, bits: n, value: v, octets: true });
+        return;
+      }
+      case 'bitstring': {
+        const n = Math.max(0, r.left);
+        const s = r.readBitsStr(n);
+        if (node.name) trace.push({ d: depth, kind: 'bitstring', name: node.name, bits: n, value: bitsToHex(s) });
+        else trace.push({ d: depth, kind: 'bitstring', name: 'bit string', bits: n, value: bitsToHex(s) });
+        return;
+      }
+      case 'eqbit': {
+        const v = r.readBit();
+        const want = node.eq === 'L' ? 0 : 1;
+        if (v !== want && !r.truncated) warn(`值约束位 ${node.name}: 期望 ${node.eq}(${want}) 读到 ${v}`);
+        scope.set(csn1ScopeKey(node.name), v);
+        trace.push({ d: depth, kind: 'field', name: node.name, bits: 1, value: v, eq: node.eq, at: r.pos - 1 });
+        return;
+      }
+      case 'valtag': {
+        const len = node.values[0].length;
+        const got = r.readBitsStr(len);
+        const want0 = [...node.values[0]].map((c) => (c === 'L' ? '0' : c === 'H' ? '1' : c)).join('');
+        const want1 = node.values[1] ? [...node.values[1]].map((c) => (c === 'L' ? '0' : c === 'H' ? '1' : c)).join('') : null;
+        const ok = got === want0 || (want1 != null && got === want1);
+        if (!ok && !r.truncated) warn(`值组 ${node.name}: 读到 ${got}，允许 {${node.values.join('|')}}`);
+        const v = parseInt(got, 2);
+        scope.set(csn1ScopeKey(node.name), v);
+        trace.push({ d: depth, kind: 'field', name: node.name, bits: len, value: v, allowed: node.values });
+        return;
+      }
+      case 'spare': {
+        const n = countOf(node.n, scope);
+        if (n > 0) {
+          r.readBits(n);
+          trace.push({ d: depth, kind: 'spare', bits: n });
+        }
+        return;
+      }
+      case 'pad': {
+        const n = Math.max(0, r.left);
+        r.readBits(n);
+        trace.push({ d: depth, kind: 'pad', start: r.pos - n, bits: n });
+        return;
+      }
+      case 'ref': {
+        const key = csn1ScopeKey(node.name);
+        const body = defs.get(key);
+        if (!body) throw new Csn1External(node.raw || node.name);
+        decodeNode(body);
+        return;
+      }
+      case 'typed': {
+        depth++;
+        trace.push({ d: depth, kind: 'mark', name: node.name, open: true });
+        decodeNode(node.body);
+        trace.push({ d: depth, kind: 'mark', name: node.name, open: false });
+        depth--;
+        return;
+      }
+      case 'choice': {
+        if (process.env.CSN1_DEBUG) console.error('[choice] pos-before', r.pos);
+        depth++;
+        // 判别折叠
+        const tagged = node.alts.map((a) => ({ a, t: altTag(a) }));
+        const withTag = tagged.filter((x) => x.t && x.t.tagLen > 0);
+        const nullAlts = tagged.filter((x) => !x.t || x.t.tagLen === 0);
+        let chosen = null;
+        let tagGot = '';
+        if (r.exhausted && nullAlts.length) {
+          chosen = nullAlts[0]; // 位耗尽 → null 支（消息在此结束）
+        } else if (withTag.length) {
+          const tagLen = Math.max(...withTag.map((x) => x.t.tagLen));
+          tagGot = r.readBitsStr(tagLen);
+          // 混长判别（'00'/'01'/'1'）：按各支 tagLen 前缀匹配；选中后回退未消费的尾位
+          const byPrefix = (x) => {
+            const sub = tagGot.slice(0, x.t.tagLen);
+            if (x.t.valtag) return x.t.valtag.values.some((v) => expand(v) === sub);
+            return expand(x.t.tag) === sub;
+          };
+          chosen = withTag.find((x) => x.t.tagLen === tagLen && byPrefix(x))
+            || withTag.find(byPrefix);
+          if (chosen) {
+            const used = chosen.t.tagLen;
+            r.pos -= tagLen - used; // 回退多读的判别尾位（归支体）
+            tagGot = tagGot.slice(0, used);
+          } else {
+            chosen = nullAlts[0] || withTag[0];
+            warn(`判别位 ${tagGot} 无匹配支，按缺省支处理`);
+          }
+        } else {
+          chosen = nullAlts[0] || tagged[0]; // 无判别：单支/缺省首支
+        }
+        // 无 tag 支被选中且已读判别位 → 判别位归还支体（支体首字段即判别本身：
+        // SI9 Position 的 modulus 值判别实测——4 位同读于两支，语义按值分流）
+        if (chosen && !chosen.t && withTag.length && tagGot) {
+          r.pos -= tagGot.length;
+          tagGot = '';
+        }
+        const altIdx = node.alts.indexOf(chosen.a);
+        const tagWrite = chosen.t && chosen.t.tagLen > 0 ? expand(chosen.t.tag) : null;
+        trace.push({ d: depth, kind: 'choice', alt: altIdx, tag: tagGot, tagBits: tagWrite, at: r.pos - tagGot.length });
+        if (chosen.t && chosen.t.eqField) {
+          // eqbit 兼作判别：位已读，记字段值（编码经 mark 写回）
+          const f = chosen.t.eqField;
+          const v = parseInt(tagGot, 2);
+          scope.set(csn1ScopeKey(f.name), v);
+          trace.push({ d: depth, kind: 'mark', name: f.name, bits: chosen.t.tagLen, value: v, at: r.pos, viaTag: 1 });
+        } else if (chosen.t && chosen.t.valtag) {
+          const sub = tagGot.slice(0, chosen.t.valtag.values[0].length);
+          const v = parseInt(sub, 2);
+          scope.set(csn1ScopeKey(chosen.t.valtag.name), v);
+          trace.push({ d: depth, kind: 'mark', name: chosen.t.valtag.name, bits: chosen.t.tagLen, value: v, allowed: chosen.t.valtag.values, at: r.pos, viaTag: 1 });
+        }
+        if (process.env.CSN1_DEBUG) console.error('[choice] pos-after', r.pos, 'alt', altIdx, 'tagGot', JSON.stringify(tagGot));
+        // 支体：剥掉已消费的判别首项
+        const body = chosen.t ? stripHead(chosen.a, chosen.t) : chosen.a;
+        decodeNode(body);
+        depth--;
+        return;
+      }
+      case 'rep': {
+        const c = node.count;
+        if (c.k === 'nullterm') {
+          const term = [...c.tag].map((x) => (x === 'L' ? '0' : x === 'H' ? '1' : x)).join('');
+          let n = 0;
+          for (;;) {
+            if (r.exhausted) break;
+            const got = r.readBitsStr(term.length);
+            if (got === term) {
+              // 终止标记位必须进 trace（编码回写）——否则错位一位（IPA Uplink struct 实测）
+              trace.push({ d: depth, kind: 'fixed', bits: c.tag });
+              break;
+            }
+            // 非终止标记 → 回退并解一支体（体内自含重复判别位）
+            r.pos -= term.length;
+            decodeNode(node.body);
+            if (extHit) return;
+            if (++n > 512) { warn('空终止重复超上限'); break; }
+          }
+          trace.push({ d: depth, kind: 'rep', n });
+          return;
+        }
+        let n;
+        if (c.k === 'star') {
+          n = 0;
+          const startPos = r.pos;
+          for (;;) {
+            if (r.exhausted) break;
+            const before = r.pos;
+            decodeNode(node.body);
+            if (extHit) return;
+            if (r.pos === before) break; // 零进展 → 停
+            if (++n > 512) { warn('不定重复超上限'); break; }
+          }
+          if (r.pos === startPos) n = 0;
+        } else {
+          n = Math.max(0, countOf(c, scope));
+          const lim = Math.min(n, 1024);
+          if (lim !== n) warn('重复次数异常截断');
+          for (let k = 0; k < lim; k++) {
+            decodeNode(node.body);
+            if (extHit) return;
+          }
+        }
+        trace.push({ d: depth, kind: 'rep', n });
+        return;
+      }
+      default:
+        throw new Error('未知 AST 节点 ' + node.t);
+    }
+  }
+
+  try {
+    decodeNode(root);
+  } catch (e) {
+    if (e instanceof Csn1External) {
+      extHit = { name: e.extName, bitPos: r.pos };
+      const tail = r.readBitsStr(Math.max(0, r.end - r.pos));
+      trace.push({ d: depth, kind: 'ext', name: e.extName, bits: tail.length, tail });
+      r.pos = r.end; // 外部结构起吞到区域尾（原始尾位保留在 trace）
+    } else {
+      throw e;
+    }
+  }
+  return {
+    trace,
+    bitsUsed: r.pos - bitOff,
+    truncated: r.truncated,
+    external: extHit,
+    warnings,
+    areaBytes,
+  };
+}
+const csn1ScopeKey = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+const expand = (bits) => [...bits].map((c) => (c === 'L' ? '0' : c === 'H' ? '1' : c)).join('');
+function stripHead(alt, t) {
+  const n = t.headCount || 1;
+  if (alt.t === 'seq' && alt.items) {
+    const rest = alt.items.slice(n); // 前导 fixed 整串即判别
+    return rest.length === 0 ? { t: 'null' } : rest.length === 1 ? rest[0] : { t: 'seq', items: rest };
+  }
+  return { t: 'null' }; // 整支就是判别（裸 fixed/eqbit/valtag 支）
+}
+function bitsToHex(s) {
+  if (!s) return '';
+  let h = '';
+  for (let i = 0; i < s.length; i += 4) {
+    h += parseInt(s.slice(i, i + 4).padEnd(4, '0'), 2).toString(16);
+  }
+  return '0x' + h;
+}
+
+// ---------- 编码（trace 回放） ----------
+// bytes 长度 = areaBytes；GSM 填充八位组 0x2B（00101011）从区域首铺满，再叠加内容位——
+// 与 pycrate 填充互证；无 trace 时按全空支（null/L 分支、字段 0）编码。
+function csn1Encode(trace, areaBytes) {
+  const out = new Uint8Array(areaBytes);
+  for (let i = 0; i < areaBytes; i++) out[i] = 0x2b; // GSM padding octet（24.007 B.8）
+  let pos = 0;
+  const wbit = (b) => {
+    if (pos >= areaBytes * 8) return;
+    const mask = 0x80 >> (pos & 7);
+    if (b) out[pos >> 3] |= mask;
+    else out[pos >> 3] &= ~mask & 0xff; // 覆盖写（区域预铺 0x2B，内容位叠加其上——pycrate 同语义）
+    pos++;
+  };
+  const wbits = (s) => { for (const c of String(s)) wbit(c === '1' ? 1 : 0); };
+  const wval = (v, n) => { for (let k = n - 1; k >= 0; k--) wbit((Number(v) >> k) & 1); };
+  for (const op of trace) {
+    switch (op.kind) {
+      case 'fixed': {
+        const want = [...op.bits].map((c) => (c === 'L' ? '0' : c === 'H' ? '1' : c)).join('');
+        wbits(want); // 文法常量（截断假定下的 got 偏差不回写，保持规范形态）
+        break;
+      }
+      case 'choice':
+        if (op.tagBits) wbits(op.tagBits); // 判别位（head 已从支体剥离，由此唯一写点）
+        break;
+      case 'mark':
+        if (op.bits && !op.viaTag) wval(op.value == null ? 0 : op.value, op.bits); // viaTag=判别位已由 choice 写点覆盖
+        break;
+      case 'field':
+        wval(op.value == null ? 0 : op.value, op.bits);
+        break;
+      case 'spare':
+        wbits('0'.repeat(op.bits)); // B.7：spare bit 发射为 0
+        break;
+      case 'bitstring':
+        if (op.value && op.bits) {
+          const s = String(op.value).replace(/^0x/i, '');
+          for (let i = 0; i < op.bits; i++) {
+            const dig = parseInt(s[i >> 2] || '0', 16);
+            wbit((dig >> (3 - (i & 3))) & 1);
+          }
+        } else {
+          pos += op.bits || 0;
+        }
+        break;
+      case 'ext':
+        wbits(op.tail || ''); // 外部结构原始尾位原样回写（部分解码保真）
+        break;
+      case 'pad':
+      case 'rep':
+      default:
+        // pad/rep：位由区域 0x2B 预铺承担（pad 吞到尾，其后无内容位）
+        break;
+    }
+  }
+  // trace 未覆盖 pad 的情形（截断消息）：pos 之后保持 0x2B 预铺
+  return out;
+}
+
+// ==== tools/csn1parse.js ====
+// csn1parse.js — CSN.1 文法文本 → AST（构建期，运行时零依赖）。
+// 记法权威：TS 24.007 Annex B（B1-B8 基础规则 / A1 标签 / G1 注释 / A2 指数记法）；
+// 44.018 扩展见其 §10.1（引 CSN.1 Specification v2.0）。
+// 本解析器按 docx 表格单元实测形态做工程化子集（括号内为实测来源形态）：
+//   终端  0 1 null L H（L=填充位值，GSM 全零填充 → L='0'，H='1'）；裸词 bit（B.1.3 预定义库）
+//   粘词  LL/LH 等纯 L/H 词拆成单位（IA '{ LL <' 实测）；'+1' 等表达式粘词拆分
+//   伪影  独立词 'I' / 'or' = '|' 分隔符（docx 字体提取伪影，{0 I 1}≡{0 | 1}）
+//   注释  -- 与 // 到行尾（'} // ;' 的分号被注释掉 → 定义可无分号结尾）
+//   截断  'truncation … bits "L" assumed' → 运行时越界读按 L(0) 假定（src/nas/csn1.js）
+//   定义  <name> ::= body [;]；名字大小写与空格不敏感（B5）；'> : :=' 冒号在外笔误归一
+//   标签  <name : desc> / <name ::= desc>（P1 实测变体）；bare 引用；'<FDD_ARFCN> : bit(14)'
+//         冒号在外变体；'BSIC : bit (6)' 缺尖括号容错（EC 实测）
+//   笔误  '< X : bit (6) }' 缺 > 容差——角度扫描遇 } / ; 视作提前闭合（EC Fixed UL Alloc 实测）
+//   选择  {…|…} 与顶层裸选择；判别前缀 0/1/00/01/…/L/H/null
+//   指数  (n) 定长重复 / ** 不定 / *(expr) / * term 单项短记法（A2）/ ** 0 位标记空终止
+//   字段  <N : bit (n)> <N : bit> <N : bit string (n)> <N : bit**>（无界）<N : octet (expr)>
+//         <N : bit == L|H> <N : {L | H}> <N : { 101 | 110 }>（值组）<spare bit> <spare padding>
+//   引用  <Ref>（未定义 → 外部引用，运行时部分解码+告警）
+
+// ---------- 名字归一（B5：大小写与空白不敏感） ----------
+function csn1NormName(s) {
+  return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+const csn1NormKey = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
+
+// ---------- 词法 ----------
+function csn1Tokenize(text) {
+  // 注释剥离（-- 与 // 均到行尾）
+  let inComment = false;
+  const lines = String(text).split(/\r?\n/).map((l) => {
+    // 单 '-' 散文注释（'0 - use MCS-1 …' 实测）先归一为 '--'；后随数字的不动（负号）
+    l = l.replace(/ - (?=[A-Za-z]{2,})/g, ' -- ');
+    // 注释续行（docx 软换行把注释折到下一物理行）：无文法记号的行整行丢弃
+    if (inComment && !/[<>{}|;=]|\d/.test(l)) return '';
+    inComment = false;
+    const idxs = [l.indexOf('--'), l.indexOf('//')].filter((i) => i >= 0);
+    if (idxs.length) { inComment = true; return l.slice(0, Math.min(...idxs)); }
+    return l;
+  });
+  const src = lines.join('\n');
+  const toks = [];
+  let i = 0;
+  const isWordCh = (c) => /[A-Za-z0-9_./'+&-]/.test(c);
+  const pushWord = (w) => {
+    // 表达式粘词拆分：'+1' '/2' → 运算符词 + 余量（名字内 A5/7 等不以运算符开头，不受影响）
+    while (w.length > 1 && /^[+\-/]/.test(w)) {
+      toks.push({ k: 'word', v: w[0] });
+      w = w.slice(1);
+    }
+    if (w) toks.push({ k: 'word', v: w });
+  };
+  while (i < src.length) {
+    const c = src[i];
+    if (/\s/.test(c)) { i++; continue; }
+    if (src.startsWith('<', i)) { toks.push({ k: 'lt' }); i++; continue; }
+    if (src.startsWith('>', i)) { toks.push({ k: 'gt' }); i++; continue; }
+    if (src.startsWith('{', i)) { toks.push({ k: 'lb' }); i++; continue; }
+    if (src.startsWith('}', i)) { toks.push({ k: 'rb' }); i++; continue; }
+    if (src.startsWith('|', i)) { toks.push({ k: 'bar' }); i++; continue; }
+    if (src.startsWith('(', i)) { toks.push({ k: 'lp' }); i++; continue; }
+    if (src.startsWith(')', i)) { toks.push({ k: 'rp' }); i++; continue; }
+    if (src.startsWith(';', i)) { toks.push({ k: 'semi' }); i++; continue; }
+    if (src.startsWith('::=', i)) { toks.push({ k: 'def' }); i += 3; continue; }
+    if (src.startsWith(':=', i)) { toks.push({ k: 'def' }); i += 2; continue; }
+    if (src.startsWith('==', i)) { toks.push({ k: 'eq' }); i += 2; continue; }
+    if (src.startsWith('**', i)) { toks.push({ k: 'star2' }); i += 2; continue; }
+    if (src.startsWith('*', i)) { toks.push({ k: 'star' }); i++; continue; }
+    if (c === ':') { toks.push({ k: 'colon' }); i++; continue; }
+    if (/[01]/.test(c)) {
+      // 位串/数值一体词：纯 0/1 串 → n01（判别/位串/值组上下文按位用）；
+      // 含 2-9 的整体按数值词（'14' 不许裂成 '1'+'4'——bit(14) 裂解实测缺陷）
+      let j = i;
+      while (j < src.length && /[01]/.test(src[j])) j++;
+      if (j < src.length && /[0-9]/.test(src[j])) {
+        while (j < src.length && /[0-9]/.test(src[j])) j++;
+        pushWord(src.slice(i, j));
+      } else {
+        toks.push({ k: 'n01', v: src.slice(i, j) });
+      }
+      i = j;
+      continue;
+    }
+    if (isWordCh(c)) {
+      let j = i;
+      while (j < src.length && isWordCh(src[j])) j++;
+      pushWord(src.slice(i, j));
+      i = j;
+      continue;
+    }
+    // 其余散排字符（逗号引号句号等）→ 忽略
+    i++;
+  }
+  return toks;
+}
+
+const CSN1_DELIM = new Set(['bar', 'rb', 'semi', 'lt', 'def']);
+
+// ---------- 解析器 ----------
+class Csn1Parser {
+  constructor(toks, opts = {}) {
+    this.toks = toks;
+    this.i = 0;
+    this.onRef = opts.onRef || (() => {});
+  }
+  peek(o = 0) { return this.toks[this.i + o] || null; }
+  next() { return this.toks[this.i++] || null; }
+  is(k, v) { const t = this.peek(); return !!t && t.k === k && (v === undefined || t.v === v); }
+  isBarToken() {
+    const t = this.peek();
+    if (!t) return false;
+    if (t.k === 'bar') return true;
+    if (t.k === 'word' && /^(I|or)$/i.test(t.v)) return true; // 字体伪影
+    return false;
+  }
+  isBarTokenAt(o) {
+    const t = this.peek(o);
+    if (!t) return false;
+    if (t.k === 'bar') return true;
+    if (t.k === 'word' && /^(I|or)$/i.test(t.v)) return true;
+    return false;
+  }
+  ctx(n = 9) {
+    return this.toks.slice(Math.max(0, this.i - 3), this.i + n).map((x) => x.v ?? x.k).join(' ');
+  }
+
+  // 单元（cell）解析：若干定义 + 散排散文降级
+  parseUnit() {
+    const defs = [];
+    const notes = [];
+    while (this.i < this.toks.length) {
+      if (this.is('lt') && this.looksLikeDef()) {
+        const save = this.i;
+        try {
+          defs.push(this.parseDef());
+          if (this.i === save) this.i++; // 防御：空推进
+          continue;
+        } catch (e) {
+          this.i = save;
+          notes.push('定义解析失败: ' + e.message);
+          this.skipToNextDef();
+          if (this.i <= save) this.i = save + 1; // 保证推进，防死循环
+          continue;
+        }
+      }
+      this.next();
+    }
+    return { defs, notes };
+  }
+  skipToNextDef() {
+    while (this.i < this.toks.length) {
+      if (this.is('lt') && this.looksLikeDef()) return;
+      this.next();
+    }
+  }
+  looksLikeDef() {
+    for (let o = 0; o < 12 && this.i + o < this.toks.length; o++) {
+      const t = this.toks[this.i + o];
+      if (t.k === 'def') return true;
+      if (['lt', 'gt', 'word', 'n01', 'colon', 'lp', 'rp'].includes(t.k)) continue;
+      return false;
+    }
+    return false;
+  }
+
+  parseDef() {
+    if (!this.is('lt')) throw new Error('定义须以 < 开头');
+    const a = this.parseAngle();
+    if (this.is('colon')) this.next(); // '> : :=' 笔误变体：冒号在尖括号外
+    if (!this.is('def')) throw new Error(`定义 ${a.name} 缺 ::=`);
+    this.next();
+    // 缺 '{' 容差：游离 '}'（规范丢左括号，SI2ter 3G MP struct 实测）后接新选择 → seq-of-choices
+    const parts = [this.parseAltList('top')];
+    for (;;) {
+      if (this.is('semi') || !this.peek()) break;
+      if (this.is('rb')) { this.next(); continue; }
+      if (this.is('lt') && this.looksLikeDef()) break;
+      parts.push(this.parseAltList('top'));
+    }
+    this.eatTerminator();
+    const body = parts.length === 1 ? parts[0] : { t: 'seq', items: parts };
+    return { name: csn1NormName(a.name), raw: a.name, kind: a.kind, body };
+  }
+  eatTerminator() {
+    if (this.is('semi')) this.next(); // 分号可省略（'} // ;' 实测）
+  }
+
+  // <…> 内部 → { name, kind:'ref'|'labeled', descParts?, trailing? }
+  parseAngle() {
+    if (!this.is('lt')) throw new Error('期望 <');
+    this.next();
+    let depth = 1;
+    let braceDepth = 0;
+    const parts = [];
+    while (this.i < this.toks.length) {
+      const t = this.peek();
+      if (t.k === 'lt') { depth++; parts.push(t); this.next(); continue; }
+      if (t.k === 'gt') {
+        depth--;
+        if (depth === 0) { this.next(); break; }
+        parts.push(t);
+        this.next();
+        continue;
+      }
+      // 规范笔误容差：'}' 出现在未闭合角度内 → 视作提前闭合（不消费）
+      // （'< Timing Advance : bit (6) }' 实测）；但角内花括号组的 '}' 除外——
+      // 按 lb 深度判归属（'<X : { 1 < ref > } ** 0>' 内联重复实测）；
+      // ';' 当标签分隔（'< EC Page Extension ; bit (4) >' 实测，花括号内同理不触发）
+      if (t.k === 'lb') { braceDepth++; parts.push(t); this.next(); continue; }
+      if (t.k === 'rb') {
+        if (braceDepth > 0) { braceDepth--; parts.push(t); this.next(); continue; }
+        break;
+      }
+      if (braceDepth === 0 && t.k === 'semi') break;
+      if (depth > 1 && t.k === 'def') break; // '>> ::= ' 缺闭合级联：内角未闭遇 ::= → 提前闭合
+      parts.push(t);
+      this.next();
+    }
+    // 顶层 ':' 或 '::='（< Priority1 ::= Priority > 实测变体）作标签分隔
+    let colon = -1;
+    let d2 = 0;
+    for (let x = 0; x < parts.length; x++) {
+      if (parts[x].k === 'lt') d2++;
+      else if (parts[x].k === 'gt') d2--;
+      else if (d2 === 0 && (parts[x].k === 'def' || parts[x].k === 'colon' || parts[x].k === 'semi')) { colon = x; break; }
+    }
+    if (colon < 0) {
+      // trailing 取原始 parts 切片（含括号）——fieldFromWords 的 'bit (n)' 正则依赖字面括号
+      // 两级候选：① 名字头非空的尾部描述（'<TLLI / G-RNTI bit (32)>' 实测）；
+      // ② 内联类型（'< relative_position: < bit (1 + val(modulus)) >>' 实测，体=类型描述，
+      //    须能解析为字段才接受——'<spare padding>' 的 'spare' 是名字本体，由此排除）
+      for (const start of [1, 0]) {
+        for (let x = start; x < parts.length; x++) {
+          if (parts[x].k === 'word' && /^(bit|string|octet|spare)$/i.test(parts[x].v)) {
+            const cand = parts.slice(x);
+            const head = parts.slice(0, x).filter((p) => p.k === 'word' || p.k === 'n01').map((p) => p.v).join(' ').replace(/\s+/g, ' ').trim();
+            if (!head) {
+              if (start === 0 && this.fieldFromWords('inline', cand)) {
+                return { name: 'inline', kind: 'ref', trailing: cand };
+              }
+              continue;
+            }
+            return { name: head, kind: 'ref', trailing: cand };
+          }
+        }
+      }
+      const name = parts.filter((p) => p.k === 'word' || p.k === 'n01').map((p) => p.v).join(' ').replace(/\s+/g, ' ').trim();
+      if (!name) throw new Error('空引用名');
+      return { name, kind: 'ref', trailing: null };
+    }
+    const nameWords = parts.slice(0, colon).filter((p) => p.k === 'word' || p.k === 'n01');
+    const name = nameWords.map((p) => p.v).join(' ').replace(/\s+/g, ' ').trim();
+    return { name, kind: 'labeled', descParts: parts.slice(colon + 1) };
+  }
+
+  // 选择列表：seq (bar seq)*；mode: 'top'（定义体）| 'brace'（{} 内）
+  parseAltList(mode) {
+    const alts = [this.parseSeq(mode)];
+    while (this.isBarToken()) {
+      this.next();
+      alts.push(this.parseSeq(mode));
+    }
+    if (alts.length === 1) return alts[0];
+    return { t: 'choice', alts };
+  }
+
+  parseSeq(mode) {
+    const items = [];
+    for (;;) {
+      const t = this.peek();
+      if (!t) break;
+      if (t.k === 'semi' || t.k === 'rb') break;
+      if (this.isBarToken()) break;
+      if (mode === 'top' && (t.k === 'def' || (t.k === 'lt' && this.looksLikeDef()))) break; // 无分号定义衔接
+      items.push(this.parseItem());
+      this.parseSuffix(items);
+      if (this.is('eq')) { // 'bit ** = <no string>' 语义注解（= 后随角度整体丢弃）
+        this.next();
+        if (this.is('lt')) { this.parseAngle(); }
+      }
+      this.relabelColon(items); // '<FDD_ARFCN> : bit(14)' 冒号在外变体
+    }
+    if (items.length === 0) return { t: 'null' };
+    if (items.length === 1) return items[0];
+    return { t: 'seq', items };
+  }
+
+  // 重复后缀（A2）：**(expr) / ** 0 空终止 / *(expr) / * term 短记法 / (n) 定长
+  parseSuffix(items) {
+    for (;;) {
+      if (this.is('star2') || this.is('star')) {
+        const tk = this.next();
+        let count;
+        if (this.is('lp')) {
+          this.next();
+          const e = this.parseExpr();
+          if (!this.is('rp')) throw new Error('重复表达式缺 )');
+          this.next();
+          count = { k: 'expr', e };
+        } else if (tk.k === 'star2' && this.is('n01')) {
+          count = { k: 'nullterm', tag: this.next().v }; // ** 0：读到位标记即停
+        } else if (this.is('word') && !this.isBarToken()) {
+          count = { k: 'expr', e: this.parseExprTerm() }; // * val(X) 单项短记法
+        } else if (this.is('n01')) {
+          count = { k: 'expr', e: this.parseExprTerm() };
+        } else {
+          count = { k: 'star' };
+        }
+        items.push({ t: 'rep', body: items.pop(), count });
+        continue;
+      }
+      if (this.is('lp')) {
+        const save = this.i;
+        this.next();
+        if (this.is('star')) { // '( *)' 无界（A2 星号指数）
+          this.next();
+          if (this.is('rp')) this.next();
+          items.push({ t: 'rep', body: items.pop(), count: { k: 'star' } });
+          continue;
+        }
+        try {
+          const e = this.parseExpr();
+          if (!this.is('rp')) throw 0;
+          this.next();
+          items.push({ t: 'rep', body: items.pop(), count: { k: 'expr', e } });
+          continue;
+        } catch {
+          this.i = save;
+        }
+      }
+      break;
+    }
+  }
+
+  // 冒号在外变体：ref 项后跟 ':' + 描述 → 改写为 labeled 字段
+  relabelColon(items) {
+    if (!this.is('colon') || !items.length) return;
+    const prev = items[items.length - 1];
+    if (prev.t !== 'ref') { this.next(); return; } // 游离冒号丢弃
+    this.next();
+    const desc = [];
+    while (this.peek() && !CSN1_DELIM.has(this.peek().k) && !this.isBarToken()) desc.push(this.next());
+    items[items.length - 1] = this.labeledNode(prev.raw || prev.name, desc);
+  }
+
+  parseItem() {
+    const t = this.peek();
+    if (!t) throw new Error('意外结尾');
+    if (t.k === 'lb') return this.parseBrace();
+    if (t.k === 'gt') { this.next(); return { t: 'null' }; } // 游离 '>'（'<X : ref>>' 双闭合实测）
+    if (t.k === 'lt') return this.parseAngleItem();
+    if (t.k === 'n01') { this.next(); return { t: 'fixed', bits: t.v }; }
+    if (t.k === 'word') {
+      const v = t.v;
+      if (/^L$/i.test(v)) { this.next(); return { t: 'fixed', bits: 'L' }; }
+      if (/^H$/i.test(v)) { this.next(); return { t: 'fixed', bits: 'H' }; }
+      if (/^[LH]+$/i.test(v)) { // LL/LH 粘词（IA '{ LL <' 实测）→ 单位串
+        this.next();
+        return { t: 'seq', items: [...v.toUpperCase()].map((ch) => ({ t: 'fixed', bits: ch })) };
+      }
+      if (/^null$/i.test(v)) { this.next(); return { t: 'null' }; }
+      if (/^bit$/i.test(v)) { this.next(); return { t: 'bits', name: 'bit', n: 1 }; } // B.1.3 裸 bit
+      if (/^(I|or)$/i.test(v)) { this.next(); return { t: 'null' }; } // 伪影兜底
+      if (/^-$/.test(v)) { this.next(); return { t: 'null' }; } // 游离 '-' 噪声（散文残段）
+      // 缺尖括号字段容错：本词起 K token 内有冒号（中间只许 word/bits）→ 词到冒号为名
+      // （'BSIC : bit (6)' / 'E-UTRAN Measurement Parameters Description : <…>' EC 实测）
+      for (let o = 1; o <= 8; o++) {
+        const nt = this.peek(o);
+        if (!nt || CSN1_DELIM.has(nt.k) || this.isBarTokenAt(o)) break;
+        if (nt.k === 'colon') {
+          this.next();
+          while (!this.is('colon')) this.next();
+          this.next();
+          const desc = [];
+          while (this.peek() && !CSN1_DELIM.has(this.peek().k) && !this.isBarToken()) desc.push(this.next());
+          return this.labeledNode(v, desc);
+        }
+        if (!['word', 'n01'].includes(nt.k)) break;
+      }
+      throw new Error(`意外词元 ${v} 上下文: ${this.ctx()}`);
+    }
+    throw new Error(`意外词元 ${t.k} 上下文: ${this.ctx()}`);
+  }
+
+  parseBrace() {
+    this.next(); // {
+    const body = this.parseAltList('brace');
+    if (!this.is('rb')) throw new Error(`选择缺 } 上下文: ${this.ctx()}`);
+    this.next();
+    return body;
+  }
+
+  parseAngleItem() {
+    const a = this.parseAngle();
+    if (a.kind === 'labeled') return this.labeledNode(a.name, a.descParts);
+    if (a.trailing && a.trailing.length) {
+      const node = this.fieldFromWords(a.name, a.trailing);
+      if (node) return node;
+    }
+    const rk = csn1NormKey(a.name);
+    if (rk === 'sparepadding') return { t: 'pad' };
+    if (rk === 'sparebit') return { t: 'spare', n: 1 };
+    if (rk === 'sparehalfoctet') return { t: 'spare', n: 4 };
+    this.onRef(a.name);
+    return { t: 'ref', name: csn1NormName(a.name), raw: a.name };
+  }
+
+  labeledNode(name, descParts) {
+    if (!descParts.length) {
+      const rk = csn1NormKey(name);
+      if (rk === 'sparepadding') return { t: 'pad' };
+      if (rk === 'sparebit') return { t: 'spare', n: 1 };
+      this.onRef(name);
+      return { t: 'ref', name: csn1NormName(name), raw: name };
+    }
+    const flat = descParts.map((p) => (p.k === 'eq' ? '==' : p.k === 'colon' ? ':' : p.k === 'lp' ? '(' : p.k === 'rp' ? ')' : p.k === 'lb' ? '{' : p.k === 'rb' ? '}' : p.k === 'bar' ? '|' : p.v ?? p.k)).join(' ');
+    let m = /^bit\s*==\s*(L|H)$/i.exec(flat);
+    if (m) return { t: 'eqbit', name, eq: m[1].toUpperCase() === 'L' ? 'L' : 'H' };
+    if (descParts.length === 1 && descParts[0].k === 'n01' && /^[01]+$/.test(descParts[0].v)) {
+      return { t: 'valtag', name, values: [descParts[0].v] };
+    }
+    if (descParts[0].k === 'lb') {
+      const vals = this.parseValueGroup(descParts);
+      // 纯值组：全部 token 都是终端位串/L/H 与分隔（'<Multiband supported : { 101 | 110 }>' 实测）
+      const pureGroup = descParts.every((p) => ['lb', 'rb', 'bar', 'n01'].includes(p.k)
+        || (p.k === 'word' && /^[LH]$/i.test(p.v)));
+      if (vals.length && pureGroup) return { t: 'valtag', name, values: vals };
+      // 排除值组：'< NO_NCELL_M : { bit (3) := 111 } >'（':=' 为规范 '≠' 的 docx 伪影）
+      {
+        const w = descParts.map((p) => (p.k === 'def' ? ':=' : p.k === 'lp' ? '(' : p.k === 'rp' ? ')' : p.v ?? p.k)).join(' ');
+        const mx = /^\{\s*(?:bit(?:\s*string)?|spare\s*bit)\s*\(\s*(\d+)\s*\)\s*:=\s*([01]+)\s*\}$/i.exec(w);
+        if (mx) return { t: 'bits', name, n: parseInt(mx[1], 10), exclude: mx[2] };
+      }
+      // 内联重复表达式：'<X : { 1 < ref struct > } ** 0>'（SI2n/14/15 实测）——按完整文法解析
+      try {
+        const sub = new Csn1Parser(descParts);
+        const body = sub.parseSeq('brace');
+        if (body && body.t !== 'null') return { t: 'typed', name, body };
+      } catch { /* 落到后续兜底 */ }
+    }
+    if (descParts.length >= 2 && descParts[0].k === 'lt') {
+      try {
+        const sub = new Csn1Parser(descParts);
+        const a = sub.parseAngle();
+        // 内联类型形态 '<X: < bit (1 + val(modulus)) >>'——体是类型描述而非引用
+        if (a.trailing && a.trailing.length) {
+          const f = this.fieldFromWords(a.name, a.trailing);
+          if (f) return { t: 'typed', name, body: f };
+        }
+        return this.typedRefNode(name, a);
+      } catch { /* 落到类型描述 */ }
+    }
+    const f = this.fieldFromWords(name, descParts);
+    if (f) return f;
+    // 描述内嵌散文/散角：首段（到首个顶层 <）若可作字段则取之（'< Ignore : bit <no string>' 类实测）
+    const cut = descParts.findIndex((p) => p.k === 'lt');
+    if (cut > 0) {
+      const f2 = this.fieldFromWords(name, descParts.slice(0, cut));
+      if (f2) return f2;
+    }
+    const words = descParts.filter((p) => p.k === 'word' || p.k === 'n01');
+    if (words.length && words.length === descParts.length) {
+      const refName = words.map((p) => p.v).join(' ').replace(/\s+/g, ' ').trim();
+      if (!/^(bit|string|octet|spare)/i.test(refName)) return this.typedRefNode(name, { name: refName });
+    }
+    throw new Error(`标签 ${name} 描述不可解析: ${flat.slice(0, 60)}`);
+  }
+
+  // { … } 值组：bits 串与 L/H 终端的并集（'<X : { 101 | 110 }>' / '<X : {L | H}>' 实测）
+  parseValueGroup(descParts) {
+    const sub = new Csn1Parser(descParts);
+    sub.next(); // {
+    const vals = [];
+    for (;;) {
+      const t = sub.peek();
+      if (!t) break;
+      if (t.k === 'n01') { vals.push(sub.next().v); continue; }
+      if (t.k === 'word' && /^[LH]$/i.test(t.v)) { vals.push(sub.next().v.toUpperCase()); continue; }
+      if (sub.isBarToken()) { sub.next(); continue; }
+      if (t.k === 'rb') { sub.next(); break; }
+      sub.next();
+    }
+    return vals;
+  }
+
+  typedRefNode(name, angle) {
+    if (csn1NormKey(angle.name) === 'bitstring') return { t: 'bitstring', name };
+    this.onRef(angle.name);
+    return { t: 'typed', name, body: { t: 'ref', name: csn1NormName(angle.name), raw: angle.name } };
+  }
+
+  // 类型描述词组 → 字段节点
+  fieldFromWords(name, toks) {
+    const words = toks.map((p) => (p.k === 'eq' ? '==' : p.k === 'star2' ? '**' : p.k === 'star' ? '*' : p.k === 'lp' ? '(' : p.k === 'rp' ? ')' : p.v ?? p.k)).join(' ');
+    let m = /^(?:bit\s*string|bit)\s*\((.+)\)\s*$/i.exec(words);
+    if (m) return { t: 'bits', name, n: this.exprOrNum(m[1]) };
+    m = /^bit\s*\(\s*(\d+)\s*\)\s*==\s*([01]+)\s*$/i.exec(words) || /^(?:bit\s*string|bit)\s*==\s*([01]+)\s*$/i.exec(words);
+    if (m) return { t: 'valtag', name, values: [m[2]] }; // 值约束位字段（'<modulus : bit (4) == 0000>' 实测）
+    m = /^bit\s*\(\s*(\d+)\s*\)\s*exclude\s*([01]+)\s*$/i.exec(words) || /^(?:bit\s*string|bit)\s*exclude\s*([01]+)\s*$/i.exec(words);
+    if (m) return { t: 'bits', name, n: parseInt(m[1], 10) || m[2].length, exclude: m[2] }; // 值排除约束（SI9 modulus 实测）
+    m = /^bit\s*(\d+)\s*\)\s*$/i.exec(words);
+    if (m) return { t: 'bits', name, n: parseInt(m[1], 10) }; // 'bit6 )' 括号丢失实测
+    if (/^bit$/i.test(words)) return { t: 'bits', name, n: 1 };
+    if (/^bit\s*\*\*?$/i.test(words)) return { t: 'bitstring', name }; // bit** 无界（A2）
+    m = /^octet\s*\((.+)\)\s*$/i.exec(words);
+    if (m) return { t: 'octets', name, n: this.exprOrNum(m[1]) };
+    m = /^spare\s*bit\s*\((.+)\)\s*$/i.exec(words);
+    if (m) return { t: 'spare', n: this.exprOrNum(m[1]) };
+    if (/^spare\s*bits?$/i.test(words)) return { t: 'pad' };
+    return null;
+  }
+  exprOrNum(s) {
+    const t = String(s).trim();
+    if (/^\d+$/.test(t)) return { k: 'num', v: parseInt(t, 10) };
+    const p = new Csn1Parser(csn1Tokenize(t));
+    return { k: 'expr', e: p.parseExpr() };
+  }
+
+  // 算术表达式（A2）：数字 / val(Name) / Name / + - * / 与括号
+  parseExpr() {
+    let left = this.parseExprTerm();
+    for (;;) {
+      const t = this.peek();
+      if (t && t.k === 'word' && /^[+\-*/]$/.test(t.v)) {
+        this.next();
+        left = { t: 'bin', op: t.v, a: left, b: this.parseExprTerm() };
+        continue;
+      }
+      if (t && t.k === 'star') {
+        this.next();
+        left = { t: 'bin', op: '*', a: left, b: this.parseExprTerm() };
+        continue;
+      }
+      break;
+    }
+    return left;
+  }
+  parseExprTerm() {
+    const t = this.peek();
+    if (!t) throw new Error('表达式意外结尾');
+    if ((t.k === 'n01' || t.k === 'word') && /^\d+$/.test(t.v)) { this.next(); return { t: 'num', v: parseInt(t.v, 10) }; }
+    if (t.k === 'lp') {
+      this.next();
+      const e = this.parseExpr();
+      if (!this.is('rp')) throw new Error('表达式缺 )');
+      this.next();
+      return e;
+    }
+    if (t.k === 'word') {
+      this.next();
+      const w = t.v;
+      if (/^val$/i.test(w) && this.is('lp')) {
+        this.next();
+        const nameParts = [];
+        while (this.peek() && !this.is('rp') && !this.is('rb')) { nameParts.push(this.next().v); }
+        if (this.is('rp')) this.next(); // 缺右括号容差（不越花括号）
+        return { t: 'val', name: csn1NormName(nameParts.join(' ')) };
+      }
+      return { t: 'val', name: csn1NormName(w) };
+    }
+    throw new Error('表达式不可解析: ' + t.k);
+  }
+}
+
+// ---------- 顶层 ----------
+// parseGrammar(cellText) → { defs:[{name,raw,body}], notes:[], refs:[...] }
+function parseGrammar(cellText) {
+  const refs = new Set();
+  const p = new Csn1Parser(csn1Tokenize(cellText), { onRef: (n) => refs.add(csn1NormName(n)) });
+  const { defs, notes } = p.parseUnit();
+  return { defs, notes, refs: [...refs] };
+}
+
 // ==== src/nas/codec.js ====
 // src/nas/codec.js — M4：NAS 消息级编解码（schema 驱动，行序扫描）。
 //
@@ -6475,6 +7480,15 @@ function splitHeading(text) {
   return m ? { num: m[1], title: m[2] } : { num: null, title: text };
 }
 
+// 节号带字母后缀的标题（'9.9.3.0B Additional update type'）——splitHeading 的节号词法
+// 不含字母，后缀会被吞进标题（num '9.9.3.0' + title 'B …'，与 9.9.3.0A 撞节号）。
+// 24.301 §9.9.3.0A/0B 实证。后缀后必须跟空白，纯数字节号回落 splitHeading。
+function splitHeadingSfx(text) {
+  const hm = /^\s*((?:\d+\.)+\d+[a-zA-Z])\s+(.*)$/.exec(text);
+  if (hm) return { num: hm[1], title: hm[2].trim() };
+  return splitHeading(text);
+}
+
 // caption 段：'Table 8.2.6.1.1: …'（24.501/24.301）或 'Table 9.2.12/3GPP TS 24.008: …'（24.008）→ 元数据
 // 取窗口内最后一个 Table 段（最贴近表格的即本表 caption）——24.080 实证：相邻两表只隔
 // 一段说明文字，上一表的 caption 会滞留在 3 段窗口里，取第一个会把 REGISTER MT 的表
@@ -6517,6 +7531,8 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
   const msgs = [];
   const typeTables = [];
   const valueTables = [];
+  const csn1Tables = [];
+  const secProse = new Map();
   let other = 0;
   const sections = [];
   let curH3 = null;
@@ -6524,10 +7540,19 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
     if (it.kind === 'p') {
       if (/^Heading[234]$/.test(it.style) && it.text) {
         const sh = splitHeading(it.text);
-        if (sh.num) {
+        const hm = /^\s*((?:\d+\.)+\d+)([a-zA-Z])\s+(.*)$/.exec(it.text);
+        if (hm) {
+          // splitHeading 吃掉节号字母后缀（'10.5.2.35a'→num '10.5.2.35' + title 'a …'；
+          // 大写后缀 24.301 '9.9.3.0B' 同病）——重建
+          const fixed = { num: hm[1] + hm[2], title: hm[3].trim(), style: it.style };
+          sections.push(fixed);
+          curH3 = fixed;
+        } else if (sh.num) {
           sections.push({ num: sh.num, title: sh.title, style: it.style });
           curH3 = sh;
         }
+      } else if (curH3 && it.text) {
+        secProse.set(curH3.num, (secProse.get(curH3.num) || '') + ' ' + it.text);
       }
       continue;
     }
@@ -6540,6 +7565,32 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
     if (ttRe && curH3 && ttRe.test(curH3.num) && /message type/i.test(curH3.title)) {
       typeTables.push({ section: curH3.num, title: curH3.title, rows: it.rows.map((r) => r.map((c) => c.text)) });
       continue;
+    }
+    // CSN.1 文法表（Rest Octets / Classmark 3，批次D）：含 '::=' 的格原样留存。
+    // 节归属优先级：① 根定义名 ↔ 节标题（'<IAR Rest Octets>' ↔ '10.5.2.17 IAR Rest Octets'；
+    // 旧节题注会滞留在 paras 里跨节泄漏，题注不可信）；② 题注 'Table 10.5.2.78.1:'（IPA 等
+    // 节标题无 Heading 样式且定义名不匹配时）；③ 表 heading。
+    if (it.rows.some((r) => r.some((c) => (c.text || '').includes('::=')))) {
+      const cells = it.rows.flat().filter((c) => (c.text || '').includes('::=')).map((c) => c.text);
+      const hSec = it.heading ? (it.heading.text.match(/^\s*((?:\d+\.)+\d+[a-z]?)\s/) || [])[1] || null : null;
+      const capSec = (it.paras || []).map((p) => /^Table\s+(\d+(?:\.\d+)+[a-z]?)\s*\.\s*\d+\s*:/i.exec(p)).find(Boolean);
+      let sec = capSec ? capSec[1] : hSec;
+      const dm = cells[0] ? /<\s*([^<>:]+?)\s*>\s*::=/.exec(cells[0]) : null;
+      if (dm) {
+        const dk = dm[1].replace(/\s+/g, '').toLowerCase();
+        // 限定 §10.5 IE 定义区——§9 消息区存在同名子标题（9.1.20.4 'IAR Rest Octets' 实测）
+        const secByTitle = (sections || []).find((s) => /^10\.5/.test(s.num)
+          && (s.title || '').replace(/\s+/g, '').toLowerCase() === dk);
+        if (secByTitle) sec = secByTitle.num;
+      }
+      if (sec) {
+        csn1Tables.push({
+          section: sec,
+          title: (it.heading ? it.heading.text.replace(/^\s*\S+\s+/, '') : '') || (capSec ? it.paras.find((p) => /^Table/i.test(p)) || '' : ''),
+          cells,
+        });
+        continue;
+      }
     }
     const bt = parseBitTable(it.rows);
     if (bt) {
@@ -6601,11 +7652,21 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
     // 值域表（位图 figure 的配套 prose 表）：'Follow-on proceed (octet 1)' + 'Bit' + '4'
     // 行组 / 'CS Domain TSC Set (octet 2): …\nBit\n1 2' 巨格——位号锚点来源（v1.13 走查纠偏）
     if (it.rows.some((r) => r.some((c) => /\(\s*octet\s+\d+\s*[,)]/i.test(c.text) || /^\s*bits?\s*:?\s*$/i.test(c.text.trim())))) {
-      const sh = it.heading ? splitHeading(it.heading.text) : { num: null, title: null };
+      const sh = it.heading ? splitHeadingSfx(it.heading.text) : { num: null, title: null };
       valueTables.push({ section: sh.num, title: sh.title, rows: it.rows.map((r) => r.map((c) => c.text)) });
       continue;
     }
     other++;
+  }
+  // 散文别名（10.5.x 无文法表节）：'coded as the SI 16 Rest Octets' / 'defined as the SI 18 …'
+  // （SI17→SI16、SI20→SI18 实测）——csn1 条目带 alias 字段，建库时池内检索根定义
+  const csn1Secs = new Set(csn1Tables.map((t) => t.section));
+  for (const [sec, text] of secProse) {
+    if (csn1Secs.has(sec) || !/^10\.5/.test(sec)) continue;
+    const am = /(?:coded|defined) as (?:the )?(?:described in [^.]*?)?SI\s?(\d+[a-z]?)\s*(?:Rest Octets)?/i.exec(text);
+    if (am) {
+      csn1Tables.push({ section: sec, title: (sections.find((x) => x.num === sec) || {}).title || '', cells: [], alias: `SI ${am[1]} Rest Octets` });
+    }
   }
   return {
     version,
@@ -6615,7 +7676,8 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
     msgs,
     typeTables,
     valueTables,
-    stats: { bitTables: bits.length, msgTables: msgs.length, otherTables: other },
+    csn1: csn1Tables,
+    stats: { bitTables: bits.length, msgTables: msgs.length, otherTables: other, csn1Tables: csn1Tables.length },
   };
 }
 
@@ -6702,6 +7764,103 @@ function buildIes(bits, valueTables) {
     });
   }
   return correctIes(ies, anchorsBySection);
+}
+
+// ---- 值语义表 → 位布局（v1.14.1）----------------------------------------------------
+// 24.301 的 IE 位图 figure 是嵌入图片，Word 表只携带值语义：字段名自带 '(octet N[, bit M])'
+// 注记 + 'Bit' + 位号行 + 0/1 值行（§9.9.3.0B Additional update type / §9.9.3.34 UE network
+// capability 实证——24.008 正文只写「See 24.301」的那两个 IE 就在这）。信息足以无损重建位
+// 布局：产出与 parseBitTable 同构的 octets/fields。行天然从内容八位组起（无 IEI/Length 行，
+// TV/TLV 值域剥壳本就由 codec 负责）。取舍：值语义文本不随布局携带（消费者按位解、UI 显数值）；
+// 置信门禁 ≥2 字段，不足返回 null（散文杂表不误收）。
+// 行形态：① 字段头（恰一非空格，含 (octet N, bit M[to K]) 注记；注记可在行中——
+//         'ProSe (octet 7, bit 7)This bit…'，取最后一处注记）→ 字段成形，随后 0/1 行是值；
+//        ② 字段头只带 (octet N) → 等下一行裁决：'Bit' + 位号行（1..4 个 1-8 数字格，降序）
+//          则成形；等来又一个字段头则它是组头（'EPS encryption algorithms supported
+//          (octet 3)'），丢弃；
+//        ③ 值行：前导 0/1 单字符格（个数 = 字段位宽）+ 描述格；前导格空而描述非空 = 描述续行；
+//        ④ 'all other bits in octet X to Y are spare' → 尾部开区间 optional spare 行。
+// 行内空隙记 pre（前导空位，与 packRow/layoutUnpack 共语义）；组内字段按 hi 降序，八位组升序。
+function parseValueLayout(rowsText) {
+  const fields = [];
+  let cur = null; // 等位号行裁决的无注记字段头（或组头）
+  let last = null; // 最近成形的字段（值行挂靠）
+  let spareFrom = null;
+  const ANNO = /\(octet\s+(\d+)\s*(?:,\s*bits?\s+(\d+)(?:\s+to\s+(\d+))?)?\)/i;
+  for (const row of rowsText || []) {
+    const texts = (row || []).map((c) => String(c ?? '').trim());
+    const ne = texts.filter((t) => t !== '');
+    if (!ne.length) continue;
+    const joined = ne.join(' ');
+    const sm = /all other bits[^\n]*?octet\s+(\d+)/i.exec(joined);
+    if (sm && !cur) {
+      spareFrom = parseInt(sm[1], 10);
+      continue;
+    }
+    if (ne.length === 1 && /^bits?\s*:?\s*$/i.test(ne[0])) continue; // 'Bit' 标记
+    if (ne.length === 1) {
+      const m = ANNO.exec(ne[0]);
+      if (m) {
+        // 散文排除（看第一处注记之前的名部）：字段描述会成句引用位号——'This bit indicates
+        // …(CP CIoT) bit (octet 8, bit 3) is set to 1…'（句号/This bit 开头）。字段头是
+        // 「名字 + 注记」，名字后可再跟 '\n' 描述或同行走文（'ProSe (octet 7, bit 7)This bit…'），
+        // 其注记也可能在后文被引用多次（S1-U 行实证），注记个数不是判据。
+        const before = ne[0].slice(0, m.index);
+        const prose = /\.\s/.test(before) || /^this bit/i.test(before);
+        if (!prose) {
+          const name = ne[0].slice(0, m.index).replace(/[\s:]+$/, '').trim();
+          if (m[2] != null) {
+            last = { name, octet: m[1], hi: +m[2], lo: m[3] != null ? +m[3] : +m[2] };
+            fields.push(last);
+            cur = null;
+          } else {
+            cur = { name, octet: m[1] };
+          }
+          continue;
+        }
+      }
+    }
+    if (cur && ne.length <= 4 && ne.every((t) => /^[1-8]$/.test(t))
+      && ne.every((t, i) => i === 0 || +ne[i - 1] > +t)) {
+      // 位号行（严格降序排除值行 ['1','1',…] 误中）
+      last = { name: cur.name, octet: cur.octet, hi: +ne[0], lo: +ne[ne.length - 1] };
+      fields.push(last);
+      cur = null;
+      continue;
+    }
+    // 值行 / 描述续行 / 散文——值语义不随布局携带，一并忽略
+    void joined;
+  }
+  if (fields.length < 2) return null;
+  const byOct = new Map();
+  for (const f of fields) {
+    if (!byOct.has(f.octet)) byOct.set(f.octet, []);
+    byOct.get(f.octet).push(f);
+  }
+  const octs = [...byOct.keys()].map(Number).sort((a, b) => a - b).map((n) => {
+    const fs = (byOct.get(String(n)) || []).sort((a, b) => b.hi - a.hi);
+    let prevLo = 9;
+    return {
+      octet: String(n),
+      count: 1,
+      fields: fs.map((f) => {
+        const pre = prevLo - f.hi - 1;
+        prevLo = f.lo;
+        return { name: f.name, bits: f.hi - f.lo + 1, hi: f.hi, lo: f.lo, ...(pre > 0 ? { pre } : {}) };
+      }),
+    };
+  });
+  // 内容值可变长（len 列 '4 - 15' 类）：首个内容八位组之后全部标 optional（'*'），解码时
+  // 字节耗尽即缺席；spare 尾注从最后一个字段八位组的下一八位组起吞尾
+  for (let i = 1; i < octs.length; i++) {
+    if (!/-/.test(octs[i].octet)) octs[i].octet += '*';
+  }
+  if (spareFrom != null && octs.length) {
+    const lastN = +octs[octs.length - 1].octet.replace(/\*$/, '');
+    const start = Math.max(spareFrom, lastN + 1);
+    if (start > lastN) octs.push({ octet: `${start}-n*`, count: 1, open: true, fields: [{ name: 'Spare', bits: 8, hi: 8, lo: 1 }] });
+  }
+  return { octets: octs };
 }
 
 // ---- 值域表位号锚点（v1.13）--------------------------------------------------------
@@ -6971,8 +8130,8 @@ function buildMessages(msgs, msgTypes, bits) {
 
 // 结构化 → schema（codec 消费形态）+ 建库问题清单
 function buildSchema(structured, opts = {}) {
-  if (structured.spec === '24008') return buildSchema24008(structured);
-  if (structured.spec === '44018') return buildSchema44018(structured, opts.fillBits, opts.fillValueTables);
+  if (structured.spec === '24008') return buildSchema24008(structured, opts);
+  if (structured.spec === '44018') return buildSchema44018(structured, opts.fillBits, opts.fillValueTables, opts.fillCsn1);
   if (structured.spec === '24080') return buildSchema24080(structured);
   if (structured.spec === '24011') return buildSchema24011(structured);
   if (structured.spec === '23040') return buildSchema23040(structured);
@@ -6983,6 +8142,91 @@ function buildSchema(structured, opts = {}) {
     schema: { spec: structured.spec, version: structured.version, msgTypes, ies, messages },
     problems,
   };
+}
+
+// ---- CSN.1 Rest Octets 描述符建库（批次D）------------------------------------------------
+// 文法表（<ver>.json 的 csn1 键，格文本原样）→ { 节号: { root, defs } }。
+// 定义全局池化：SI7/SI8/17/20 别名节的 root 定义位于 SI4/16/18 的表内，按定义名全局检索；
+// 44.018 §10.5.1.x 委托 24.008（--fill 并池）。Spare Half Octet（10.5.1.8）两规范均纯散文，
+// 按 24.007 Annex B.1.3 预定义库记法合成 <spare half octet> ::= <spare bit>(4)（通用记法，非规范数据）。
+const csn1Key = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
+
+function buildCsn1Descriptors(csn1Tables, sections) {
+  const pool = new Map(); // defKey → body
+  const secDefs = new Map(); // 节号 → [defKey]
+  for (const t of csn1Tables || []) {
+    for (const cell of t.cells || []) {
+      let parsed;
+      try { parsed = parseGrammar(cell); } catch { continue; }
+      for (const d of parsed.defs) {
+        const k = csn1Key(d.name);
+        if (!pool.has(k)) pool.set(k, d.body);
+        const arr = secDefs.get(t.section) || [];
+        if (!arr.includes(k)) arr.push(k);
+        secDefs.set(t.section, arr);
+      }
+    }
+  }
+  const titleOf = (sec) => {
+    const s = (sections || []).find((x) => x.num === sec);
+    return s ? s.title || '' : '';
+  };
+  const out = {};
+  const ensure = (sec, rootKey) => {
+    if (!pool.has(rootKey) || out[sec]) return;
+    const defs = {};
+    const walk = (body) => {
+      if (!body || typeof body !== 'object') return;
+      if (body.t === 'ref' && body.name) {
+        const k = csn1Key(body.name);
+        if (pool.has(k) && !Object.prototype.hasOwnProperty.call(defs, k)) {
+          defs[k] = pool.get(k);
+          walk(defs[k]);
+        }
+        return;
+      }
+      if (body.t === 'typed') return walk(body.body);
+      if (body.t === 'seq' && body.items) return body.items.forEach(walk);
+      if (body.t === 'choice' && body.alts) return body.alts.forEach(walk);
+      if (body.t === 'rep') return walk(body.body);
+    };
+    defs[rootKey] = pool.get(rootKey);
+    walk(pool.get(rootKey));
+    out[sec] = { root: rootKey, defs };
+  };
+  // ① 有文法表的节（含 fill 并入节）：root = 节标题匹配的定义，否则节内首定义
+  for (const [sec, keys] of secDefs) {
+    const tk = csn1Key(titleOf(sec));
+    ensure(sec, keys.includes(tk) ? tk : keys[0]);
+  }
+  // ② 别名节（本节无文法表）：节标题匹配的定义全局检索
+  for (const s of sections || []) {
+    const tk = csn1Key(s.title || '');
+    if (tk && pool.has(tk)) ensure(s.num, tk);
+  }
+  // ②b 散文别名（'coded/defined as the SI 16/18 Rest Octets' 摄取期解析）：按别名定义名检索
+  for (const t of csn1Tables || []) {
+    if (t.alias && !out[t.section]) {
+      const ak = csn1Key(t.alias);
+      if (pool.has(ak)) ensure(t.section, ak);
+    }
+  }
+  // ③ Spare Half Octet：记法库合成
+  for (const s of sections || []) {
+    if (!out[s.num] && csn1Key(s.title || '') === 'sparehalfoctet') {
+      out[s.num] = { root: 'spare half octet', defs: { 'spare half octet': { t: 'spare', n: 4 } } };
+    }
+  }
+  // ④ 并入 ies（位布局可共存——同名 IE 同时有 layouts 与 csn1 时解码优先 csn1）
+  return out;
+}
+
+function mergeCsn1IntoIes(ies, csn1, sections) {
+  for (const [sec, d] of Object.entries(csn1 || {})) {
+    const s = (sections || []).find((x) => x.num === sec);
+    ies[sec] = { name: (ies[sec] && ies[sec].name) || (s ? s.title : sec), layouts: (ies[sec] && ies[sec].layouts) || [], csn1: d };
+  }
+  return ies;
 }
 
 // ---- 24.008（GSM/UMTS 传承 NAS）建库 -----------------------------------------------
@@ -6997,6 +8241,49 @@ function buildSchema(structured, opts = {}) {
 //      RR=6 / MM=5 / CC=3 / GMM=8 / SM=10（GPRS Session Management——非 SMS(9)，
 //      wire oracle 实证：pycrate SMActivatePDPContextRequest 帧 octet1=0x0a）。
 const PD24008 = { '9.1': 6, '9.2': 5, '9.3': 3, '9.4': 8, '9.5': 10 };
+
+// 24.008 IE 节正文只写「See 3GPP TS 24.301 subclause 9.9.3.x」的映射（10.5.5.0/10.5.5.26：
+// 正文为一句引用 + 嵌入图片 figure，无自带位表）。布局取自 24.301 的值语义表
+// （parseValueLayout），建库时经 --fill24301 提供同管线摄取的 24.301 产物并入。
+const SEE_24301 = { '10.5.5.0': '9.9.3.0B', '10.5.5.26': '9.9.3.34' };
+
+function rowIsTv1(r) {
+  const f = (r.format || '').trim().toUpperCase();
+  return f === 'TV' && /^[0-9a-fA-F]-$/i.test((r.iei || '').trim());
+}
+
+function fillSee24301(ies, messages, fill24301) {
+  if (!fill24301) return [];
+  const vts = fill24301.valueTables || [];
+  const filled = [];
+  for (const [sec, ref] of Object.entries(SEE_24301)) {
+    if (ies[sec]) continue; // 本版自带布局则让位（未来 24.008 若补位表即自动停用）
+    const vt = vts.find((t) => t.section === ref);
+    if (!vt || !Array.isArray(vt.rows)) continue;
+    const lay = parseValueLayout(vt.rows);
+    if (!lay) continue;
+    // TV/1（type1，IEI 半八位组）行消费的是 nibble——八位组布局换半八位组行（位号 ≤4）
+    const isTv1 = (messages ? Object.values(messages) : []).some((insts) =>
+      (insts || []).some((inst) => (inst.rows || []).some((r) => (r.ref === sec || r.def === sec) && rowIsTv1(r))));
+    const row = lay.octets[0];
+    if (isTv1 && row && !row.half && row.fields.every((f) => f.hi <= 4)) {
+      let prevLo = 5;
+      row.fields = row.fields.map((f) => {
+        const pre = prevLo - f.hi - 1;
+        prevLo = f.lo;
+        return { name: f.name, bits: f.bits, hi: f.hi, lo: f.lo, ...(pre > 0 ? { pre } : {}) };
+      });
+      row.half = true;
+    }
+    ies[sec] = {
+      name: (vt.title || '').replace(/^[A-Za-z]\s+/, '') || sec,
+      layouts: [{ figure: null, octets: lay.octets }],
+      fillFrom: `24.301 ${fill24301.version || ''} §${ref}`.trim(),
+    };
+    filled.push(`${sec} ← ${ref}`);
+  }
+  return filled;
+}
 
 function parseTypeTables24008(tables) {
   const out = {};
@@ -7125,7 +8412,7 @@ function mergeContentRows(structured, rows) {
   return merged;
 }
 
-function buildSchema24008(structured) {
+function buildSchema24008(structured, opts = {}) {
   const msgTypes = parseTypeTables24008(structured.typeTables);
   const domNames = {};
   for (const m of structured.msgs) {
@@ -7143,6 +8430,7 @@ function buildSchema24008(structured) {
     }
   }
   const ies = buildIes(structured.bits, structured.valueTables);
+  mergeCsn1IntoIes(ies, buildCsn1Descriptors(structured.csn1, structured.sections), structured.sections);
   const out = {};
   const problems = [];
   for (const m of structured.msgs) {
@@ -7170,9 +8458,11 @@ function buildSchema24008(structured) {
     if (!out[m.name]) out[m.name] = [];
     out[m.name].push(inst);
   }
+  const filled = fillSee24301(ies, out, opts.fill24301);
   return {
     schema: { spec: '24008', version: structured.version, msgTypes, ies, messages: out },
     problems,
+    filled,
   };
 }
 
@@ -7241,10 +8531,11 @@ function resolveMsgType44018(name, msgTypes) {
   return best ? best[1] : null;
 }
 
-function buildSchema44018(structured, fillBits, fillValueTables) {
+function buildSchema44018(structured, fillBits, fillValueTables, fillCsn1) {
   // 跨规范位表并入：44.018 §10.5.1.x（Mobile Identity / Classmark / LAI 等）正文只有
   // 'See 3GPP TS 24.008.'——节号与 24.008 §10.5.1.x 同编，用 24.008 摄取产物的位表补齐
-  // （只并本地缺失的节号，本地优先）。并入节的值域表随行并入（挂起行的锚点走查依赖）。
+  // （只并本地缺失的节号，本地优先）。并入节的值域表随行并入（挂起行的锚点走查依赖）；
+  // CSN.1 文法表同路并入（10.5.1.7 MS Classmark 3 = 24.008 CSN.1 文法）。
   const localBits = new Set(structured.bits.map((b) => b.section));
   const extraBits = (fillBits || []).filter((b) => b.section && !localBits.has(b.section));
   const allBits = structured.bits.concat(extraBits);
@@ -7252,8 +8543,13 @@ function buildSchema44018(structured, fillBits, fillValueTables) {
   const allValueTables = (structured.valueTables || []).concat(
     (fillValueTables || []).filter((v) => v.section && !localVt.has(v.section))
   );
+  const localCsn1 = new Set((structured.csn1 || []).map((v) => v.section));
+  const allCsn1 = (structured.csn1 || []).concat(
+    (fillCsn1 || []).filter((v) => v.section && !localCsn1.has(v.section))
+  );
   const msgTypes = parseTypeTables44018(structured.typeTables);
   const ies = buildIes(allBits, allValueTables);
+  mergeCsn1IntoIes(ies, buildCsn1Descriptors(allCsn1, structured.sections), structured.sections);
   const out = {};
   const problems = [];
   for (const m of structured.msgs) {
@@ -7751,7 +9047,7 @@ if (args.schema && args.out) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, extractBitAnchors, walkRow, buildSchema, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
@@ -7952,7 +9248,7 @@ function renderShell() {
 <header class="topbar">
   <div class="logo">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1" y="1" width="7" height="7" rx="1.5" fill="#0f62fe"/><rect x="10" y="1" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="1" y="10" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="10" y="10" width="7" height="7" rx="1.5" fill="#0f62fe"/></svg>
-    RRC&nbsp;Workbench <span class="dim">v1.13.1</span>
+    RRC&nbsp;Workbench <span class="dim">v1.14.1</span>
   </div>
   <nav class="tabs">
     <button class="tab on" data-page="encode">帧生成器</button>
@@ -7963,7 +9259,7 @@ function renderShell() {
     <button class="tab" data-page="library">规范库</button>
     <button class="tab" data-page="about">关于</button>
   </nav>
-  <span class="ver">v1.13.1 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
+  <span class="ver">v1.14.1 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
 </header>
 <main>
   <section class="page on" id="page-encode"></section>
@@ -7974,7 +9270,7 @@ function renderShell() {
   <section class="page" id="page-library"></section>
   <section class="page" id="page-about"></section>
 </main>
-<div class="foot">RRC Workbench v1.13.1 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
+<div class="foot">RRC Workbench v1.14.1 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => goto(t.dataset.page)));
 }
 function goto(id) {
@@ -9640,6 +10936,25 @@ function nasSample() {
   nasDecodeFrom(lines[0].hex);
 }
 
+// CSN.1 rest octets 解码树行（批次D）：trace → [depth, 名称, 值]；fixed/spare/pad/rep 为结构位不进树
+function csn1TraceLines(trace, warnings, ext) {
+  const lines = [];
+  for (const op of trace || []) {
+    const pad = op.d || 0;
+    if (op.kind === 'field' || op.kind === 'mark') {
+      lines.push([pad, op.name, op.bits ? `${op.value}（${op.bits} 位）` : String(op.value)]);
+    } else if (op.kind === 'bitstring') {
+      lines.push([pad, op.name, `${op.value}（${op.bits} 位）`]);
+    } else if (op.kind === 'choice' && op.tag) {
+      lines.push([pad, `判别 ${op.tag}`, '']);
+    } else if (op.kind === 'ext') {
+      lines.push([pad, `⚠ 外部结构 ${op.name}`, `其后 ${op.bits} 位保留原样`]);
+    }
+  }
+  for (const w of warnings || []) lines.push([0, `⚠ ${w}`, '']);
+  return lines;
+}
+
 // 值语义展示：位布局字段展开 + APN/PLMN 语义解码（解析失败回退原始 hex）
 function nasValueHtml(r, value) {
   const raw = value == null ? '—'
@@ -9669,6 +10984,19 @@ function nasValueHtml(r, value) {
     }
   }
   let fieldRows = '';
+  if (ref && refOwner.ies[ref].csn1) {
+    // CSN.1 rest octets（批次D）：位级解码树（外部结构引用部分解码 + 原始尾位保留）
+    try {
+      const c = refOwner.ies[ref].csn1;
+      const defs = new Map(Object.entries(c.defs));
+      const bytes = typeof value === 'number' ? Uint8Array.of(value) : value;
+      const d = csn1Decode(defs, defs.get(c.root), bytes, { areaBytes: bytes.length });
+      const lines = csn1TraceLines(d.trace, d.warnings, d.external);
+      if (lines.length) {
+        fieldRows = `<table style="margin:2px 0 2px 14px;font:11px var(--mono);border-collapse:collapse">${lines.map(([dep, k, v]) => `<tr><td style="padding:1px 8px 1px 0;color:var(--t3)">${'&nbsp;'.repeat(dep * 2)}${k}</td><td>${v}</td></tr>`).join('')}</table>`;
+      }
+    } catch {}
+  }
   if (ref) {
     const lay = refOwner.ies[ref].layouts[0];
     if (lay && lay.octets.length) {
@@ -9729,6 +11057,17 @@ function nasValueText(r, value) {
     for (const sc of Object.values(nasState.schemas || {})) {
       if (sc.ies && sc.ies[r.ref]) { ref = r.ref; refOwner = sc; break; }
     }
+  }
+  if (ref && refOwner.ies[ref].csn1) {
+    try {
+      const c = refOwner.ies[ref].csn1;
+      const defs = new Map(Object.entries(c.defs));
+      const bytes = typeof value === 'number' ? Uint8Array.of(value) : value;
+      const d = csn1Decode(defs, defs.get(c.root), bytes, { areaBytes: bytes.length });
+      for (const [dep, k, v] of csn1TraceLines(d.trace, d.warnings, d.external)) {
+        sem.push(`${'  '.repeat(dep)}${k}${v ? ': ' + v : ''}`);
+      }
+    } catch {}
   }
   if (ref) {
     const lay = refOwner.ies[ref].layouts[0];
