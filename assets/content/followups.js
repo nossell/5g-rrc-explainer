@@ -453,6 +453,30 @@
         a: '广播/多播同款风险，两处表注都写明由 **UE 实现定**（§5.9.2.2/§5.10.2.2）。兜底在机制本身：修改周期内 MCCH 按重复周期可多次重发（§5.9.1.3），而获取是**全量覆盖、无增量**——任何时候重读一次就拿到最新配置，不会拿到半新半旧的账。',
         ref: '38.331#5.9.1.3' }
     ] },
+    'm52:q0': { levels: [
+      { q: '为什么 IAB-donor 也拆成 CU 和 DU？',
+        a: '因为 donor 本来就是一台 gNB——「能够服务 IAB-node 的 gNB 命名 IAB-donor」（§6.1.3 原文），gNB 的 CU/DU 分离架构原样继承（M41 的地基）：IAB-node 的 F1 终结在 donor-CU、无线侧锚在 donor-DU；CP/UP 分离部署时 donor 甚至可由 donor-CU-CP+多个 CU-UP+多个 DU 组成（§6.1.3 原文）。',
+        ref: '38.401#6.1.3' },
+      { q: 'IAB-node 为什么不干脆叫「小 gNB」？',
+        a: '它比 gNB 少一块「自己的回程」——回程借道接入链（MT 侧），所以规范叫它 node（节点）：一节 MT 一节 DU 的双角色。而 gNB-DU/gNB-CU/UE 上下文的全部功能对 IAB-DU/IAB-donor-CU/IAB-MT「同样适用，除非另有说明」（§6.1.3 原文三连）——复用存量规范、只在例外处改笔，不重写。',
+        ref: '38.401#6.1.3' }
+    ] },
+    'm52:q2': { levels: [
+      { q: 'IAB-MT 怎么向 donor 要 IP？',
+        a: '走 IAB Other Information 过程（§5.7.12.1 原文）：请求侧按协议填数量字段——iab-IPv4-AddressNumReq/iab-IPv6-AddressNumReq/iab-IPv6-AddressPrefixReq（消息字段明文）；地址按 all traffic/F1-U/F1-C/non-F1 四类用途各请求各的（§8.9.13），donor-CU 可再发起 TNL Address Allocation 从 donor-DU 取号，最后经 RRC 下发。',
+        ref: '38.331#5.7.12.1' },
+      { q: 'EN-DC/NR-DC 下这条消息走哪条车道？',
+        a: '§5.7.12.3 原文分支：**SRB3 配了就走 SRB3**；没配则 (NG)EN-DC 嵌入 E-UTRA RRC 的 ULInformationTransferMRDC（36.331），NR-DC 朝 SN 的场景嵌入 NR RRC 的 ULInformationTransferMRDC（5.7.2a.3）；SA 场景直接递交底层——车道选错消息就出不了门（故障面 m52f6）。',
+        ref: '38.331#5.7.12.3' }
+    ] },
+    'm52:q4': { levels: [
+      { q: 'boundary 节点诞生后，F1 流量怎么跟上？',
+        a: '靠流量卸载（offload）：新 CU 先把 RRC 配置发给 IAB-MT——新 TNL 地址/新拓扑的 BAP 地址/默认 BH RLC channel 与 default BAP routing ID（§8.17.4 步骤 14 原文转述），随后经 IAB Transport Migration Management 系列消息把流量逐批卸载到新路径（8.17.3.1 的 14-20 步）——F1 端点留在源 CU 不动，换的只是路。',
+        ref: '38.401#8.17.4' },
+      { q: '卸载过去的流量还能搬回来吗？',
+        a: '能。全部撤销（full revoking）：新 CU 对 boundary IAB-MT 发起反方向的切换准备（XnAP Handover Preparation），MT 回到初始 CU 后流量重回原路径（§8.17.4 原文转述）；源 CU 也可经 IAB TRANSPORT MIGRATION MANAGEMENT REQUEST 申请全部或部分释放已卸载流量——按 traffic 逐批回收。',
+        ref: '38.401#8.17.4' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

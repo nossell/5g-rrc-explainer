@@ -66,7 +66,9 @@
     { t: '同步参考', alt: 'SyncRef', mean: 'SL 直连里「跟谁对时」的账：候选三源——GNSS、小区、选中的 SyncRef UE——按 sl-SyncPriority（gnbEnb 还是 gnss 优先）与优先组排序；当前源 RSRP 跌破最小要求、GNSS 变不可靠或小区跟丢，就重跑搜索换源。', qref: 'm50' },
     { t: 'SLSS', alt: 'sidelink SSB', mean: 'SL 直连的同步广播：SLSS 与 MIB-Sidelink 成对发，SLSSID 是身份暗号——跟 GNSS 发 0、跟 SyncRef UE 同号或 +336、其用 TA3 时隙则换 337；无源可跟时随机选但要排除 336/337。', qref: 'm50' },
     { t: 'G-RNTI', alt: '组播 RNTI', mean: '广播/多播业务的「叫号暗号」：桌牌（MCCH）里公布每个会话用哪个 G-RNTI 调度，UE 盯住这个号去收流；多播没数据或会话去激活时网络会通知停盯——省电就省在这一个号上。', qref: 'm51' },
-    { t: 'PTM', alt: '点对多点', mean: '一份信令发给一群人的发送方式：广播与多播都走 PTM，对照单播的 PTP（点对点）；PTM 接收同样能配 DRX 省电。', qref: 'm51' }
+    { t: 'PTM', alt: '点对多点', mean: '一份信令发给一群人的发送方式：广播与多播都走 PTM，对照单播的 PTP（点对点）；PTM 接收同样能配 DRX 省电。', qref: 'm51' },
+    { t: 'IAB', alt: '集成接入回传/无线回传', mean: '给基站装无线尾巴：光纤断了的地方用接入链兼跑回程——IAB-node 靠 IAB-MT（UE 功能的子集）接入 donor、靠 IAB-DU 服务下游 UE；现场聊「无线回传」「回程没光缆」的部署，多半就是它。', qref: 'm52' },
+    { t: 'BH RLF', alt: '回程断链', mean: 'IAB-MT 侧回程无线链失败：上游路径断了就换父节点重建立恢复——同 CU 下换父叫 intra-CU 恢复、跨 CU 恢复会诞生 boundary 节点；恢复失败的节点按无序退役（disorderly release）处理。', qref: 'm52' }
   ];
   g.RRC_SLANG = {
     get: function (i) { return S[i] || null; },
