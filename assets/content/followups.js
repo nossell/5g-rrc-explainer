@@ -429,6 +429,30 @@
         a: '一条善后链走到底：释放该 destination 的 SL DRB→SL SRB→PC5 Relay RLC 信道→丢弃其 SL 配置→重置 sidelink specific MAC→**视为该 PC5-RRC 连接已释放**→向上层指示（PC5 unavailable）。RRC_CONNECTED 的 UE 还要经 SidelinkUEInformationNR 把 **sl-Failure=rlf** 报给网络（§5.8.3.3）——直连断了，网络要知情。',
         ref: '38.331#5.8.3.3' }
     ] },
+    'm51:q0': { levels: [
+      { q: '广播的配置为什么放系统信息，不走专有信令？',
+        a: '因为广播是小区级群发、**没有订阅账本**——网络不知道也不需要知道谁在听，桌牌（MCCH 的 MBSBroadcastConfiguration）面向全体广播；收 MCCH 所需的配置同样在系统信息里（SIB1 与 SIB20，§5.9.1.1 原文）。专有信令逐条点名是单播/多播 CONNECTED 侧的心智（对照 m51 的 mrb-ToAddModList）。',
+        ref: '38.331#5.9.1.1' },
+      { q: '不在服务区还白收 MCCH 吗？',
+        a: '规范留了口子：表注明文（§5.9.2.2），UE 可用 USD 的 Target Service Area 或 SIB27 的 ISA 避免在 MBS 服务区外获取 MCCH——怎么做由 UE 实现定；多播侧同款表注在 §5.10.2.2。',
+        ref: '38.331#5.9.2.2' }
+    ] },
+    'm51:q2': { levels: [
+      { q: '广播 MRB 和单播 DRB 的配置来源差在哪？',
+        a: '单播 DRB 由网络专有 RRCReconfiguration 逐条配置（M6 的机器）；广播 MRB 的 PDCP/RLC 配置来自 MCCH 桌牌里的 **MRB-InfoBroadcast**（§5.9.3.3 原文），而且适用状态宽到 RRC_IDLE/INACTIVE/CONNECTED 三态（§5.9.3.1）——零专有信令，读到桌牌就自己动手建。',
+        ref: '38.331#5.9.3.3' },
+      { q: '已配置的广播 MRB 要改配置怎么办？',
+        a: '表注明文（§5.9.3.1）：已配置 MRB 的修改怎么做**由 UE 实现定**——规范不规定统一路径。工程常见解：重读 MCCH（获取是全量覆盖、无增量），按新配置做相应调整；MCCH 变更本身有修改周期+位图通知兜底（§5.9.1.3）。',
+        ref: '38.331#5.9.3.1' }
+    ] },
+    'm51:q4': { levels: [
+      { q: '为什么多播位图的 MSB 是 reserved？',
+        a: '对照着看就通：广播的 MSB=1 表示**新 MBS 业务开始**（§5.9.1.3）——广播面向全小区，新业务上线要广而告之；多播只伺候 **join 过的会话**，加入/建立在上层完成（§5.10.1.1），RRC 侧没有「新业务开始」的通知语义，MSB 自然保留（§5.10.1.3 原文：The MSB in the 2-bit bitmap is reserved）。',
+        ref: '38.331#5.10.1.3' },
+      { q: '漏收变更通知会怎样？',
+        a: '广播/多播同款风险，两处表注都写明由 **UE 实现定**（§5.9.2.2/§5.10.2.2）。兜底在机制本身：修改周期内 MCCH 按重复周期反复重发（§5.9.1.3），而获取是**全量覆盖、无增量**——任何时候重读一次就拿到最新配置，不会拿到半新半旧的账。',
+        ref: '38.331#5.9.1.3' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

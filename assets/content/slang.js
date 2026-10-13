@@ -64,7 +64,9 @@
     { t: 'TAU', alt: '跟踪区更新', mean: 'UE 挪窝换到新跟踪区后向核心网报到更新位置——负载过重时网络也会主动要求 UE 做 TAU（释放原因 loadBalancingTAURequired）。', qref: 'me' },
     { t: '星历', alt: 'ephemeris', mean: '卫星的轨道「时刻表」：SIB19 的 EphemerisInfo 按二选一带卫星位置速度（ECEF）或轨道参数（ECI），以 epochTime 为基准（两坐标系在纪元时刻对齐）——UE 推算卫星在哪、公共 TA 与卫星切换预告都挂在这份账上。', qref: 'm49' },
     { t: '同步参考', alt: 'SyncRef', mean: 'SL 直连里「跟谁对时」的账：候选三源——GNSS、小区、选中的 SyncRef UE——按 sl-SyncPriority（gnbEnb 还是 gnss 优先）与优先组排序；当前源 RSRP 跌破最小要求、GNSS 变不可靠或小区跟丢，就重跑搜索换源。', qref: 'm50' },
-    { t: 'SLSS', alt: 'sidelink SSB', mean: 'SL 直连的同步广播：SLSS 与 MIB-Sidelink 成对发，SLSSID 是身份暗号——跟 GNSS 发 0、跟 SyncRef UE 同号或 +336、其用 TA3 时隙则换 337；无源可跟时随机选但要排除 336/337。', qref: 'm50' }
+    { t: 'SLSS', alt: 'sidelink SSB', mean: 'SL 直连的同步广播：SLSS 与 MIB-Sidelink 成对发，SLSSID 是身份暗号——跟 GNSS 发 0、跟 SyncRef UE 同号或 +336、其用 TA3 时隙则换 337；无源可跟时随机选但要排除 336/337。', qref: 'm50' },
+    { t: 'G-RNTI', alt: '组播 RNTI', mean: '广播/多播业务的「叫号暗号」：桌牌（MCCH）里公布每个会话用哪个 G-RNTI 调度，UE 盯住这个号去收流；多播没数据时网络会通知停盯——省电就省在这一个号上。', qref: 'm51' },
+    { t: 'PTM', alt: '点对多点', mean: '一份信令发给一群人的发送方式：广播与多播都走 PTM，对照单播的 PTP（点对点）；PTM 接收同样能配 DRX 省电。', qref: 'm51' }
   ];
   g.RRC_SLANG = {
     get: function (i) { return S[i] || null; },
