@@ -405,15 +405,20 @@
       w.appendChild(tgl);
       w.appendChild(meta);
       /* 岗位快选：三张固定卷卡，点击直接开考（绕过域下拉）。
-         免费层兜底：当前授权下候选不足 12 题的卷置灰并说明——点了不开考、不再静默。 */
+         v20 题池扩充：全量授权开固定 24 题卷；免费层兜底两档——候选 12–23 题降为
+         免费层 12 题卷（免费池扩容后自动生效），不足 12 题置灰并说明——点了不开考、
+         不再静默。 */
       var jobRow = el('div', 'iv-job-row');
       JOB_PAPERS.forEach(function (jp) {
         var candN = p.filter(function (q) { return jp.domains.indexOf(q.domain) >= 0; }).length;
-        var enough = candN >= 12;
-        var card = el('button', 'iv-job-card' + (enough ? '' : ' dim'));
+        var enough = candN >= 24;
+        var free12 = !enough && candN >= 12;
+        var card = el('button', 'iv-job-card' + (enough || free12 ? '' : ' dim'));
         card.innerHTML = '<b>' + esc(jp.name) + '</b><span>' + esc(jp.blurb) + '</span>' +
-          '<i>' + (enough ? '固定 12 题卷 · 点击即开考' : '需解锁全部模块（当前可用 ' + candN + ' 题）') + '</i>';
-        if (enough) card.onclick = function () { startJobPaper(jp.key); };
+          '<i>' + (enough ? '固定 24 题卷 · 点击即开考'
+            : free12 ? '免费层 12 题卷 · 点击即开考'
+            : '需解锁全部模块（当前可用 ' + candN + ' 题）') + '</i>';
+        if (enough || free12) card.onclick = function () { startJobPaper(jp.key); };
         else card.disabled = true;
         jobRow.appendChild(card);
       });
@@ -458,13 +463,15 @@
       });
       return { qs: list, idx: 0, score: 0, endsAt: cfg.timer ? list.length * 60 : 0, tick: null, auto: false };
     }
-    /* 岗位模拟卷：按卷 seed 固定抽 12 题——同 key 每次开出同一套卷（选项顺序也一致） */
+    /* 岗位模拟卷：按卷 seed 固定抽题——全量授权 24 题、免费层降 12 题，
+       同 key 同授权每次开出同一套卷（选项顺序也一致） */
     function startJobPaper(key) {
       var jp = jobPaper(key);
       if (!jp) return;
       var cand = pool(store).filter(function (q) { return jp.domains.indexOf(q.domain) >= 0; });
-      if (cand.length < 12) { renderConfig(); return; }
-      exam = buildExam(shuffled(cand, mulberry32(jp.seed)).slice(0, 12));
+      var n = cand.length >= 24 ? 24 : (cand.length >= 12 ? 12 : 0);
+      if (!n) { renderConfig(); return; }
+      exam = buildExam(shuffled(cand, mulberry32(jp.seed)).slice(0, n));
       exam.paper = jp.name;
       view = 'exam';
       render();

@@ -5710,6 +5710,230 @@ function parseGrammar(cellText) {
   return { defs, notes, refs: [...refs] };
 }
 
+// ==== src/nas/gtpc.js ====
+// src/nas/gtpc.js — GTPv2-C（TS 29.274）消息级编解码（schema 驱动）。
+//
+// 头（§5.1）：[flags: V3|P|T|spare3][Message Type(1)][Message Length(2)]
+// [TEID(4) 若 T=1][Sequence Number(3)][Spare(1)]，头长恒为 4 的倍数（T=1 → 12，T=0 → 8）；
+// Message Length = 头前 4 八位组之外的本消息全部字节（TEID/Seq/Spare 计入）——不含
+// 内嵌消息：piggybacked 消息与前序 triggered response「shall have their own length」
+// 各自带各自长度（原文 ¶952/¶953 实证）。
+// IE 一律 TLIV（§8.2.1）：Type(1)+Length(2，不含 IE 自身前 4 八位组)+octet4(Spare|Instance)
+// +content(Length 八位组)。行身份 = (IE Type, Instance 低半八位组)——同一 IE 类型可带不同
+// Instance 在同消息多次出现（F-TEID 0-7 实证）；表行 Ins. 'VS'/空 = 实例通配（§6.1.3）。
+// 未知 IE 按长度跳过（§7.7.9 前向兼容，note 记录）；缺失必配行报错（§7.7.6）。
+// 分组 IE（§6.1.2）值 = 子 TLIV 串——解码按分组子行表递归展开挂 part.children（显示层
+// 用），值不透明回写（编码层零感知）；采样器经 gtpcTli 递归构值。
+// Piggybacking（§5.1/§7.7.0）：P=1 → 内嵌完整 GTPv2-C 消息（自带头与体）跟在本消息
+// 4+Message Length 处（¶944），内嵌消息 P 位应为 0（¶945，一级为限——观测到 P=1 记
+// warning 不再展开）。解码按 schema 类型表接续解码（piggy[] 返回，内嵌帧 hex 随行），
+// 重编码经 hdr.piggy + hdr.piggyHex 字节保真回嵌（内嵌消息不参与字段编辑）；无 schema
+// 诚实降级不展开。
+// 头的 TEID/Sequence Number 是连接状态不是表内 IE：解码在 hdr 中返回，编码经 hdr 参数
+// 还原（缺省 T=1/TEID=0/Seq=0——采样器与回环门禁用确定性零值）。
+
+function gtpPresence(p) {
+  const s = (p || '').trim();
+  if (/^M$/i.test(s)) return 'M';
+  if (/^C/i.test(s)) return 'C';
+  return 'O';
+}
+
+function gtpRowType(r) {
+  const s = String(r.iei ?? '').trim();
+  return /^\d+$/.test(s) ? parseInt(s, 10) : null;
+}
+
+function gtpcHeader(u8) {
+  if (!u8 || u8.length < 4) throw new Error('GTP-C 头截断');
+  const flags = u8[0];
+  const ver = flags >> 5;
+  if (ver !== 2) throw new Error(`GTP 版本非 2: ${ver}`);
+  const piggy = (flags >> 4) & 1;
+  const t = (flags >> 3) & 1;
+  const msgType = u8[1];
+  const msgLen = (u8[2] << 8) | u8[3];
+  let off = 4;
+  let teid = null;
+  if (t) {
+    if (u8.length < 8) throw new Error('GTP-C 头截断（TEID）');
+    teid = (((u8[4] << 24) | (u8[5] << 16) | (u8[6] << 8) | u8[7]) >>> 0);
+    off = 8;
+  }
+  if (off + 4 > u8.length) throw new Error('GTP-C 头截断（Seq/Spare）');
+  const seq = (u8[off] << 16) | (u8[off + 1] << 8) | u8[off + 2];
+  const spare = u8[off + 3];
+  off += 4;
+  return { flags, ver, piggy, t, msgType, msgLen, teid, seq, spare, off };
+}
+
+// TLIV 三件套（分组 IE 采样构值用）：type + instance 低半 + content
+function gtpcTli(type, ins, content) {
+  return Uint8Array.from([type & 255, (content.length >> 8) & 255, content.length & 255, ins & 0x0f, ...content]);
+}
+
+// TLIV 行扫描（消息体与分组子体共用）：rows 按表序匹配 (Type, Instance)——从上次命中
+// 行之后顺序找（乱序 M 行防御报错）；未知 IE 按长度跳过（§7.7.9）。
+function gtpcWalk(rows, u8, start, end) {
+  const notes = [];
+  const parts = [];
+  let off = start;
+  let ri = 0;
+  while (off + 4 <= end) {
+    const type = u8[off];
+    const len = (u8[off + 1] << 8) | u8[off + 2];
+    const instN = u8[off + 3] & 0x0f;
+    if (off + 4 + len > end) throw new Error(`IE 0x${type.toString(16)} 长度越界（${len}，余 ${end - off - 4}）`);
+    let match = -1;
+    for (let j = ri; j < rows.length; j++) {
+      if (gtpRowType(rows[j]) !== type) continue;
+      if (rows[j].ins != null && rows[j].ins !== instN) continue;
+      match = j;
+      break;
+    }
+    if (match < 0) {
+      notes.push(`未知 IE（Type ${type}，实例 ${instN}）按长度跳过（§7.7.9）`);
+      off += 4 + len;
+      continue;
+    }
+    for (let j = ri; j < match; j++) {
+      if (gtpPresence(rows[j].presence) === 'M' && gtpRowType(rows[j]) != null) {
+        throw new Error(`必配行缺失: ${rows[j].name}（IE Type ${type}/实例 ${instN} 先行）`);
+      }
+    }
+    parts.push({ row: rows[match], rowIdx: match, value: u8.slice(off + 4, off + 4 + len), ins: instN });
+    off += 4 + len;
+    ri = match + 1;
+  }
+  for (let j = ri; j < rows.length; j++) {
+    if (gtpPresence(rows[j].presence) === 'M' && gtpRowType(rows[j]) != null) {
+      throw new Error(`必配行缺失: ${rows[j].name}`);
+    }
+  }
+  // end < off 只见于畸形 msgLen（小于头变量部长度）——由上层「Message Length 与帧长不符」
+  // 注覆盖，这里不再报负数余量（审计轮合成畸形帧探针抓获）
+  if (off < end) notes.push(`表尾余 ${end - off} 字节未匹配任何行`);
+  return { parts, off, notes };
+}
+
+const gtpGroupOf = (schema, row) =>
+  schema && row && row.def && schema.ies[row.def] && schema.ies[row.def].grouped;
+
+// 分组 IE 子树解码：值按子行表再走一遍 TLIV 扫描，嵌套分组递归（显示层；值不透明回写）
+function gtpcDecGroup(schema, rows, u8) {
+  const walk = gtpcWalk(rows, u8, 0, u8.length);
+  const notes = [...walk.notes];
+  for (const p of walk.parts) {
+    const g = gtpGroupOf(schema, p.row);
+    if (!g || !p.value.length) continue;
+    const sub = gtpcDecGroup(schema, g, p.value);
+    p.children = sub.parts;
+    notes.push(...sub.notes.map((n) => `${p.row.name}: ${n}`));
+  }
+  return { parts: walk.parts, notes };
+}
+
+function gtpcInstByType(schema, type) {
+  for (const [name, insts] of Object.entries(schema.messages || {})) {
+    for (const inst of insts) if (inst.msgType === type) return { name, inst };
+  }
+  return null;
+}
+
+const gtpHex = (u8) => Array.from(u8).map((b) => b.toString(16).padStart(2, '0')).join('');
+
+function decGtpcMsg(inst, u8, schema = null, depth = 0) {
+  const h = gtpcHeader(u8);
+  const notes = [];
+  if (inst.msgType != null && h.msgType !== inst.msgType) {
+    throw new Error(`消息类型不匹配: ${h.msgType} ≠ ${inst.msgType}`);
+  }
+  const end = Math.min(u8.length, 4 + h.msgLen);
+  const walk = gtpcWalk(inst.rows || [], u8, h.off, end);
+  const parts = walk.parts;
+  notes.push(...walk.notes);
+  if (schema) {
+    for (const p of parts) {
+      const g = gtpGroupOf(schema, p.row);
+      if (!g || !p.value.length) continue;
+      const sub = gtpcDecGroup(schema, g, p.value);
+      p.children = sub.parts;
+      notes.push(...sub.notes.map((n) => `${p.row.name}: ${n}`));
+    }
+  }
+  const hdr = { t: h.t, teid: h.teid, seq: h.seq, piggy: h.piggy, spare: h.spare };
+  const piggy = [];
+  if (h.piggy && depth > 0) {
+    notes.push('内嵌消息 P=1 违反 §5.1（piggybacked 消息 P 位应为 0）——不再展开其内嵌');
+  } else if (h.piggy) {
+    // P=1：内嵌完整 GTPv2-C 消息跟在本消息 4+Message Length 处（§5.1 ¶944）
+    if (!schema) {
+      notes.push('P=1（piggybacked 内嵌消息）——无 schema 未展开，尾部字节保留');
+    } else {
+      let poff = end;
+      if (u8.length - poff < 8) {
+        notes.push(`P=1 但内嵌区仅 ${u8.length - poff} 字节，不足完整 GTP-C 头，保留原样`);
+      }
+      while (poff + 8 <= u8.length) {
+        let h2;
+        try {
+          h2 = gtpcHeader(u8.subarray(poff));
+        } catch {
+          notes.push(`内嵌区 0x${poff.toString(16)} 起不足完整 GTP-C 头，余 ${u8.length - poff} 字节保留原样`);
+          break;
+        }
+        if (h2.ver !== 2) {
+          notes.push(`内嵌区 0x${poff.toString(16)} 起非 GTPv2 头（版本 ${h2.ver}），余 ${u8.length - poff} 字节保留原样`);
+          break;
+        }
+        if (poff + 4 + h2.msgLen > u8.length) {
+          notes.push(`内嵌消息（类型 ${h2.msgType}）长度越界（${h2.msgLen}），余 ${u8.length - poff} 字节保留原样`);
+          break;
+        }
+        const span = 4 + h2.msgLen;
+        const found = gtpcInstByType(schema, h2.msgType);
+        if (!found) {
+          notes.push(`内嵌消息类型 ${h2.msgType} 无 schema 实例，${span} 字节按长度跳过`);
+          hdr.piggyHex = (hdr.piggyHex || '') + gtpHex(u8.subarray(poff, poff + span));
+          poff += span;
+          continue;
+        }
+        const sub = decGtpcMsg(found.inst, u8.subarray(poff, poff + span), schema, 1);
+        piggy.push({ name: found.name, msgType: h2.msgType, ...sub, hex: gtpHex(u8.subarray(poff, poff + span)) });
+        hdr.piggyHex = (hdr.piggyHex || '') + gtpHex(u8.subarray(poff, poff + span));
+        poff += span;
+      }
+      if (poff !== u8.length) notes.push(`内嵌区尾余 ${u8.length - poff} 字节未构成完整 GTP-C 消息，保留原样`);
+    }
+  } else if (u8.length !== 4 + h.msgLen) {
+    notes.push(`Message Length ${h.msgLen} 与帧长 ${u8.length - 4} 不符，按较小者解码`);
+  }
+  return { parts, consumed: walk.off, warnings: notes, hdr, piggy };
+}
+
+function encGtpcMsg(inst, parts = [], hdr = {}) {
+  const t = hdr.t != null ? hdr.t : 1;
+  const teid = (hdr.teid || 0) >>> 0;
+  const seq = (hdr.seq || 0) >>> 0;
+  // P=1 重编码：内嵌消息字节保真回嵌（§5.1 ¶945 内嵌 P 位为 0 由解码侧保证）
+  const piggyHex = hdr.piggy && hdr.piggyHex ? String(hdr.piggyHex).replace(/[^0-9a-f]/gi, '') : '';
+  if (piggyHex.length % 2) throw new Error('piggybacked 帧 hex 长度须为偶数');
+  const body = [];
+  for (const p of parts) {
+    const r = inst.rows[p.rowIdx];
+    if (!r || r.iei == null) continue;
+    const content = p.value instanceof Uint8Array ? p.value : Uint8Array.from(p.value ?? []);
+    body.push(...gtpcTli(parseInt(r.iei, 10), p.ins != null ? p.ins : (r.ins != null ? r.ins : 0), content));
+  }
+  const msgLen = body.length + 4 + (t ? 4 : 0); // §5.1 ¶952：不含内嵌消息（各自头带各自长度）
+  const head = [(2 << 5) | (piggyHex ? 0x10 : 0) | (t ? 0x08 : 0), inst.msgType != null ? inst.msgType & 255 : 0, (msgLen >> 8) & 255, msgLen & 255];
+  if (t) head.push((teid >> 24) & 255, (teid >> 16) & 255, (teid >> 8) & 255, teid & 255);
+  head.push((seq >> 16) & 255, (seq >> 8) & 255, seq & 255, 0);
+  const out = [...head, ...body];
+  for (let i = 0; i < piggyHex.length; i += 2) out.push(parseInt(piggyHex.slice(i, i + 2), 16));
+  return Uint8Array.from(out);
+}
+
 // ==== src/nas/codec.js ====
 // src/nas/codec.js — M4：NAS 消息级编解码（schema 驱动，行序扫描）。
 //
@@ -9453,7 +9677,7 @@ if (args.schema && args.out) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
@@ -9654,7 +9878,7 @@ function renderShell() {
 <header class="topbar">
   <div class="logo">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1" y="1" width="7" height="7" rx="1.5" fill="#0f62fe"/><rect x="10" y="1" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="1" y="10" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="10" y="10" width="7" height="7" rx="1.5" fill="#0f62fe"/></svg>
-    RRC&nbsp;Workbench <span class="dim">v1.16.0</span>
+    RRC&nbsp;Workbench <span class="dim">v1.16.1</span>
   </div>
   <nav class="tabs">
     <button class="tab on" data-page="encode">帧生成器</button>
@@ -9665,7 +9889,7 @@ function renderShell() {
     <button class="tab" data-page="library">规范库</button>
     <button class="tab" data-page="about">关于</button>
   </nav>
-  <span class="ver">v1.16.0 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
+  <span class="ver">v1.16.1 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
 </header>
 <main>
   <section class="page on" id="page-encode"></section>
@@ -9676,7 +9900,7 @@ function renderShell() {
   <section class="page" id="page-library"></section>
   <section class="page" id="page-about"></section>
 </main>
-<div class="foot">RRC Workbench v1.16.0 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
+<div class="foot">RRC Workbench v1.16.1 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => goto(t.dataset.page)));
 }
 function goto(id) {
