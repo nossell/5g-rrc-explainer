@@ -18,8 +18,9 @@
      数组（默认树=38.331）或对象 {'': [...], '38.423': [...], ...}；未注入索引的规范跳过存在性。 */
   var clauseIndex = null;
   function isClauseRef(s) {
-    /* 允许末段字母后缀（如 5.3.3.1a / 5.7.3b——语料条款树中真实存在） */
-    return typeof s === 'string' && (/^\d+(\.\d+)+[A-Za-z]?$/.test(s) || /^\d{2}\.\d{3}(-\d+)?#\d+(\.\d+)+[A-Za-z]?$/.test(s));
+    /* 允许任意段字母后缀（如 5.3.3.1a / 5.7.3b / 5.5a.1.3——语料条款树中真实存在；
+       v19：字母后缀从仅末段放宽到每一段——38.331 §5.5a/§5.7.3b 系子条款字母在中段） */
+    return typeof s === 'string' && (/^\d+(\.\d+[A-Za-z]?)+$/.test(s) || /^\d{2}\.\d{3}(-\d+)?#\d+(\.\d+[A-Za-z]?)+$/.test(s));
   }
   function clauseMissing(ref) {
     if (clauseIndex == null) return false;

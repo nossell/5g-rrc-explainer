@@ -68,7 +68,8 @@
     { t: 'G-RNTI', alt: '组播 RNTI', mean: '广播/多播业务的「叫号暗号」：桌牌（MCCH）里公布每个会话用哪个 G-RNTI 调度，UE 盯住这个号去收流；多播没数据或会话去激活时网络会通知停盯——省电就省在这一个号上。', qref: 'm51' },
     { t: 'PTM', alt: '点对多点', mean: '一份信令发给一群人的发送方式：广播与多播都走 PTM，对照单播的 PTP（点对点）；PTM 接收同样能配 DRX 省电。', qref: 'm51' },
     { t: 'IAB', alt: '集成接入回传/无线回传', mean: '给基站装无线尾巴：光纤断了的地方用接入链兼跑回程——IAB-node 靠 IAB-MT（UE 功能的子集）接入 donor、靠 IAB-DU 服务下游节点与 UE；现场聊「无线回传」「回程没光缆」的部署，多半就是它。', qref: 'm52' },
-    { t: 'BH RLF', alt: '回程断链', mean: 'IAB-MT 侧回程无线链失败：上游路径断了就换父节点重建立恢复——同 CU 下换父叫 intra-CU 恢复、跨 CU 恢复会诞生 boundary 节点；恢复失败的节点按无序退役（disorderly release）处理。', qref: 'm52' }
+    { t: 'BH RLF', alt: '回程断链', mean: 'IAB-MT 侧回程无线链失败：上游路径断了就换父节点重建立恢复——同 CU 下换父叫 intra-CU 恢复、跨 CU 恢复会诞生 boundary 节点；恢复失败的节点按无序退役（disorderly release）处理。', qref: 'm52' },
+    { t: 'MDT', alt: '最小化路测/打点数据', mean: '让 UE 自己当路测员：连接态下发配置、空闲/非激活态默默打点记账，网络随后取账——现场聊「路测数据从哪来」「打点日志」多半就是它；账本有 48 小时保留窗，取数别拖。', qref: 'm54' }
   ];
   g.RRC_SLANG = {
     get: function (i) { return S[i] || null; },
