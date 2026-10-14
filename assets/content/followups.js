@@ -474,7 +474,7 @@
         a: '靠流量卸载（offload）：新 CU 先把 RRC 配置发给 IAB-MT——新 TNL 地址/新拓扑的 BAP 地址/默认 BH RLC channel 与 default BAP routing ID（§8.17.4 步骤 14 原文转述），随后经 IAB Transport Migration Management 系列消息把流量逐批卸载到新路径（8.17.3.1 的 14-20 步）——F1 端点留在源 CU 不动，换的只是路。',
         ref: '38.401#8.17.4' },
       { q: '卸载过去的流量还能搬回来吗？',
-        a: '能。全部撤销（full revoking）：新 CU 对 boundary IAB-MT 发起反方向的切换准备（XnAP Handover Preparation），MT 回到初始 CU 后流量重回原路径（§8.17.4 原文转述）；源 CU 也可经 IAB TRANSPORT MIGRATION MANAGEMENT REQUEST 申请全部或部分释放已卸载流量——按 traffic 逐批回收。',
+        a: '能。课程 b3 的账本：卸载本身可逐批释放乃至全撤。全撤通道是反向切换——boundary IAB-MT 被切回初始 CU 后，其流量沿原路径重新路由（§8.17.4 原文）；逐批回收则经 IAB Transport Migration Management 系列按 traffic 申请释放（§8.17.3.1）。',
         ref: '38.401#8.17.4' }
     ] },
   };
