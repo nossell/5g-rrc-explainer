@@ -5814,10 +5814,12 @@ function planVhRun(runRows) {
 // warnings：宽容处理的提示串（可选行 IEI 命中但长度越界按缺席等），空数组 = 无。
 // 条件/可选的非 IEI 定长 V 行（presence C/O）线缆级不可探测——按包含数递增枚举组合
 // （cap 2^6），首个整流成功的组合为准（最小包含优先）。
-function decMsg(inst, bytes, spec = '24501') {
+// schema（可选）：29274 分支用于分组 IE 子树展开与 piggyback 内嵌消息类型反查（src/nas/gtpc.js）；
+// 其余 spec 忽略。
+function decMsg(inst, bytes, spec = '24501', schema = null) {
   const u8 = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
   // GTPv2-C（29.274）：头与 IE 框架不同（TLIV/Instance），派发专用实现（src/nas/gtpc.js）
-  if (spec === '29274') return decGtpcMsg(inst, u8);
+  if (spec === '29274') return decGtpcMsg(inst, u8, schema);
   // 歧义行：非头部的 C/O 定长 V 行
   const amb = [];
   for (let ri = 0; ri < inst.rows.length; ri++) {
@@ -8718,6 +8720,17 @@ function gtpTranslateRows(rows, ctx, problems) {
     if (!typeClean || /^note\b/i.test(typeClean)) continue;
     let e = ctx.keyMap.get(GTP_KEY(typeClean));
     if (!e) e = gtpFuzzyEntry(typeClean, ctx.entries); // 拼写容差（唯一命中才接受）
+    if (!e) {
+      // docx 格内粘词伪影：'Local Distinguished Name (LDN)Name'（Modify Bearer Response
+      // 'PGW LDN' 行，j30-k00 五版本同位置同形态）。直查/模糊全落后截到最后一个右括号
+      // 重试精确 + 模糊（k00 叠加形态：§8.1 本身带 'Distiguished' 笔误、行格再粘词——
+      // 截断后仍需模糊唯一命中）。合法名 'H(e)NB …' 直查即中，不受影响。
+      const pm = /^(.*\))/.exec(typeClean);
+      if (pm && pm[1] !== typeClean) {
+        e = ctx.keyMap.get(GTP_KEY(pm[1])) || null;
+        if (!e) e = gtpFuzzyEntry(pm[1], ctx.entries);
+      }
+    }
     if (!e) problems.push(`IE 类型未识别: ${typeClean}（${name || cond.slice(0, 30)}）`);
     const ref = e && e.ref ? e.ref : null;
     out.push({
@@ -9641,7 +9654,7 @@ function renderShell() {
 <header class="topbar">
   <div class="logo">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1" y="1" width="7" height="7" rx="1.5" fill="#0f62fe"/><rect x="10" y="1" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="1" y="10" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="10" y="10" width="7" height="7" rx="1.5" fill="#0f62fe"/></svg>
-    RRC&nbsp;Workbench <span class="dim">v1.15.0</span>
+    RRC&nbsp;Workbench <span class="dim">v1.16.0</span>
   </div>
   <nav class="tabs">
     <button class="tab on" data-page="encode">帧生成器</button>
@@ -9652,7 +9665,7 @@ function renderShell() {
     <button class="tab" data-page="library">规范库</button>
     <button class="tab" data-page="about">关于</button>
   </nav>
-  <span class="ver">v1.15.0 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
+  <span class="ver">v1.16.0 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
 </header>
 <main>
   <section class="page on" id="page-encode"></section>
@@ -9663,7 +9676,7 @@ function renderShell() {
   <section class="page" id="page-library"></section>
   <section class="page" id="page-about"></section>
 </main>
-<div class="foot">RRC Workbench v1.15.0 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
+<div class="foot">RRC Workbench v1.16.0 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => goto(t.dataset.page)));
 }
 function goto(id) {
@@ -11307,11 +11320,20 @@ function nasBuildParts() {
   return parts;
 }
 
+// 29274：重编码回传解码时的 TEID/Seq/piggyback（连接状态不是表内 IE，见 gtpc.js）。
+// 防跨消息泄漏：当前选择与解码上下文（spec/ver/msg/instIdx）不一致时不回传。
+function nasGtpcHdr() {
+  const c = nasState._decodedCtx;
+  if (!c || c.hdr == null) return undefined;
+  if (c.spec !== nasState.spec || String(c.ver) !== String(nasState.ver) || c.msg !== nasState.msg || c.instIdx !== nasState.instIdx) return undefined;
+  return c.hdr;
+}
+
 function nasEncode() {
   const inst = nasCurInst();
   if (!inst) return;
   try {
-    const bytes = encMsg(inst, nasBuildParts(), nasState.spec);
+    const bytes = encMsg(inst, nasBuildParts(), nasState.spec, nasGtpcHdr());
     $('nasHexOut').textContent = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
   } catch (e) {
     $('nasHexOut').textContent = '';
@@ -11407,18 +11429,36 @@ function nasValueHtml(r, value) {
   return raw + (sem.map(([k, v]) => `<div style="font:400 11px var(--sans);color:#198038">${k}: ${v}</div>`).join('')) + fieldRows;
 }
 
+// 29274 解码行渲染：分组 IE 子树（p.children 递归缩进）+ piggyback 内嵌消息段
+function nasGtpcPartRows(p, depth, indent0 = 0) {
+  const pad = 14 * (depth + indent0);
+  const head = depth
+    ? `<tr><td style="padding:2px 3px;color:var(--t4)">↳</td><td style="padding:2px 3px;padding-left:${14 + pad}px">└ ${p.row.name} <span style="color:var(--t4)">（Type ${p.row.iei}/实例 ${p.ins ?? '—'}）</span></td><td style="padding:2px 3px">${nasValueHtml(p.row, p.value)}</td></tr>`
+    : `<tr><td style="padding:3px;color:var(--t4)">${p.rowIdx}</td><td style="padding:3px;padding-left:${pad}px">${p.row.name}</td><td style="padding:3px">${nasValueHtml(p.row, p.value)}</td></tr>`;
+  return head + (p.children || []).map((c) => nasGtpcPartRows(c, depth + 1, indent0)).join('');
+}
+
+function nasGtpcPiggyRows(piggy) {
+  return (piggy || []).map((pg) =>
+    `<tr><td colspan="3" style="padding:7px 3px 2px;font:600 11.5px var(--sans);color:var(--t3)">▸ 内嵌消息（piggybacked）：${pg.name}（帧 ${pg.hex.length / 2} 字节，重编码字节保真回嵌）</td></tr>` +
+    pg.parts.map((p) => nasGtpcPartRows(p, 0, 1)).join('') +
+    ((pg.warnings || []).length ? `<tr><td colspan="3" style="padding:2px 3px;font:400 11px var(--sans);color:#f1c21b">${pg.warnings.map((s) => `⚠ ${s}`).join('<br>')}</td></tr>` : '')
+  ).join('');
+}
+
 function nasDecodeFrom(hex) {
   const inst = nasCurInst();
   if (!inst) return;
   try {
-    const { parts, warnings } = decMsg(inst, OCT(hex), nasState.spec);
+    const { parts, warnings, hdr, piggy } = decMsg(inst, OCT(hex), nasState.spec, nasCur());
     nasState.decoded = parts;
-    nasState._decodedCtx = { inst, spec: nasState.spec, ver: nasState.ver, msg: nasState.msg, instIdx: nasState.instIdx, hex, parts, warnings };
+    nasState._decodedCtx = { inst, spec: nasState.spec, ver: nasState.ver, msg: nasState.msg, instIdx: nasState.instIdx, hex, parts, warnings, hdr, piggy: piggy || [] };
     const smsSem = smsMsgSemantics(parts);
     const l2pl = l2plCheck(inst, OCT(hex), parts);
     $('nasDecOut').innerHTML = `<table style="width:100%;font:11.5px var(--mono);border-collapse:collapse">
       <tr style="color:var(--t4)"><th style="text-align:left;padding:3px">行</th><th style="text-align:left;padding:3px">IE</th><th style="text-align:left;padding:3px">值</th></tr>
-      ${parts.map((p) => `<tr><td style="padding:3px;color:var(--t4)">${p.rowIdx}</td><td style="padding:3px">${p.row.name}</td><td style="padding:3px">${nasValueHtml(p.row, p.value)}</td></tr>`).join('')}
+      ${parts.map((p) => nasGtpcPartRows(p, 0)).join('')}
+      ${(piggy || []).length ? nasGtpcPiggyRows(piggy) : ''}
       ${(warnings || []).length ? `<tr><td colspan="3" style="padding:3px;font:400 11px var(--sans);color:#f1c21b">${warnings.map((s) => `⚠ ${s}`).join('<br>')}</td></tr>` : ''}
       ${smsSem.length ? `<tr><td colspan="3" style="padding:3px;font:400 11px var(--sans);color:#198038">${smsSem.map((s) => `📩 ${s}`).join('<br>')}</td></tr>` : ''}
       ${l2pl.length ? `<tr><td colspan="3" style="padding:3px;font:400 11px var(--sans);color:var(--t3)">${l2pl.map((s) => `📏 ${s}`).join('<br>')}</td></tr>` : ''}
@@ -11476,6 +11516,27 @@ function nasValueText(r, value) {
   return sem.length ? `${raw}（${sem.join('; ')}）` : raw;
 }
 
+// ---- NAS 报告导出（.md/.json；与 Release Diff 导出同一 ingestDownload 通道）----------
+// 值语义文本版（nasValueHtml 的 md 对应物）：raw hex + APN/PLMN + 位布局字段展开
+// 29274 导出件：分组 IE 子树（children 递归）与 piggyback 内嵌消息（json+md 同构）
+const gtpcChildJson = (c) => ({
+  ie: c.row.name, type: c.row.iei || '', instance: c.ins ?? null,
+  value: Array.from(c.value).map((b) => b.toString(16).padStart(2, '0')).join(''),
+  semantics: nasValueText(c.row, c.value) === Array.from(c.value).map((b) => b.toString(16).padStart(2, '0')).join('') ? undefined : nasValueText(c.row, c.value),
+  children: (c.children || []).map(gtpcChildJson),
+});
+const gtpcPartJson = (p) => ({
+  row: p.rowIdx, ie: p.row.name, iei: p.row.iei || '', format: p.row.format || '', presence: p.row.presence || '',
+  ref: p.row.ref || undefined, instance: p.ins ?? undefined,
+  value: Array.from(p.value).map((b) => b.toString(16).padStart(2, '0')).join(''),
+  semantics: nasValueText(p.row, p.value) === Array.from(p.value).map((b) => b.toString(16).padStart(2, '0')).join('') ? undefined : nasValueText(p.row, p.value),
+  children: (p.children || []).length ? p.children.map(gtpcChildJson) : undefined,
+});
+const gtpcChildMd = (c, depth) => [
+  `| ↳ | ${'&nbsp;'.repeat(depth * 2)}└ ${c.row.name.replace(/\|/g, '\\|')}（Type ${c.row.iei}/实例 ${c.ins ?? '—'}） | ${c.row.format || ''} | ${nasValueText(c.row, c.value).replace(/\|/g, '\\|')} |`,
+  ...(c.children || []).flatMap((cc) => gtpcChildMd(cc, depth + 1)),
+];
+
 function nasExportDecode(format) {
   const ctx = nasState._decodedCtx;
   if (!ctx) { inlineMsg('nasDecOut', '还没有成功解码的帧——先解码再导出。'); return; }
@@ -11492,7 +11553,13 @@ function nasExportDecode(format) {
         presence: p.row.presence || '', ref: p.row.ref || undefined,
         value: p.value == null ? null : p.value instanceof Uint8Array ? Array.from(p.value).map((b) => b.toString(16).padStart(2, '0')).join('') : p.value,
         semantics: nasValueText(p.row, p.value) === (p.value == null ? '—' : Array.from(p.value).map((b) => b.toString(16).padStart(2, '0')).join('')) ? undefined : nasValueText(p.row, p.value),
+        children: (p.children || []).length ? p.children.map(gtpcChildJson) : undefined,
       })),
+      piggybacked: (ctx.piggy || []).length ? ctx.piggy.map((pg) => ({
+        message: pg.name, msgType: pg.msgType, frameHex: pg.hex,
+        warnings: pg.warnings?.length ? pg.warnings : undefined,
+        parts: pg.parts.map(gtpcPartJson),
+      })) : undefined,
     };
     ingestDownload(`nas-decode-${ctx.spec}-${ctx.ver || 'x'}-${stamp}.json`, JSON.stringify(doc, null, 1), 'application/json');
     return;
@@ -11506,7 +11573,22 @@ function nasExportDecode(format) {
     '',
     '| 行 | IE | 格式 | 值 |',
     '|---:|---|---|---|',
-    ...ctx.parts.map((p) => `| ${p.rowIdx} | ${p.row.name.replace(/\|/g, '\\|')} | ${p.row.format || ''} | ${nasValueText(p.row, p.value).replace(/\|/g, '\\|')} |`),
+    ...ctx.parts.flatMap((p) => [
+      `| ${p.rowIdx} | ${p.row.name.replace(/\|/g, '\\|')} | ${p.row.format || ''} | ${nasValueText(p.row, p.value).replace(/\|/g, '\\|')} |`,
+      ...(p.children || []).flatMap((c) => gtpcChildMd(c, 1)),
+    ]),
+    ...(ctx.piggy || []).length ? ['', '## 内嵌消息（piggybacked）', ...ctx.piggy.flatMap((pg) => [
+      '',
+      `**${pg.name}**（类型 ${pg.msgType}，帧 \`${pg.hex}\`）`,
+      '',
+      '| 行 | IE | 格式 | 值 |',
+      '|---:|---|---|---|',
+      ...pg.parts.flatMap((p) => [
+        `| ${p.rowIdx} | ${p.row.name.replace(/\|/g, '\\|')} | ${p.row.format || ''} | ${nasValueText(p.row, p.value).replace(/\|/g, '\\|')} |`,
+        ...(p.children || []).flatMap((c) => gtpcChildMd(c, 1)),
+      ]),
+      ...(pg.warnings || []).map((s) => `> ⚠ ${s}`),
+    ])] : [],
     ...(ctx.warnings?.length ? ['', ...ctx.warnings.map((s) => `> ⚠ ${s}`)] : []),
     ...(smsMsgSemantics(ctx.parts).length ? ['', ...smsMsgSemantics(ctx.parts).map((s) => `> 📩 ${s}`)] : []),
     '',
