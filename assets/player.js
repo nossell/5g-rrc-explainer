@@ -639,7 +639,7 @@
         '<div class="g-actions">' +
         '<button class="btn primary" data-act="unlock">完整版解锁码</button>' +
         '<a class="btn" href="index.html">返回目录</a></div>' +
-        '<p class="g-note">免费层（Free Edition）：本站开放 M0/M1 两课与全部工具页；M2–M54 共 53 个模块属完整版，获取方式见仓库 README。</p>';
+        '<p class="g-note">免费层（Free Edition）：本站开放 M0–M2 三课与全部工具页；M3–M54 共 52 个模块属完整版，获取方式见仓库 README。</p>';
       w.appendChild(c); root.appendChild(w);
       c.querySelector('[data-act="unlock"]').onclick = function () {
         store.setLicense({ demo: true });
@@ -799,7 +799,7 @@
       function renderLic() {
         lic = store.license();
         licCard.innerHTML =
-          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0/M1 与全部工具页；完整版（M2–M54）获取方式见 README。</div></div>' +
+          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0–M2 与全部工具页；完整版（M3–M54）获取方式见 README。</div></div>' +
           '<div style="display:flex;gap:8px;align-items:center">' +
           '<span class="license-state' + (lic.demo ? ' on' : '') + '">' + (lic.demo ? '完整版用户' : '免费层') + '</span>' +
           '<button class="btn sm" data-act="export-progress" title="生成 Markdown 学习进度单（完成态/测验分/下一步建议）">导出学习进度</button>' +
@@ -863,7 +863,7 @@
       headRow.appendChild(expandBtn);
       root.appendChild(headRow);
       root.appendChild(viewbar);
-      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程与 M1 连接建立 + 全部工具页；M2–M54 属完整版。'));
+      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程、M1 连接建立与 M2 系统消息 + 全部工具页；M3–M54 属完整版。'));
       root.appendChild(tools);
       root.appendChild(pathView); pathView.style.display = 'none';
 
