@@ -106,7 +106,7 @@
         '- 条款锚点：§' + (q.ref || '—'),
         '- 复习：' + ((r.due || 0) <= now ? '**今日到期**' : fmtDate(r.due)) + '（间隔 iv=' + (r.iv || 0) + ' 天）', '');
     });
-    L.push('---', '间隔复习规则：答对间隔翻倍（1→2→4→8 天），连对三轮自动出本。', '');
+    L.push('---', '间隔复习规则：答对间隔翻倍（1→2→4→8 天），连过四个间隔自动出本。', '');
     return L.join('\n');
   }
   function buildProgressMarkdown(store) {
@@ -317,6 +317,7 @@
 
     /* ---- 配置视图 ---- */
     var cfg = { domain: 'all', count: 5, timer: timerOn };
+    var cfgNotice = null; /* 一次性提示：下次 render() 进配置视图时显示并清除 */
     function renderConfig() {
       var p = pool(store);
       var domains = [];
@@ -326,6 +327,7 @@
       var missN = loadMisses().length;
       var dueN = dueRows().length;
       var w = el('div', 'iv-config');
+      if (cfgNotice) { w.appendChild(el('p', 'iv-meta', '⚠️ ' + esc(cfgNotice))); cfgNotice = null; }
       var scope = el('select', 'iv-scope');
       scope.innerHTML = '<option value="all">全部学习域</option>' +
         domains.map(function (d) { return '<option value="' + esc(d) + '">' + esc(d) + '</option>'; }).join('');
@@ -378,7 +380,7 @@
         '题库共 <b>' + pool(Object.assign({}, store, { license: function () { return { demo: true }; } })).length + '</b> 题' +
         '（当前可用 <b>' + p.length + '</b> 题' + (demo ? '' : '——演示解锁后全部开放') + '）' +
         (missN ? ' · 错题本留存 <b>' + missN + '</b> 题' + (dueN ? '（<b>' + dueN + '</b> 题今日到期）' : '（今日无到期）') : '') +
-        '。随机抽题、选项洗牌，答完即出解析与条款出处；错题按间隔复习（1→2→4→8 天，连对三轮出本）。');
+        '。随机抽题、选项洗牌，答完即出解析与条款出处；错题按间隔复习（1→2→4→8 天，连过四个间隔出本）。');
       var actions = el('div', 'iv-actions');
       var go = el('button', 'btn primary', '开始面试');
       go.onclick = function () { start(); };
@@ -464,13 +466,13 @@
       return { qs: list, idx: 0, score: 0, endsAt: cfg.timer ? list.length * 60 : 0, tick: null, auto: false };
     }
     /* 岗位模拟卷：按卷 seed 固定抽题——全量授权 24 题、免费层降 12 题，
-       同 key 同授权每次开出同一套卷（选项顺序也一致） */
+       同 key 同授权每次开出同一套题与题序（选项顺序随机打乱，防背选项） */
     function startJobPaper(key) {
       var jp = jobPaper(key);
       if (!jp) return;
       var cand = pool(store).filter(function (q) { return jp.domains.indexOf(q.domain) >= 0; });
       var n = cand.length >= 24 ? 24 : (cand.length >= 12 ? 12 : 0);
-      if (!n) { renderConfig(); return; }
+      if (!n) { cfgNotice = '当前授权下「' + jp.name + '」可用题数不足 12 题——解锁对应课程后可开考'; view = 'config'; render(); return; }
       exam = buildExam(shuffled(cand, mulberry32(jp.seed)).slice(0, n));
       exam.paper = jp.name;
       view = 'exam';
@@ -576,7 +578,7 @@
         if (right) {
           if (i < 0) return;
           var iv = (miss[i].iv || 0) ? Math.min(miss[i].iv * 2, 32) : 1;
-          if (iv >= 16) { miss.splice(i, 1); return; } /* 连对三轮，毕业 */
+          if (iv >= 16) { miss.splice(i, 1); return; } /* iv 到 16 天档（第 5 次答对），毕业 */
           miss[i].iv = iv;
           miss[i].due = Date.now() + iv * DAY;
         } else {
@@ -649,7 +651,7 @@
       }
       var dueN = dueRows().length;
       if (rows.length >= 200) w.appendChild(el('p', 'iv-meta', '⚠️ 错题本已满 200 条上限——新错题会<b>挤出最旧的记录</b>；建议先用"清空错题本"或间隔复习消化几条再继续。'));
-      w.appendChild(el('p', 'iv-meta', '留存 <b>' + rows.length + '</b> 题' + (dueN ? '（<b>' + dueN + '</b> 题今日到期）' : '（今日无到期，间隔复习中）') + '。答对升间隔（1→2→4→8 天），连对三轮自动出本。'));
+      w.appendChild(el('p', 'iv-meta', '留存 <b>' + rows.length + '</b> 题' + (dueN ? '（<b>' + dueN + '</b> 题今日到期）' : '（今日无到期，间隔复习中）') + '。答对升间隔（1→2→4→8 天），连过四个间隔自动出本。'));
       rows.slice(0, 50).forEach(function (r) {
         var q = p.filter(function (x) { return x.qid === r.qid; })[0];
         var dueTag = '';
