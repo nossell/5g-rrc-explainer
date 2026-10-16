@@ -6433,10 +6433,39 @@ function layoutUnpack(octets, bytes, framed = false) {
   const fields = {};
   const warnings = [];
   if (typeof bytes === 'number') {
+    // type-1 TV 旧形态容差：24.008/44.018 自带表把 IEI 半字段与内容写在同一整八位组行
+    //（首域占高位半八位组 lo≥5、余域 hi≤4）——与整八位组 IEI 行（isIeiRow）同理在消费
+    // 侧剥离，余域按基 5 重排为半八位组行（与建库侧 fillSee24301 的 TV/1 适配同构），
+    // 否则数值路径只能抛「仅适用于半八位组布局」而整行失明。仅 TV1 行触发本路径（codec
+    // 已消费高位 IEI），位置判据足够、不看域名；几何不一致（bits≠hi−lo+1、重排后超 4 位
+    // ——bitsanchor 走查伪影，台账在案）不容差，保持抛错（诚实失明优于垃圾值）。
+    // 数值路径仅在 VH（framed=false）/ TV1（framed=true）行触发；本容差只对 framed
+    //（TV1——codec 已消费高位 IEI）生效，VH 行走规范半八位组布局不容差。
+    if (framed) for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.half) continue;
+      const f0 = r.fields[0];
+      if (!f0 || (f0.lo || 8) < 5) continue;
+      const rest = r.fields.slice(1);
+      if (!rest.length || !rest.every((f) => (f.hi || 8) <= 4)) continue;
+      if (!rest.every((f) => f.bits === f.hi - f.lo + 1)) continue;
+      let prevLo = 5;
+      let total = 0;
+      let ok = true;
+      const nf = rest.map((f) => {
+        const pre = prevLo - f.hi - 1;
+        if (pre < 0) ok = false;
+        prevLo = f.lo;
+        total += Math.max(pre, 0) + f.bits;
+        return { name: f.name, bits: f.bits, hi: f.hi, lo: f.lo, ...(pre > 0 ? { pre } : {}) };
+      });
+      if (!ok || total > 4) continue;
+      rows[i] = { ...r, half: true, fields: nf };
+    }
     let acc = bytes & 0x0f;
-    let shift = 4;
     for (const row of rows) {
       if (!row.half) throw new Error('布局反解：数值输入仅适用于半八位组布局');
+      let shift = 4; // 每行独立解读同一 nibble（nibble 只承载一个半八位组；多行=同八位组变体伪影，逐行覆盖）
       for (const f of row.fields) {
         shift -= f.pre || 0;
         if (f.pre) {
@@ -9878,7 +9907,7 @@ function renderShell() {
 <header class="topbar">
   <div class="logo">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1" y="1" width="7" height="7" rx="1.5" fill="#0f62fe"/><rect x="10" y="1" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="1" y="10" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="10" y="10" width="7" height="7" rx="1.5" fill="#0f62fe"/></svg>
-    RRC&nbsp;Workbench <span class="dim">v1.16.1</span>
+    RRC&nbsp;Workbench <span class="dim">v1.17.0</span>
   </div>
   <nav class="tabs">
     <button class="tab on" data-page="encode">帧生成器</button>
@@ -9889,7 +9918,7 @@ function renderShell() {
     <button class="tab" data-page="library">规范库</button>
     <button class="tab" data-page="about">关于</button>
   </nav>
-  <span class="ver">v1.16.1 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
+  <span class="ver">v1.17.0 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
 </header>
 <main>
   <section class="page on" id="page-encode"></section>
@@ -9900,7 +9929,7 @@ function renderShell() {
   <section class="page" id="page-library"></section>
   <section class="page" id="page-about"></section>
 </main>
-<div class="foot">RRC Workbench v1.16.1 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
+<div class="foot">RRC Workbench v1.17.0 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => goto(t.dataset.page)));
 }
 function goto(id) {
