@@ -4351,7 +4351,7 @@ function parseSmsElementsTable(rowsRaw) {
 // '27 to (n+4)'，字母标号 'a to a+6' 跳过）+ 位段格（gridSpan 跨位）。octet 1-4 是 TLIV
 // 头（Type/Length/Spare+Instance，codec 自管）不入布局；'(n+4)' 开区间行 → open 吞尾。
 // 产出与 parseBitTable 同构的 octets/fields。
-function parseGtpIeTable(rowsRaw) {
+function parseGtpIeTable(rowsRaw, hdrOctets = 4) {
   if (!rowsRaw.length) return null;
   const rows = resolveVMerge(rowsRaw);
   let rulerI = -1;
@@ -4405,7 +4405,8 @@ function parseGtpIeTable(rowsRaw) {
     const open = /\(n\s*\+/i.test(label);
     const last = open ? null : (lm[2] != null ? first + (+lm[2]) : lm[3] != null ? +lm[3] : lm[4] != null ? +lm[4] : first);
     const count = open ? null : last - first + 1;
-    if (first <= 4 && (open || last <= 4)) continue; // octet 1-4 = TLIV 头（Type/Length/Instance），codec 自管
+    if (first <= hdrOctets && (open || last <= hdrOctets)) continue; // 头八位组（29.274 TLIV=1-4；29.060 只 1=Type，参数化）codec 自管
+    if (hdrOctets < 4 && fields.length === 1 && /^length/i.test(fields[0].text)) continue; // 29.060 TLV 的 Length 行（浅头下新增）不入布局
     if (!fields.length) continue;
     if (open) {
       octets.push({ octet: `${first}-n*`, count: 1, open: true, fields: [{ name: fields[0].text, bits: 8, hi: 8, lo: 1 }] });
@@ -4451,6 +4452,42 @@ function parseGtpMsgRows(rowsRaw) {
   }
   if (hi < 0) return null;
   return { groupName, rows: texts.slice(hi + 1) };
+}
+
+// 29.060 §7.x 消息内容表（v1.19.0）：3 列（Information element | Presence requirement |
+// Reference）——列映射动态（容多出的 Condition 列）。Reference 列 '7.7.2' 本规范节号；
+// '3GPP TS 24.008' 跨规范引用 → ref 置 null 防误挂。非内容表返回 null。
+function parseGtpv1MsgRows(rowsRaw) {
+  if (!rowsRaw.length) return null;
+  const rows = resolveVMerge(rowsRaw);
+  const texts = rows.map((r) => r.map((c) => normWs(c.text)));
+  let hi = -1;
+  let col = null;
+  for (let i = 0; i < Math.min(texts.length, 6); i++) {
+    const r = texts[i];
+    if (r.some((c) => /information element/i.test(c)) && r.some((c) => /presence/i.test(c)) && r.some((c) => /reference/i.test(c))) {
+      hi = i;
+      col = {
+        name: r.findIndex((c) => /information element/i.test(c)),
+        presence: r.findIndex((c) => /presence/i.test(c)),
+        ref: r.findIndex((c) => /reference/i.test(c)),
+      };
+      break;
+    }
+  }
+  if (hi < 0 || col.name < 0) return null;
+  const out = [];
+  for (let i = hi + 1; i < texts.length; i++) {
+    const r = texts[i];
+    const name = (r[col.name] || '').replace(/\n/g, ' ').trim();
+    if (!name) continue;
+    const refRaw = (r[col.ref] || '').replace(/\n/g, ' ').trim();
+    // Reference 格可能粘词（'GSN Address 7.7.32'——名称列 vMerge 漏入）→ 尾部节号提取；
+    // 仅认 7.x（本规范 IE 区），外部规范号（'24.008'）不误中
+    const rm = /\b(7(?:\.[0-9a-zA-Z]+)+)\s*$/.exec(refRaw);
+    out.push({ name, presence: (r[col.presence] || '').replace(/\n/g, ' ').trim(), ref: rm ? rm[1] : null });
+  }
+  return out.length ? out : null;
 }
 
 // ==== src/nas/docxzip.js ====
@@ -5934,6 +5971,207 @@ function encGtpcMsg(inst, parts = [], hdr = {}) {
   return Uint8Array.from(out);
 }
 
+// ==== src/nas/gtpv1.js ====
+// src/nas/gtpv1.js — GTPv1-C（TS 29.060）消息级编解码（schema 驱动）。
+//
+// 头（§6）：[flags: V3|PT|(*)|E|S|PN][Message Type(1)][Length(2)][TEID(4)]，必配部 8 八位组
+//（TEID 恒在）；可选部 4 八位组（Seq(2)|N-PDU(1)|Next Ext Type(1)）在 S/PN/E 任一置位时
+// 整块出现——'0' 位字段「not present or, if present, shall not be interpreted」（§6 原文）。
+// Length = 第 8 八位组之后的全部载荷：可选部、扩展头链、TLR 串都计入（§6 Length 字段原文
+// 'the rest of the packet following the mandatory part of the GTP header (that is the first
+// 8 octets)'——与 v2 的「不含内嵌」不同，v1 无 piggyback）。
+// 扩展头链（E=1，§6.1）：每节 [Length(1, 4 八位组单位含自身 4 字节)][content][Next Type(1)]，
+// 链至 Next Type=0（'No more extension headers'）——字节保真保留（extHex），不参与字段编辑。
+// IE 无 Instance（v2 的 TLIV 四件套在 v1 退化为 T+V 或 T+L+V）：格式与定长由 §7.7.0 主表
+// 给出（schema.ies[ref].format 'TV'|'TLV' + .fixed = Type 八位组之外的定长值字节数）。
+// TV 定长：[Type][value(fixed)]；TLV：[Type][Length(2)]——Length 域 16 位、值=IE 长度不含
+// Type 与 Length 域自身（§7.7 原文 'The Length field contains the length of the information
+// element excluding the Type and Length field'；EUA/MM Context 位图 Length 均画在 octets
+// 2-3 实证）。Type 位 8 区分格式：0=TV（1-127）、1=TLV（128-255）（§7.7 原文）。
+// 未知 IE Type 无法定界（不知道该读定长还是 Length）——诚实停走记注（v2 未知 IE 可按长
+// 度跳过的前向兼容在 v1 不存在，如实入账）。行按表序匹配（乱序 M 行防御报错同 v2）；
+// 必配行缺失报错。
+// 头的 TEID/Seq 是连接状态不是表内 IE：解码在 hdr 中返回，编码经 hdr 参数还原（缺省
+// PT=1/S=1/TEID=0/Seq=0——采样器与回环门禁用确定性值）。
+
+function gtpPresence(p) {
+  const s = (p || '').trim();
+  if (/^M/i.test(s)) return 'M';
+  if (/^C/i.test(s)) return 'C';
+  return 'O';
+}
+
+function gtpv1Header(u8) {
+  if (!u8 || u8.length < 8) throw new Error('GTPv1 头截断（必配部 8 八位组）');
+  const flags = u8[0];
+  const ver = flags >> 5;
+  if (ver !== 1) throw new Error(`GTP 版本非 1: ${ver}`);
+  const pt = (flags >> 4) & 1;
+  const e = (flags >> 2) & 1;
+  const s = (flags >> 1) & 1;
+  const pn = flags & 1;
+  const msgType = u8[1];
+  const msgLen = (u8[2] << 8) | u8[3];
+  const teid = (((u8[4] << 24) | (u8[5] << 16) | (u8[6] << 8) | u8[7]) >>> 0);
+  let off = 8;
+  let seq = 0;
+  let npdu = 0;
+  let nextExt = 0;
+  if (s || pn || e) {
+    if (u8.length < 12) throw new Error('GTPv1 头截断（可选部 4 八位组）');
+    seq = (u8[8] << 8) | u8[9];
+    npdu = u8[10];
+    nextExt = u8[11];
+    off = 12;
+  }
+  // 扩展头链（E=1）：每节 4×Length 八位组，Next Type=0 终止；越界诚实保留原样
+  let extHex = '';
+  let extBytes = 0;
+  if (e && nextExt) {
+    let guard = 0;
+    while (off + 4 <= u8.length && guard++ < 64) {
+      const unit = u8[off];
+      if (unit < 1) break; // 长度 0 非法——诚实保留
+      const size = unit * 4;
+      if (off + size > u8.length) break; // 越界——由上层注覆盖
+      extBytes += size;
+      extHex += Array.from(u8.subarray(off, off + size)).map((b) => b.toString(16).padStart(2, '0')).join('');
+      off += size;
+      if (u8[off - 1] === 0) break; // Next Type=0 链终
+    }
+  }
+  return { flags, ver, pt, e, s, pn, msgType, msgLen, teid, seq, npdu, nextExt, extHex, extBytes, off };
+}
+
+// 行扫描：行身份 = IE Type 值（主表 §7.7.0）；TV 定长 vs TLV 由行 format/fixed（主表填充）
+// 或 schema.ies 反查。未知 Type 无法定界 → 诚实停走。
+function gtpv1Walk(rows, u8, start, end, typeIndex) {
+  const notes = [];
+  const parts = [];
+  let off = start;
+  let ri = 0;
+  while (off < end) {
+    const type = u8[off];
+    const info = typeIndex.get(type);
+    if (!info) {
+      notes.push(`未知 IE Type ${type} 无法定界（29.060 无长度前缀的未知 IE 不可跳过）——停走，余 ${end - off} 字节未解`);
+      break;
+    }
+    let total;
+    if (info.format === 'TLV') {
+      if (off + 3 > end) throw new Error(`IE 0x${type.toString(16)}（TLV）头截断`);
+      const len = (u8[off + 1] << 8) | u8[off + 2];
+      total = 3 + len;
+      if (off + total > end) throw new Error(`IE 0x${type.toString(16)} 长度越界（${len}，余 ${end - off - 3}）`);
+    } else {
+      total = 1 + (info.fixed || 0);
+      if (off + total > end) throw new Error(`IE 0x${type.toString(16)}（TV 定长 ${info.fixed}）越界，余 ${end - off - 1}`);
+    }
+    let match = -1;
+    for (let j = ri; j < rows.length; j++) {
+      if (rows[j].iei == null) continue;
+      if (parseInt(rows[j].iei, 10) !== type) continue;
+      match = j;
+      break;
+    }
+    if (match < 0) {
+      // 已知 IE 但不在本消息行表——无法按行装配，停走诚实保留
+      notes.push(`IE Type ${type} 不在本消息行表（未预期）——停走，余 ${end - off} 字节未解`);
+      break;
+    }
+    for (let j = ri; j < match; j++) {
+      if (gtpPresence(rows[j].presence) === 'M' && rows[j].iei != null) {
+        throw new Error(`必配行缺失: ${rows[j].name}（IE Type ${type} 先行）`);
+      }
+    }
+    parts.push({ row: rows[match], rowIdx: match, value: u8.slice(off + (info.format === 'TLV' ? 3 : 1), off + total) });
+    off += total;
+    ri = match + 1;
+  }
+  for (let j = ri; j < rows.length; j++) {
+    if (gtpPresence(rows[j].presence) === 'M' && rows[j].iei != null) {
+      throw new Error(`必配行缺失: ${rows[j].name}`);
+    }
+  }
+  if (off < end) notes.push(`表尾余 ${end - off} 字节未匹配任何行`);
+  return { parts, off, notes };
+}
+
+function gtpv1TypeIndex(schema) {
+  const m = new Map();
+  for (const ie of Object.values(schema?.ies || {})) {
+    if (ie.ieType == null) continue;
+    if (!m.has(ie.ieType)) m.set(ie.ieType, { format: ie.format === 'TLV' ? 'TLV' : 'TV', fixed: ie.fixed || 0 });
+  }
+  return m;
+}
+
+const gtpv1Hex = (u8) => Array.from(u8).map((b) => b.toString(16).padStart(2, '0')).join('');
+
+function decGtpv1Msg(inst, u8, schema = null) {
+  const h = gtpv1Header(u8);
+  const notes = [];
+  if (inst.msgType != null && h.msgType !== inst.msgType) {
+    throw new Error(`消息类型不匹配: ${h.msgType} ≠ ${inst.msgType}`);
+  }
+  const end = Math.min(u8.length, 8 + h.msgLen);
+  if (u8.length !== 8 + h.msgLen) notes.push(`Length ${h.msgLen} 与帧长 ${u8.length - 8} 不符，按较小者解码`);
+  if (h.e && h.nextExt === 0) notes.push('E=1 但 Next Extension Header Type=0——按无扩展头处理');
+  if (h.extBytes && 8 + h.msgLen < 12 + h.extBytes) notes.push(`扩展头链 ${h.extBytes} 字节越出 Length 界——按 Length 界解码`);
+  // h.off 已随扩展头链推进（S=0 无可选部=8；E=1 链后=TLR 起点）——直接即 TLR 起点
+  const tlrStart = h.off;
+  const walk = gtpv1Walk(inst.rows || [], u8, tlrStart, end, gtpv1TypeIndex(schema));
+  return {
+    parts: walk.parts,
+    consumed: walk.off,
+    warnings: [...notes, ...walk.notes],
+    hdr: { pt: h.pt, e: h.e, s: h.s, pn: h.pn, teid: h.teid, seq: h.seq, npdu: h.npdu, nextExt: h.nextExt, extHex: h.extHex },
+    piggy: [],
+  };
+}
+
+function encGtpv1Msg(inst, parts = [], hdr = {}) {
+  const pt = hdr.pt != null ? hdr.pt : 1;
+  const e = hdr.e ? 1 : 0;
+  const s = hdr.s != null ? hdr.s : 1;
+  const pn = hdr.pn ? 1 : 0;
+  const teid = (hdr.teid || 0) >>> 0;
+  const seq = (hdr.seq || 0) & 0xffff;
+  const npdu = hdr.npdu || 0;
+  const extHex = e && hdr.extHex ? String(hdr.extHex).replace(/[^0-9a-f]/gi, '') : '';
+  if (extHex.length % 2) throw new Error('扩展头链 hex 长度须为偶数');
+  const extLen = extHex.length / 2;
+  const body = [];
+  for (const p of parts) {
+    const r = inst.rows[p.rowIdx];
+    if (!r || r.iei == null) continue;
+    const content = p.value instanceof Uint8Array ? p.value : Uint8Array.from(p.value ?? []);
+    if (r.format === 'TLV') {
+      if (content.length > 65535) throw new Error(`行 ${r.name}：TLV 值 ${content.length} 字节超 2 八位组长度域`);
+      body.push(parseInt(r.iei, 10), (content.length >> 8) & 255, content.length & 255, ...content);
+    } else {
+      const fixed = r.len != null && /^\d+$/.test(r.len) ? parseInt(r.len, 10) : null;
+      if (fixed != null && content.length !== fixed) {
+        throw new Error(`行 ${r.name}：TV 定长 ${fixed}，实得 ${content.length}`);
+      }
+      body.push(parseInt(r.iei, 10), ...content);
+    }
+  }
+  const optBlock = s || pn || e ? 4 : 0;
+  const msgLen = optBlock + extLen + body.length; // §6：第 8 八位组之后的全部载荷
+  const flags = (1 << 5) | ((pt & 1) << 4) | (e ? 0x04 : 0) | (s ? 0x02 : 0) | (pn ? 0x01 : 0);
+  const head = [flags, inst.msgType != null ? inst.msgType & 255 : 0, (msgLen >> 8) & 255, msgLen & 255,
+    (teid >> 24) & 255, (teid >> 16) & 255, (teid >> 8) & 255, teid & 255];
+  if (optBlock) {
+    // octet 12 = 首扩展头类型声明（E=1 时解码捕获回传保真；E=0 恒 0）
+    head.push((seq >> 8) & 255, seq & 255, npdu & 255, e ? (hdr.nextExt || 0) & 255 : 0);
+  }
+  const out = [...head];
+  for (let i = 0; i < extHex.length; i += 2) out.push(parseInt(extHex.slice(i, i + 2), 16));
+  out.push(...body);
+  return Uint8Array.from(out);
+}
+
 // ==== src/nas/codec.js ====
 // src/nas/codec.js — M4：NAS 消息级编解码（schema 驱动，行序扫描）。
 //
@@ -6044,6 +6282,8 @@ function decMsg(inst, bytes, spec = '24501', schema = null) {
   const u8 = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
   // GTPv2-C（29.274）：头与 IE 框架不同（TLIV/Instance），派发专用实现（src/nas/gtpc.js）
   if (spec === '29274') return decGtpcMsg(inst, u8, schema);
+  // GTPv1-C（29.060）：头 8 八位组必配 + TV/TLV 主表驱动，派发专用实现（src/nas/gtpv1.js）
+  if (spec === '29060') return decGtpv1Msg(inst, u8, schema);
   // 歧义行：非头部的 C/O 定长 V 行
   const amb = [];
   for (let ri = 0; ri < inst.rows.length; ri++) {
@@ -6244,6 +6484,7 @@ function decOnce(inst, u8, spec, force, notes = []) {
 function encMsg(inst, parts = [], spec = '24501', gtpcHdr = undefined) {
   // GTPv2-C：头（TEID/Seq 非表内 IE）经第 4 参还原，缺省 T=1/TEID=0/Seq=0（采样/回环零值）
   if (spec === '29274') return encGtpcMsg(inst, parts, gtpcHdr);
+  if (spec === '29060') return encGtpv1Msg(inst, parts, gtpcHdr);
   const byRow = new Map(parts.map((p) => [p.rowIdx, p.value]));
   const out = [];
   for (let ri = 0; ri < inst.rows.length; ri++) {
@@ -7931,6 +8172,11 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
       typeTables.push({ section: curH3.num, title: curH3.title, rows: it.rows.map((r) => r.map((c) => c.text)) });
       continue;
     }
+    // 29.060：§7.1 消息类型值表（GTP-C 列）+ §7.7.0 IE 主表（Type 值|Format|名|ref|长度类别|定长）
+    if (spec === '29060' && curH3 && /^(7\.1|7\.7\.0)$/.test(curH3.num || '')) {
+      typeTables.push({ section: curH3.num, title: curH3.title, rows: it.rows.map((r) => r.map((c) => c.text)) });
+      continue;
+    }
     const ttRe = spec === '24008' || spec === '44018' ? /^10\.4[a-z]?\b/
       : spec === '24011' ? /^8\.[12]\b/
       : spec === '23040' ? null
@@ -7965,9 +8211,18 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
         continue;
       }
     }
-    // 29.274 §8.x IE 位布局表（gutter 形——parseBitTable 不识别）：布局直出
+    // 29.274 §8.x / 29.060 §7.7.x IE 位布局表（gutter 形——parseBitTable 不识别）：布局直出。
+    // 29.060 头只占 octet 1（Type），TLV 的 Length 行由 hdrOctets<4 的 Length 行守卫剥除
     if (spec === '29274') {
       const gt = parseGtpIeTable(it.rows);
+      if (gt) {
+        const sh = it.heading ? splitHeading(it.heading.text) : { num: null, title: null };
+        bits.push({ section: sh.num, name: sh.title, figure: it.paras?.find((p) => /^Figure/i.test(p)) || null, octets: gt.octets, ...(gt.warnings && gt.warnings.length ? { warnings: gt.warnings } : {}) });
+        continue;
+      }
+    }
+    if (spec === '29060') {
+      const gt = parseGtpIeTable(it.rows, 1);
       if (gt) {
         const sh = it.heading ? splitHeading(it.heading.text) : { num: null, title: null };
         bits.push({ section: sh.num, name: sh.title, figure: it.paras?.find((p) => /^Figure/i.test(p)) || null, octets: gt.octets, ...(gt.warnings && gt.warnings.length ? { warnings: gt.warnings } : {}) });
@@ -8014,6 +8269,16 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
           groupName: gm.groupName,
           rows: gm.rows,
         });
+        continue;
+      }
+    }
+    // 29.060 §7.x 消息内容表（3 列：IE | Presence | Reference）。节号自带字母段
+    // （'7.5A.1'——splitHeading 会拆烂），独立重解；消息名取标题余部与 §7.1 名列对齐
+    if (spec === '29060') {
+      const gm = parseGtpv1MsgRows(it.rows);
+      if (gm) {
+        const hm2 = it.heading ? /^\s*((?:\d+[a-zA-Z]?\.)+(?:\d+[a-zA-Z]?)*(?:\.\d+)*[a-zA-Z]?)\s+(.+)$/.exec(it.heading.text) : null;
+        msgs.push({ section: hm2 ? hm2[1] : null, tableId: null, name: hm2 ? hm2[2].trim() : null, kind: 'message', direction: null, rows: gm });
         continue;
       }
     }
@@ -8543,6 +8808,7 @@ function buildMessages(msgs, msgTypes, bits) {
 function buildSchema(structured, opts = {}) {
   if (structured.spec === '24008') return buildSchema24008(structured, opts);
   if (structured.spec === '29274') return buildSchema29274(structured);
+  if (structured.spec === '29060') return buildSchema29060(structured);
   if (structured.spec === '44018') return buildSchema44018(structured, opts.fillBits, opts.fillValueTables, opts.fillCsn1);
   if (structured.spec === '24080') return buildSchema24080(structured);
   if (structured.spec === '24011') return buildSchema24011(structured);
@@ -9011,6 +9277,104 @@ function gtpTranslateRows(rows, ctx, problems) {
     });
   }
   return out;
+}
+
+// ---- 29.060（GTPv1-C）建库 -----------------------------------------------------------------
+// §7.1 消息类型值表（GTP-C 列 = X 且 Reference 为本规范 7.x 才入——GTP-U/外部规范消息
+// 不入族）+ §7.7.0 IE 主表（Type 值|Format(TV/TLV)|名|Reference|Length Type|定长）驱动：
+// 位表（parseGtpIeTable hdrOctets=1，头只占 octet 1、TLV Length 行剥除）挂布局，主表补
+// ieType/format/fixed——无位表的 IE（图 figure + 值表散文形态，如 APN）靠 format/fixed
+// 供 codec 编解码。消息行 = 3 列内容表行翻译（ref 反查主表），presence 原词（Mandatory/
+// Conditional/Optional——gtpPresence 前缀映射兼容）。
+function parseGtpv1MsgTypes(rows) {
+  const out = {};
+  let gtpcCol = -1;
+  for (const cells of rows || []) {
+    if (gtpcCol < 0) {
+      gtpcCol = cells.findIndex((c) => /^gtp-?c$/i.test((c || '').trim()));
+      continue; // 表头行（GTP-C 列定位）
+    }
+    const first = (cells[0] || '').trim();
+    if (!/^\d+$/.test(first)) continue; // '6-7 | Spare' 区间行跳过
+    const name = (cells[1] || '').split('\n')[0].replace(/\s+/g, ' ').trim();
+    if (!name || /^reserved|^spare|^for future/i.test(name)) continue;
+    const ref = (cells[2] || '').trim();
+    if (!/^7\.\d/.test(ref)) continue; // 外部规范引用（Node Alive → 32.295 等）不入 GTP-C 族
+    if (!/^x$/i.test((cells[gtpcCol] || '').trim())) continue; // 仅 GTP-U / GTP' 的消息不入
+    out[GTP_KEY(name)] = { type: parseInt(first, 10), mask: 0xff, name };
+  }
+  return out;
+}
+
+function parseGtpv1IeTypes(rows) {
+  const entries = [];
+  for (const cells of rows || []) {
+    const first = (cells[0] || '').trim();
+    if (!/^\d+$/.test(first)) continue;
+    const name = (cells[2] || '').split('\n')[0].replace(/\s+/g, ' ').trim();
+    const format = (cells[1] || '').trim().toUpperCase();
+    const ref = (cells[3] || '').trim();
+    const fixed = (cells[5] || '').trim();
+    if (!name || /^reserved|^spare/i.test(name) || !/^7\.7/.test(ref)) continue;
+    entries.push({
+      value: parseInt(first, 10),
+      name,
+      ref,
+      format: format === 'TLV' ? 'TLV' : 'TV',
+      fixed: /^\d+$/.test(fixed) ? parseInt(fixed, 10) : null,
+    });
+  }
+  const byRef = new Map();
+  for (const e of entries) if (!byRef.has(e.ref)) byRef.set(e.ref, e);
+  return { entries, byRef };
+}
+
+function buildSchema29060(structured) {
+  const problems = [];
+  const t71 = (structured.typeTables || []).find((t) => t.section === '7.1');
+  const t770 = (structured.typeTables || []).find((t) => t.section === '7.7.0');
+  const msgTypes = parseGtpv1MsgTypes(t71 && t71.rows);
+  if (!Object.keys(msgTypes).length) problems.push('§7.1 消息类型值表未捕获');
+  const ieTypes = parseGtpv1IeTypes(t770 && t770.rows);
+  if (!ieTypes.entries.length) problems.push('§7.7.0 IE 主表未捕获');
+  // ies：§7.7.x 位表直出布局，主表补 ieType/format/fixed（含无位表 IE——layouts 空数组）
+  const ies = {};
+  for (const b of structured.bits || []) {
+    if (!b.section || !/^7\.7/.test(b.section)) continue;
+    ies[b.section] = { name: b.name, layouts: [{ figure: b.figure, octets: b.octets }], ...(b.warnings && b.warnings.length ? { warnings: b.warnings } : {}) };
+  }
+  for (const e of ieTypes.entries) {
+    if (ies[e.ref] === undefined) ies[e.ref] = { name: e.name, layouts: [] };
+    else if (!ies[e.ref].name) ies[e.ref].name = e.name;
+    ies[e.ref].ieType = e.value;
+    ies[e.ref].format = e.format;
+    ies[e.ref].fixed = e.fixed;
+  }
+  // 消息实例（§7.2-7.5A）：行 ref 反查 IE 主表
+  const out = {};
+  for (const m of structured.msgs || []) {
+    if (m.kind !== 'message' || !/^7\.[2-5]/.test(m.section || '')) continue;
+    const rows = (m.rows || []).map((r) => {
+      const e = r.ref ? ieTypes.byRef.get(r.ref) : null;
+      return {
+        iei: e ? String(e.value) : null,
+        name: r.name,
+        presence: r.presence || 'O',
+        cond: null,
+        format: e ? e.format : null,
+        len: e && e.fixed != null ? String(e.fixed) : null,
+        ins: null,
+        ref: r.ref || null,
+        def: e ? r.ref : null,
+      };
+    });
+    const t = msgTypes[GTP_KEY(m.name)];
+    if (!t) problems.push(`${m.section} ${m.name}: 无消息类型值`);
+    const inst = { section: m.section, tableId: null, direction: null, pd: null, msgType: t ? t.type : null, rows };
+    if (!out[m.name]) out[m.name] = [];
+    out[m.name].push(inst);
+  }
+  return { schema: { spec: '29060', version: structured.version, msgTypes, ies, messages: out }, problems };
 }
 
 function buildSchema29274(structured) {
@@ -9524,6 +9888,7 @@ function lenRangeOf(lenStr, fmt) {
 // 采样一个 schema：返回 { lines, skipped, okMsgs }（lines = JSON 对象数组）
 function sampleSchema(schema, N, seed, msgRe = null) {
   if (schema.spec === '29274') return sampleGtpcSchema(schema, N, seed, msgRe);
+  if (schema.spec === '29060') return sampleGtpv1Schema(schema, N, seed, msgRe);
   const rng = rng32(seed);
   const rnd = (n) => Math.floor(rng() * n);
   const rbytes = (n) => Uint8Array.from({ length: n }, () => rnd(256));
@@ -9703,6 +10068,65 @@ function sampleGtpcSchema(schema, N, seed, msgRe) {
   return { lines, skipped, okMsgs };
 }
 
+// ---- GTPv1-C（29.060）采样：头缺省 PT=1/S=1/TEID=0/Seq=0（encGtpv1Msg 缺省值，回环确定性）；
+// 行序 TV 定长 / TLV；值来源优先级：IE 位布局（layoutSample framed，TV 定长校验不符回退
+// 随机定长）> 定长随机（TV）/ 1-6 字节随机（TLV）。M 必采、Conditional/Optional p=0.4。
+function gtpv1SampleValue(r, schema, rng) {
+  const ref = r.def || (r.ref && schema.ies[r.ref] ? r.ref : null);
+  const fixed = r.len != null && /^\d+$/.test(r.len) ? parseInt(r.len, 10) : null;
+  if (ref) {
+    const ie = schema.ies[ref];
+    if (ie && ie.layouts && ie.layouts[0] && ie.layouts[0].octets.length) {
+      const { bytes } = layoutSample(ie.layouts[0].octets, rng, true);
+      if (bytes.length && (r.format === 'TLV' || fixed == null || bytes.length === fixed)) return bytes;
+    }
+  }
+  if (r.format === 'TLV') return Uint8Array.from({ length: 1 + Math.floor(rng() * 6) }, () => Math.floor(rng() * 256));
+  return Uint8Array.from({ length: fixed != null ? fixed : 1 + Math.floor(rng() * 4) }, () => Math.floor(rng() * 256));
+}
+
+function sampleGtpv1Schema(schema, N, seed, msgRe) {
+  const rng = rng32(seed);
+  const lines = [];
+  const skipped = {};
+  let okMsgs = 0;
+  for (const [msgName, insts] of Object.entries(schema.messages)) {
+    if (msgRe && !msgRe.test(msgName)) continue;
+    for (let ii = 0; ii < insts.length; ii++) {
+      const inst = insts[ii];
+      const instKey = `${msgName}#${ii}`;
+      if (inst.msgType == null) { skipped[instKey] = skipped[instKey] || '无消息类型值'; continue; }
+      let made = 0;
+      for (let k = 0; k < N * 3 && made < N; k++) {
+        try {
+          const parts = [];
+          let ok = true;
+          for (let ri = 0; ri < inst.rows.length; ri++) {
+            const r = inst.rows[ri];
+            if (r.iei == null) {
+              if (/^M/i.test((r.presence || '').trim())) { ok = false; break; }
+              continue;
+            }
+            if (!/^M/i.test((r.presence || '').trim()) && rng() > 0.4) continue;
+            parts.push({ rowIdx: ri, value: gtpv1SampleValue(r, schema, rng) });
+          }
+          if (!ok) { skipped[instKey] = skipped[instKey] || '必配行无类型值'; continue; }
+          const bytes = encMsg(inst, parts, schema.spec);
+          lines.push({
+            msg: msgName, inst: ii, section: inst.section,
+            hex: Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join(''),
+          });
+          made++;
+        } catch (e) {
+          skipped[instKey] = skipped[instKey] || e.message.slice(0, 60);
+        }
+      }
+      if (made > 0) okMsgs++;
+    }
+  }
+  return { lines, skipped, okMsgs };
+}
+
 // CLI（浏览器打包时跳过：process 不存在）
 if (typeof process === 'undefined' || !process.argv) {
   // 打包进 dist 时仅作为库使用
@@ -9718,7 +10142,7 @@ if (args.schema && args.out) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
@@ -9919,7 +10343,7 @@ function renderShell() {
 <header class="topbar">
   <div class="logo">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1" y="1" width="7" height="7" rx="1.5" fill="#0f62fe"/><rect x="10" y="1" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="1" y="10" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="10" y="10" width="7" height="7" rx="1.5" fill="#0f62fe"/></svg>
-    RRC&nbsp;Workbench <span class="dim">v1.18.0</span>
+    RRC&nbsp;Workbench <span class="dim">v1.19.0</span>
   </div>
   <nav class="tabs">
     <button class="tab on" data-page="encode">帧生成器</button>
@@ -9930,7 +10354,7 @@ function renderShell() {
     <button class="tab" data-page="library">规范库</button>
     <button class="tab" data-page="about">关于</button>
   </nav>
-  <span class="ver">v1.18.0 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
+  <span class="ver">v1.19.0 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
 </header>
 <main>
   <section class="page on" id="page-encode"></section>
@@ -9941,7 +10365,7 @@ function renderShell() {
   <section class="page" id="page-library"></section>
   <section class="page" id="page-about"></section>
 </main>
-<div class="foot">RRC Workbench v1.18.0 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
+<div class="foot">RRC Workbench v1.19.0 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => goto(t.dataset.page)));
 }
 function goto(id) {
@@ -10955,7 +11379,7 @@ function registryAddVersion(label) {
 // 官方 docx/zip → schema/ASN.1 全程本机：NAS 走 ingestDocxZip（与 CLI 同一纯函数，
 // 导出 JSON 与 nasdef 产物逐字节一致）；ASN.1 走 extractFromDocumentXml（ASN1START 块拼接）。
 const ingestState = { results: [], seq: 0 };
-const NAS_SPECS = ['24501', '24301', '24008', '44018', '24080', '24011', '23040', '29274'];
+const NAS_SPECS = ['24501', '24301', '24008', '44018', '24080', '24011', '23040', '29274', '29060'];
 
 function ingestAutoName(fname) {
   const m = /^(?:[3GPP ]*)?(\d{5})-([0-9a-z]+)\.(?:zip|docx)$/i.exec(fname.trim());
@@ -11488,7 +11912,7 @@ function nasRefreshSelectors() {
   // 33.501/33.401 SHT 安全帧封装仅 LTE/5G NAS 有：GSM RR 的 A5 在 RR 层（44.018 无
   // SHT 帧形态）、SS 消息不加密——这两族隐藏安全卡
   const secCard = $('nasSecCard');
-  if (secCard) secCard.style.display = ['44018', '24080', '24011', '23040', '29274'].includes(nasState.spec) ? 'none' : '';
+  if (secCard) secCard.style.display = ['44018', '24080', '24011', '23040', '29274', '29060'].includes(nasState.spec) ? 'none' : '';
   $('nasDiffL').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${k}</option>`).join('');
   $('nasDiffR').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${k}</option>`).join('');
   nasSecRefreshAlgos();
@@ -11585,7 +12009,7 @@ function nasBuildParts() {
   return parts;
 }
 
-// 29274：重编码回传解码时的 TEID/Seq/piggyback（连接状态不是表内 IE，见 gtpc.js）。
+// 29274/29060：重编码回传解码时的 TEID/Seq/piggyback（连接状态不是表内 IE，见 gtpc.js/gtpv1.js）。
 // 防跨消息泄漏：当前选择与解码上下文（spec/ver/msg/instIdx）不一致时不回传。
 function nasGtpcHdr() {
   const c = nasState._decodedCtx;
