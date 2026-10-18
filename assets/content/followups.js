@@ -517,6 +517,30 @@
         a: '看 timeGap 标记：同配置同小区两次记录的间隔超过 loggingPeriodicity（未配则按 csi-LoggedResourceConfig 的资源周期）时，UE set timeGap=true（§5.5c.3.2）——账本自己标出断档位置，排查连续性问题时先筛它（M54 课 n3）。',
         ref: '38.331#5.5c.3.2' }
     ] },
+    'm55:q0': { levels: [
+      { q: 'SRAP 头里认人的凭证是什么？两段链路用同一个号吗？',
+        a: '**local Remote UE ID 同时出现在 PC5 SRAP 头与 Uu SRAP 头**——两段认人用同一个号。配置方向：Relay UE 由 gNB 配置该 ID；Remote UE 经 Uu RRC 消息获得（RRCSetup/RRCReconfiguration/RRCResume/RRCReestablishment）。防撞号是 gNB 的责任；换号经 RRCReconfiguration 下发，且独立于 PC5 单播链 L2 ID 更新流程——换号不必换链路地址（M55 课 a5）。',
+        ref: '38.300#16.12.2.1' },
+      { q: '为什么 SRB0 消息在直连 PC5 段没有 SRAP 头？',
+        a: '§16.12.2.1 两条特例：转发 Remote UE 的 BCCH/PCCH 消息时 PC5 hop 无 SRAP 头；SRB0 消息在 Remote UE 与直连 Relay UE 之间的 PC5 hop 无 SRAP 头——而 Uu hop 与 Relay UE 之间的 PC5 hop 上 DL/UL 都有。深因：SRB0 走 RRCSetupRequest/RRCSetup 时 local Remote UE ID 尚未分配（建连后才配），直连段靠指定的 PC5 Relay RLC channel 认道即可——六步建连正是这么走通的（M55 课 a3/c1）。',
+        ref: '38.300#16.12.2.1' }
+    ] },
+    'm55:q2': { levels: [
+      { q: '中继选择与重选各用什么测量量？没数据在跑呢？',
+        a: '两段判据：**选择**（与候选 parent 无单播 PC5 连接时）用 **SD-RSRP** 评朝候选的 PC5 链路质量；**重选**在 Relay→Remote 有 DL 数据传输时用 **SL-RSRP** 做触发评估，无数据传输时用 SL-RSRP 还是 SD-RSRP 由 UE 实现定。suitable=PC5 链路质量超（预）配置阈值+满足全部 AS 与高层判据；多 suitable 候选实现定挑一（M55 课 b3）。',
+        ref: '38.300#16.12.4' },
+      { q: 'Relay UE 换小区要通知谁？收通知的 UE 必须放链吗？',
+        a: 'IDLE/INACTIVE 的 Relay UE 选了新小区→用 **PC5-RRC** 通知已连 Remote/child UE（切换、检测到 Uu/PC5 RLF、Uu RRC 建连或恢复失败、与父链 PC5 释放同样要通知）；RLF 触发的通知要等恢复动作成功后才发、恢复失败则发不发实现定；小区没变可省略。**收通知后放链还是保链由接收方实现定**——放链则触发 PC5 释放并可能小区/中继重选（M55 课 b4）。',
+        ref: '38.300#16.12.4' }
+    ] },
+    'm55:q4': { levels: [
+      { q: '中继场景的统一访问控制（UAC）谁做？中继会代做吗？',
+        a: '§16.12.5.7 原文两句：The L2 U2N Remote UE performs unified access control——**Remote UE 自己做**统一访问控制；The L2 U2N Relay UE does not perform UAC for L2 U2N Remote UE\'s data——**Relay UE 不为 Remote UE 的数据做 UAC**。中继只是转发通道，准入判定的责任留在被中继者自己（M55 课 c4）。',
+        ref: '38.300#16.12.5.7' },
+      { q: 'Remote UE 挂在中继下时，移动注册更新按谁的时机走？',
+        a: '按 **Relay UE 的服务小区**判：L2 U2N Remote UE 的 Mobility Registration Update/RNAU 基于 Relay UE 的服务小区；IDLE/INACTIVE 的 Remote UE 在服务小区变更（因 Relay 换小区）且**新小区在其配置 RNA/TA 之外**时才发起——中继带着走，出了注册区才重新报到（M55 课 c4）。',
+        ref: '38.300#16.12.5.8' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

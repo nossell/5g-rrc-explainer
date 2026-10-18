@@ -6163,7 +6163,9 @@ function encGtpv1Msg(inst, parts = [], hdr = {}) {
   const head = [flags, inst.msgType != null ? inst.msgType & 255 : 0, (msgLen >> 8) & 255, msgLen & 255,
     (teid >> 24) & 255, (teid >> 16) & 255, (teid >> 8) & 255, teid & 255];
   if (optBlock) {
-    // octet 12 = 首扩展头类型声明（E=1 时解码捕获回传保真；E=0 恒 0）
+    // octet 12 = 首扩展头类型声明（§6.1：类型只在 octet 12 声明，链内单元是
+    // [Length][content][Next Type]——extHex 首字节是长度不是类型，不能由此派生）；
+    // E=1 无链时 hdr.nextExt 缺省 0，解码端注记按无扩展头处理，自洽
     head.push((seq >> 8) & 255, seq & 255, npdu & 255, e ? (hdr.nextExt || 0) & 255 : 0);
   }
   const out = [...head];
@@ -8393,8 +8395,8 @@ function resolveMsgType(name, direction, msgTypes) {
 }
 
 // ---- IE 布局库 ---------------------------------------------------------------
-// _pending 行（parseBitTable 位宽门禁不过的挂起行）：有锚点的节交给 walkRow 走查恢复，
-// 无锚点的节放弃（诚实拒绝）。走查/纠偏统一后经 correctIes 收口。
+// _pending 行（parseBitTable 位宽门禁不过的挂起行）：有锚点的节交给走查恢复，无锚点的
+// 节放弃（诚实拒绝）。走查/纠偏统一后经 correctIes 收口。
 function buildIes(bits, valueTables) {
   const ies = {};
   const anchorsBySection = extractBitAnchors(valueTables);
@@ -8409,7 +8411,7 @@ function buildIes(bits, valueTables) {
       const rowTotal = row.half ? 4 : 8 * (row.count || 1);
       if (rowTotal !== 4 && rowTotal !== 8) continue;
       const wnotes = [];
-      const fixed = walkRow(row.fields, rowTotal, anchors, row.octet, wnotes);
+      const fixed = rescueRow(row.fields, rowTotal, anchors, row.octet, wnotes);
       if (!fixed || !fixed.some((f) => f.anchor)) { notes.push(`octet ${row.octet}: 锚点走查未收敛，行放弃`); continue; }
       const { _pending, ...clean } = row;
       clean.fields = fixed.map(({ spare, anchor, ...rest }) => {
@@ -8428,6 +8430,31 @@ function buildIes(bits, valueTables) {
     });
   }
   return correctIes(ies, anchorsBySection);
+}
+
+// 挂起行走查入口（v1.19.1 审计修正）：自然平铺优先——spare 按列宽占位 + 锚点钉位后若恰好
+// 严丝合缝平铺整个八位组（首字段顶格、相邻字段无缝、末字段抵 bit1、锚字段零 pre），列序
+// 即规范位图原读。此前 flex 模式无条件跳过 spare，行首 spare 与锚点隔着命名字段时命名字段
+// 整体顶高一位（10.5.1.6 octet3 Revision level/ES IND、octet5 LCSVA 各错一位——规范值表
+// 「ES IND (octet 3, bit 5)」「LCS VA capability (octet 5, bit 6)」实证，v1.13 起即错，
+// v1.18.0 只修了几何自洽未及位序）。自然平铺不成立（列宽膨胀溢出类）回退 flex spare-skip
+// 救援，该路径行为不变。
+function tilesExactly(fields, rowTotal) {
+  if (!fields || !fields.length) return false;
+  const s = [...fields].sort((a, b) => b.hi - a.hi);
+  if (s[0].hi !== rowTotal || s[s.length - 1].lo !== 1) return false;
+  for (let i = 1; i < s.length; i++) if (s[i].hi !== s[i - 1].lo - 1) return false;
+  return true;
+}
+function rescueRow(fields, rowTotal, anchors, octetNo, notes) {
+  const knotes = [];
+  const kept = walkRow(fields, rowTotal, anchors, octetNo, knotes, 'keep');
+  if (kept && kept.some((f) => f.anchor) && tilesExactly(kept, rowTotal)
+    && kept.every((f) => !f.anchor || !(f.pre > 0))) {
+    notes.push(...knotes);
+    return kept;
+  }
+  return walkRow(fields, rowTotal, anchors, octetNo, notes, 'flex');
 }
 
 // ---- 值语义表 → 位布局（v1.14.1）----------------------------------------------------
@@ -10142,7 +10169,7 @@ if (args.schema && args.out) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
@@ -10343,7 +10370,7 @@ function renderShell() {
 <header class="topbar">
   <div class="logo">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1" y="1" width="7" height="7" rx="1.5" fill="#0f62fe"/><rect x="10" y="1" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="1" y="10" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="10" y="10" width="7" height="7" rx="1.5" fill="#0f62fe"/></svg>
-    RRC&nbsp;Workbench <span class="dim">v1.19.0</span>
+    RRC&nbsp;Workbench <span class="dim">v1.19.1</span>
   </div>
   <nav class="tabs">
     <button class="tab on" data-page="encode">帧生成器</button>
@@ -10354,7 +10381,7 @@ function renderShell() {
     <button class="tab" data-page="library">规范库</button>
     <button class="tab" data-page="about">关于</button>
   </nav>
-  <span class="ver">v1.19.0 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
+  <span class="ver">v1.19.1 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
 </header>
 <main>
   <section class="page on" id="page-encode"></section>
@@ -10365,7 +10392,7 @@ function renderShell() {
   <section class="page" id="page-library"></section>
   <section class="page" id="page-about"></section>
 </main>
-<div class="foot">RRC Workbench v1.19.0 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
+<div class="foot">RRC Workbench v1.19.1 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => goto(t.dataset.page)));
 }
 function goto(id) {
