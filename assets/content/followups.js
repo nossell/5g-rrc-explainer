@@ -541,6 +541,30 @@
         a: '按 **Relay UE 的服务小区**判：L2 U2N Remote UE 的 Mobility Registration Update/RNAU 基于 Relay UE 的服务小区；IDLE/INACTIVE 的 Remote UE 在服务小区变更（因 Relay 换小区）且**新小区在其配置 RNA/TA 之外**时才发起——中继带着走，出了注册区才重新报到（M55 课 c3）。',
         ref: '38.300#16.12.5.8' }
     ] },
+    'm56:q0': { levels: [
+      { q: 'MP Remote UE 的信令锚在哪条路径？为什么必须钉在那里？',
+        a: '§16.21.3.1：split SRB1 与 SRB2 的 primary path **永远配置在 direct 路径**；非 split 的 SRB1/2 **只允许配在 direct**。因由=全局约束「PCell 恒在 direct」的延伸——信令锚在永远在的直连腿上，间接路全断也不影响 RRC 基本盘；间接口在信令面只是「多一条腿」而非「换主心骨」（M56 课 b2）。',
+        ref: '38.300#16.21.3.1' },
+      { q: '配了 split SRB1 复制时，路径添加的 Complete 为什么要双发？',
+        a: '§16.21.3.1 step6：至少经 direct 发 RRCReconfigurationComplete；配了 split SRB1 with duplication 时**也经 indirect 路径再发一份**——重复信令顺带把「间接路已通」通报给 gNB：收到 indirect 版 Complete 即知中继段就绪，不必额外探活；且第 5 步可在 6a 后执行、与 6a 独立（M56 课 c1/b2）。',
+        ref: '38.300#16.21.3.1' }
+    ] },
+    'm56:q2': { levels: [
+      { q: 'N3C 间接路能像 PC5 那样反向补直连吗？一台 N3C Relay 能服务几台 Remote？',
+        a: '都不能按直觉来：§16.21.3.1——**不允许**「N3C 间接路之上再加 direct 路径」（N3C 单向：只能在唯一 direct 路径上加 N3C 间接路）；且用 N3C 间接路的 MP Relay UE **被限制为只服务一台** L2 MP Remote UE——multi-Relay 形态要用多台 Relay 铺，每台 N3C Relay 各服务一台 Remote（M56 课 b1）。',
+        ref: '38.300#16.21.3.1' },
+      { q: 'N3C 形态的候选上报和 PC5 形态差在哪？',
+        a: '差不只是字段：PC5 形态报候选 **MP Relay UE ID+小区 ID**（要建 PC5 链）；N3C 形态改经 **UEAssistanceInformation** 报 **C-RNTI+小区 ID**，且**表注限定：MP Remote 与 MP Relay 的安全连接建立后才可报**——字段反推动作，配置张冠李戴先查接口类型与安全前提（M56 课 b3）。',
+        ref: '38.300#16.21.3.1' }
+    ] },
+    'm56:q4': { levels: [
+      { q: '间接加流程里 PC5 形态的第 5 步做什么？N3C 形态为什么没有这一步？',
+        a: '§16.21.3.1 step5：MP Remote UE 与目标 Relay **建立 PC5 单播链**；表注——**N3C 形态省略第 5 步**，N3C 间接路怎么建由 UE 实现定（预配/静态关系）；且第 5 步可在 6a 之后执行、与 6a 独立（M56 课 c1）。',
+        ref: '38.300#16.21.3.1' },
+      { q: '直接加流程的 RRCReconfiguration 为什么走间接路下发？',
+        a: '§16.21.3.1 Figure -3 step4：此刻 MP Remote UE 还没有 direct 腿——gNB **经 Relay 转发**把重配（至少含 direct 路径添加配置的目标小区）发给 Remote；随后 Remote 同步目标小区下行+随机接入、**把目标小区配置为 PCell**，直连腿立起（M56 课 c3）。',
+        ref: '38.300#16.21.3.1' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
