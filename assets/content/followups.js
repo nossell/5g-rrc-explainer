@@ -535,10 +535,10 @@
     ] },
     'm55:q4': { levels: [
       { q: '中继场景的统一访问控制（UAC）谁做？中继会代做吗？',
-        a: '§16.12.5.7 原文两句：The L2 U2N Remote UE performs unified access control——**Remote UE 自己做**统一访问控制；The L2 U2N Relay UE does not perform UAC for L2 U2N Remote UE\'s data——**Relay UE 不为 Remote UE 的数据做 UAC**。中继只是转发通道，准入判定的责任留在被中继者自己（M55 课 c4）。',
+        a: '§16.12.5.7 原文两句：The L2 U2N Remote UE performs unified access control——**Remote UE 自己做**统一访问控制；The L2 U2N Relay UE does not perform UAC for L2 U2N Remote UE\'s data——**Relay UE 不为 Remote UE 的数据做 UAC**。中继只是转发通道，准入判定的责任留在被中继者自己（M55 课 c3）。',
         ref: '38.300#16.12.5.7' },
       { q: 'Remote UE 挂在中继下时，移动注册更新按谁的时机走？',
-        a: '按 **Relay UE 的服务小区**判：L2 U2N Remote UE 的 Mobility Registration Update/RNAU 基于 Relay UE 的服务小区；IDLE/INACTIVE 的 Remote UE 在服务小区变更（因 Relay 换小区）且**新小区在其配置 RNA/TA 之外**时才发起——中继带着走，出了注册区才重新报到（M55 课 c4）。',
+        a: '按 **Relay UE 的服务小区**判：L2 U2N Remote UE 的 Mobility Registration Update/RNAU 基于 Relay UE 的服务小区；IDLE/INACTIVE 的 Remote UE 在服务小区变更（因 Relay 换小区）且**新小区在其配置 RNA/TA 之外**时才发起——中继带着走，出了注册区才重新报到（M55 课 c3）。',
         ref: '38.300#16.12.5.8' }
     ] },
   };

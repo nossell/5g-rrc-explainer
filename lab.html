@@ -7312,7 +7312,7 @@ function l2plCheck(inst, frameBytes, parts) {
 // ==== src/nas/crypto.js ====
 // crypto.js — NAS 完整性/机密性算法层（clean-room，锚定规范测试向量）。
 //
-// 来源规范（本地归档 D:/AI/cache/algo35_doc + sage_*.pdf）：
+// 来源规范（本地归档 algo35 文档 + sage_*.pdf）：
 //   SHA-256:  FIPS 180-4；HMAC: RFC 2104（向量 RFC 4231）
 //   KDF:      TS 33.220 Annex B.2.0（= HMAC-SHA256(KEY, S)）
 //   NAS 密钥: TS 33.501 A.8（FC=0x69, KEY=K_AMF）/ TS 33.401 A.7（FC=0x15, KEY=K_ASME）
@@ -11649,7 +11649,7 @@ function renderAboutPage() {
         <li><span class="n">3</span>逐字节验证当前仅 MIB-NR 过外部 oracle；正式发包前须做 Wireshark/asn1c 三方交叉验证</li>
         <li><span class="n">4</span>内置 schema 不含 3GPP 官方 .asn 全文（版权纪律：正式分发采用"用户自带 spec"模式）</li>
       </ul>
-      <p class="muted" style="font:400 12px/1.6 var(--sans);color:var(--ink2);margin-top:10px">完整文档：<span class="kv-num">docs/使用手册.md</span>（12 章，含规则速查与验收记录）。市场与可行性依据：<span class="kv-num">F:\AI data\ASN1编码侧工具与3GPP语义diff-可行性与市场分析-20260927.md</span></p>
+      <p class="muted" style="font:400 12px/1.6 var(--sans);color:var(--ink2);margin-top:10px">完整文档：<span class="kv-num">docs/使用手册.md</span>（12 章，含规则速查与验收记录）。市场与可行性依据：<span class="kv-num">《ASN1 编码侧工具与 3GPP 语义 diff 可行性与市场分析》</span></p>
     </div></div>
   </div>`;
 }
