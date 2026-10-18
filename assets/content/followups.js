@@ -546,7 +546,7 @@
         a: '§16.21.3.1：split SRB1 与 SRB2 的 primary path **永远配置在 direct 路径**；非 split 的 SRB1/2 **只允许配在 direct**。因由=全局约束「PCell 恒在 direct」的延伸——信令锚在永远在的直连腿上，间接路全断也不影响 RRC 基本盘；间接口在信令面只是「多一条腿」而非「换主心骨」（M56 课 b2）。',
         ref: '38.300#16.21.3.1' },
       { q: '配了 split SRB1 复制时，路径添加的 Complete 为什么要双发？',
-        a: '§16.21.3.1 step6：至少经 direct 发 RRCReconfigurationComplete；配了 split SRB1 with duplication 时**也经 indirect 路径再发一份**——重复信令顺带把「间接路已通」通报给 gNB：收到 indirect 版 Complete 即知中继段就绪，不必额外探活；且第 5 步可在 6a 后执行、与 6a 独立（M56 课 c1/b2）。',
+        a: '§16.21.3.1 step6：至少经 direct 发 RRCReconfigurationComplete；配了 split SRB1 with duplication 时**也经 indirect 路径再发一份**——重复信令顺带把「间接路已通」通报给 gNB：收到 indirect 版 Complete 即知中继段就绪（工程口径：不必额外探活）；且第 5 步可在 6a 后执行、与 6a 独立（M56 课 c1/b2）。',
         ref: '38.300#16.21.3.1' }
     ] },
     'm56:q2': { levels: [
