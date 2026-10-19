@@ -4427,6 +4427,17 @@ function parseGtpIeTable(rowsRaw, hdrOctets = 4) {
           if (Math.min(f.end, d.end) - Math.max(f.start, d.start) > 0 && owner[di] < 0) owner[di] = fi;
         }
       });
+      // 内部空档审计：左右均有字段认领、自身未被认领的标尺位格——它们会静默并入
+      // 邻字段 pre（与 v1.22.0 吞格修复同一机制），注记以便建库后审计（v1.23.0）。
+      let gapUnclaimed = 0;
+      for (let di = 1; di < digits.length - 1; di++) {
+        if (owner[di] >= 0) continue;
+        let leftClaimed = false;
+        let rightClaimed = false;
+        for (let d2 = 0; d2 < di; d2++) if (owner[d2] >= 0) leftClaimed = true;
+        for (let d2 = di + 1; d2 < digits.length; d2++) if (owner[d2] >= 0) rightClaimed = true;
+        if (leftClaimed && rightClaimed) gapUnclaimed++;
+      }
       const fs = [];
       let prevLo = 9;
       for (let fi = 0; fi < fields.length; fi++) {
@@ -4440,7 +4451,10 @@ function parseGtpIeTable(rowsRaw, hdrOctets = 4) {
         prevLo = lo;
         fs.push({ name: fields[fi].text, bits: hi - lo + 1, hi, lo, ...(pre > 0 ? { pre } : {}) });
       }
-      if (fs.length) octets.push({ octet: String(first), count: 1, fields: fs });
+      if (fs.length) {
+        if (gapUnclaimed) notes.push(`octet ${label}: ${gapUnclaimed} 个标尺位格未被字段认领（内部空档并入邻字段 pre，审计注记）`);
+        octets.push({ octet: String(first), count: 1, fields: fs });
+      }
     }
   }
   if (!octets.length) return null;
@@ -6665,7 +6679,7 @@ function layoutPack(octets, fieldVals, framed = false) {
       let bits = 0;
       for (const f of row.fields) {
         const key = n > 1 ? `${f.name}[${k}]` : f.name;
-        const v = (fieldVals[key] ?? (isSpare(f) ? 0 : 0));
+        const v = fieldVals[key] ?? 0;
         acc = (acc << ((f.pre || 0) + f.bits)) | (v & ((1 << f.bits) - 1));
         bits += (f.pre || 0) + f.bits;
       }
@@ -6790,8 +6804,10 @@ function layoutUnpack(octets, bytes, framed = false) {
 //   - 消息族新增/删除 → info（新消息老收端忽略不了——但 NAS 收端对未知消息类型回
 //     STATUS/#97，属协议内处理路径，不算字节破坏）；
 //   - 同名消息 msgType 值变更 → break（同名消息在线缆上变成另一种语义）；
-//   - 行新增（含 IEI 的 TV/TLV 类，O/C）→ ok（老收端按 IEI 未知跳过，24.501 §4.4.6 /
-//     24.301 §4.4.6 忽略未知 IE）；
+//   - 行新增（TLV/LV 类带 IEI）→ ok（老收端按 IEI 未知跳过，24.501 §4.4.6 /
+//     24.301 §4.4.6 忽略未知 IE；长度域保证可跳过）；
+//   - 行新增（TV 类带 IEI）→ warn（TV 无长度域，老收端不识该 IEI 即不知值宽、无法跳过，
+//     后续 IE 全部错位——v1.23.0 起分档，原先「有 IEI 即 ok」的推理对 TV 不成立）；
 //   - 行新增（V/VH/LV 类无 IEI）→ warn（老收端无法定位，后续 IE 全部错位）；
 //   - 行删除 → info（新版本流里可能出现的 IE 老收端不认识——若删除行携带 IEI，老收端
 //     忽略之；M 行删除 = 新版本流不再有，老流照旧可解）；
@@ -6808,7 +6824,9 @@ const rowKey = (r) => {
 
 // 实例配对：同 direction 按出现序消费（44018 IMMEDIATE ASSIGNMENT 两实例同 direction——
 // v1.22.0 前的 find 配对把它们全部塌到 inst0，产生同版本对上的幻影删除）；direction
-// 不匹配回退下标。GTP 消息表分片（direction 全 null）同理按序配对。
+// 不匹配回退剩余未消费实例（按右实例序），每个左实例至多消费一次；仍无可用 → null
+// （调用方按「新增消息表实例」入账，不再拿左末实例重复比对）。
+// 返回 { paired, unused }：unused = 左实例中未被配对的（调用方按「删除实例」入账）。
 function pairLeftByDirection(linsts, rinsts) {
   const q = new Map();
   for (const x of linsts) {
@@ -6816,20 +6834,35 @@ function pairLeftByDirection(linsts, rinsts) {
     if (!q.has(d)) q.set(d, []);
     q.get(d).push(x);
   }
-  return rinsts.map((ri, i) => (q.get(ri.direction ?? null) || []).shift() || linsts[Math.min(i, linsts.length - 1)]);
+  const used = new Set();
+  const exact = rinsts.map((ri) => {
+    const arr = q.get(ri.direction ?? null);
+    if (arr && arr.length) { const x = arr.shift(); used.add(x); return x; }
+    return null;
+  });
+  const rest = linsts.filter((x) => !used.has(x));
+  let k = 0;
+  const paired = exact.map((x) => x || (k < rest.length ? rest[k++] : null));
+  return { paired, unused: rest.slice(k) };
 }
 
-// 行键：同 IEI 多行（条件重复行，如 44018 IMMEDIATE ASSIGNMENT / 29274 Context Response）
-// 加出现序号——v1.22.0 前直接以 iei 为 Map 键把重复行折叠成一行，既丢语义又产幻影增删。
-function rowMapWithOrdinal(rows) {
+// 键映射：重复键加出现序号（#2/#3 按位配对）。IEI 条件重复行、布局 octet 变体行
+// （7.7.29 PDP Context 六变体、8.123 Remote User ID 八变体）与同行同名字段通用——
+// v1.22.0 前直接以键为 Map 键把重复项折叠成一项（批次 L 修 IEI 行，v1.23.0 补齐
+// 布局层同类塌缩）。
+function mapWithOrdinal(items, keyOf) {
   const m = new Map();
   const seen = {};
-  for (const r of rows) {
-    const k0 = rowKey(r);
+  for (const it of items) {
+    const k0 = keyOf(it);
     seen[k0] = (seen[k0] || 0) + 1;
-    m.set(seen[k0] > 1 ? `${k0}#${seen[k0]}` : k0, r);
+    m.set(seen[k0] > 1 ? `${k0}#${seen[k0]}` : k0, it);
   }
   return m;
+}
+
+function rowMapWithOrdinal(rows) {
+  return mapWithOrdinal(rows, rowKey);
 }
 
 // inst = 消息实例（schema.messages[name][k]）；比较行集合
@@ -6839,11 +6872,14 @@ function diffMessageRows(name, li, ri, findings) {
   for (const [k, rr] of rmap) {
     if (!lmap.has(k)) {
       const hasIei = k.startsWith('i:');
-      const sev = hasIei ? 'ok' : 'warn';
+      const framed = /^(tlv|lv)/i.test(rr.format || '');
+      const sev = hasIei && framed ? 'ok' : 'warn';
       findings.push({
         severity: sev,
         kind: 'nas-row-add',
-        msg: `${name}：新增 IE 行 ${rr.name}${hasIei ? `（IEI ${rr.iei}，老收端按未知 IE 跳过）` : '（无 IEI——老收端无法定位，后续 IE 错位风险）'}`,
+        msg: hasIei
+          ? `${name}：新增 IE 行 ${rr.name}（IEI ${rr.iei}，${framed ? '老收端按未知 IE 跳过' : 'TV 无长度域——老收端不识该 IEI 即无法跳过，后续 IE 错位风险'}）`
+          : `${name}：新增 IE 行 ${rr.name}（无 IEI——老收端无法定位，后续 IE 错位风险）`,
       });
     }
   }
@@ -6857,7 +6893,7 @@ function diffMessageRows(name, li, ri, findings) {
       });
       continue;
     }
-    if ((lr.format || '').toUpperCase() !== (rr.format || '').toUpperCase() ||
+    if ((lr.format || '').trim().toUpperCase() !== (rr.format || '').trim().toUpperCase() ||
         (lr.len || '').replace(/\s/g, '') !== (rr.len || '').replace(/\s/g, '')) {
       findings.push({
         severity: 'break',
@@ -6892,8 +6928,9 @@ function msgTypeOf(schema, name) {
 //   - 新增消息 → info（收端对未知消息类型回 Unsupported Message Type——29.274 §7.3.1
 //     cause #1 / 29.060 'Message Type Non-Existent'——协议内处理路径，不算字节破坏）；
 //   - 同名消息 msgType 值变更 → break（同节消息在线缆上变成另一种语义）；
-//   - 行新增 → ok（GTP 收端 shall ignore 未知 IE——29.274 §7.6.1；29.060 TLV/TV 均带
-//     IEI 可跳过）；行删除 → info；
+//   - 行新增 → 按格式分档：TLV/LV 带长度域 → ok（GTP 收端 shall ignore 未知 IE——
+//     29.274 §7.6.1，按 Length 自界跳过）；TV/fixed 无长度域 → warn（老收端不识 IEI
+//     即不知值宽、无法跳过——GTPv1-C Echo 的 Recovery 即 TV 形态）；行删除 → info；
 //   - 同 IEI 行指向的 IE 节变更（ref 换节）→ break（同 IEI 值整个换语义）；
 //   - 行 format/len 变更 → break（TV↔TLV 破坏框架判读）；
 //   - presence 词表归一（29060 长词 'Mandatory/Optional/Conditional'、29274 短码
@@ -6905,28 +6942,23 @@ function msgTypeOf(schema, name) {
 const gtpPresClass = (p) => {
   const s = (p || '').trim();
   if (!s) return '';
-  if (/^m/i.test(s)) return 'M';
-  if (/^c/i.test(s)) return 'C';
-  if (/^o/i.test(s)) return 'O';
-  return s[0].toUpperCase();
+  const w = (s.split(/[\s(（]/)[0] || '').toUpperCase(); // 首词（容 '(NOTE)' 等后缀）
+  if (w === 'M' || w === 'MANDATORY') return 'M';
+  if (w === 'C' || w === 'CONDITIONAL') return 'C'; // 29060 长词与 29274 短码同档
+  if (w === 'CO') return 'CO'; // 29.274 条件可选——与 C 分档（v1.23.0：原先 /^c/ 前缀把 CO 并入 C 静默吞掉档位变化）
+  if (w === 'O' || w === 'OPTIONAL') return 'O';
+  const c = w[0];
+  return c === 'M' || c === 'C' || c === 'O' ? c : w;
 };
 // GTP 行键：同 IEI 多行（条件重复，如 Context Response 的多个 '* Context' 条件出现）按出现序配对
-const rowMapGtp = (rows) => {
-  const m = new Map();
-  const seen = {};
-  for (const r of rows) {
-    const k0 = String(r.iei);
-    seen[k0] = (seen[k0] || 0) + 1;
-    m.set(seen[k0] > 1 ? `${k0}#${seen[k0]}` : k0, r);
-  }
-  return m;
-};
+const rowMapGtp = (rows) => mapWithOrdinal(rows, (r) => String(r.iei));
 const gtpFramed = (fmt) => /^(tlv|lv|tliv)/i.test(fmt || ''); // 带长度域、收端自界
 
 function diffGtpIeLayout(ref, layL, layR, framed, findings) {
-  const keyOf = (r) => String(r.octet);
-  const lmap = new Map((layL || []).map((r) => [keyOf(r), r]));
-  const rmap = new Map((layR || []).map((r) => [keyOf(r), r]));
+  // octet 标签出现序号配对：变体行共用同一标签（7.7.29 '3'×6、8.123 '5-n*'×8），
+  // v1.23.0 前 Map 只保留最后一变体，其余被遮蔽（改第一变体将漏报）。
+  const lmap = mapWithOrdinal(layL || [], (r) => String(r.octet));
+  const rmap = mapWithOrdinal(layR || [], (r) => String(r.octet));
   for (const [k, rr] of rmap) {
     if (lmap.has(k)) continue;
     findings.push({
@@ -6949,8 +6981,9 @@ function diffGtpIeLayout(ref, layL, layR, framed, findings) {
       findings.push({ severity: 'info', kind: 'gtp-ie-rowcount', msg: `${ref}：行「${rr.octet}」重复/开区间语义变化（count ${lr.count || 1}→${rr.count || 1}${lr.open || rr.open ? '、open 标记变化' : ''}）` });
     }
     const fkey = (f) => (String(f.name).split('\n')[0] || f.name).trim(); // 主名（字段名可带换行脚注句——脚注措辞微调不算字段变更）
-    const lf = new Map((lr.fields || []).map((f) => [fkey(f), f]));
-    const rf = new Map((rr.fields || []).map((f) => [fkey(f), f]));
+    // 同名字段出现序号配对（行内重复的 Spare/字面量位字段）——与 octet 行同则
+    const lf = mapWithOrdinal(lr.fields || [], fkey);
+    const rf = mapWithOrdinal(rr.fields || [], fkey);
     for (const [nm, f] of rf) {
       const g = lf.get(nm);
       if (!g) { findings.push({ severity: 'info', kind: 'gtp-ie-field', msg: `${ref}：行「${rr.octet}」新增字段 ${nm}（bit ${f.hi}-${f.lo}）` }); continue; }
@@ -6979,10 +7012,17 @@ function diffGtpSchema(left, right) {
     }
     const rinsts = rmsg[name];
     const linsts = lmsg[name];
-    const paired = pairLeftByDirection(linsts, rinsts);
+    const { paired, unused } = pairLeftByDirection(linsts, rinsts);
+    for (const li of unused) {
+      findings.push({ severity: 'info', kind: 'gtp-inst-del', msg: `${name}：删除消息表实例${li.direction ? `（direction ${li.direction}）` : ''}` });
+    }
     for (let i = 0; i < rinsts.length; i++) {
       const ri = rinsts[i];
       const li = paired[i];
+      if (!li) {
+        findings.push({ severity: 'info', kind: 'gtp-inst-add', msg: `${name}：新增消息表实例${ri.direction ? `（direction ${ri.direction}）` : ''}（旧版本无对应表分片）` });
+        continue;
+      }
       if (li.msgType != null && ri.msgType != null && li.msgType !== ri.msgType) {
         findings.push({ severity: 'break', kind: 'gtp-msgtype', msg: `${name}：消息类型值变更 ${li.msgType} → ${ri.msgType}（0x${li.msgType.toString(16)} → 0x${ri.msgType.toString(16)}）` });
       }
@@ -6990,14 +7030,19 @@ function diffGtpSchema(left, right) {
       const rrow = rowMapGtp(ri.rows);
       for (const [k, rr] of rrow) {
         if (!lrow.has(k)) {
-          findings.push({ severity: 'ok', kind: 'gtp-row-add', msg: `${name}：新增 IE 行 ${rr.name}（IEI ${rr.iei}，收端按未知 IE 忽略）` });
+          const framedAdd = gtpFramed(rr.format);
+          findings.push({
+            severity: framedAdd ? 'ok' : 'warn',
+            kind: 'gtp-row-add',
+            msg: `${name}：新增 IE 行 ${rr.name}（IEI ${rr.iei}，${framedAdd ? 'TLV/LV 收端按 Length 跳过未知 IE' : 'TV/fixed 无长度域——老收端不识 IEI 即无法跳过，错位风险'}）`,
+          });
           continue;
         }
         const lr = lrow.get(k);
         if ((lr.ref || null) !== (rr.ref || null)) {
           findings.push({ severity: 'break', kind: 'gtp-row-ref', msg: `${name}：IEI ${rr.iei}（${rr.name}）指向的 IE 节变更 ${lr.ref || '?'} → ${rr.ref || '?'}（原 ${lr.name}）` });
         }
-        if ((lr.format || '').toUpperCase() !== (rr.format || '').toUpperCase() ||
+        if ((lr.format || '').trim().toUpperCase() !== (rr.format || '').trim().toUpperCase() ||
             (lr.len || '').replace(/\s/g, '') !== (rr.len || '').replace(/\s/g, '')) {
           findings.push({ severity: 'break', kind: 'gtp-row-format', msg: `${name}：IE ${rr.name} 框架变更 ${lr.format}/${lr.len || ''} → ${rr.format}/${rr.len || ''}` });
         }
@@ -7027,7 +7072,7 @@ function diffGtpSchema(left, right) {
     if (li.ieType != null && ri.ieType != null && li.ieType !== ri.ieType) {
       findings.push({ severity: 'break', kind: 'gtp-ie-type', msg: `${ref} ${ri.name}：IE Type 值变更 ${li.ieType} → ${ri.ieType}（老收端认不出/错认）` });
     }
-    if ((li.format || '') !== (ri.format || '')) {
+    if ((li.format || '').trim().toUpperCase() !== (ri.format || '').trim().toUpperCase()) {
       findings.push({ severity: 'break', kind: 'gtp-ie-format', msg: `${ref} ${ri.name}：格式变更 ${li.format || '?'} → ${ri.format || '?'}（框架判读破坏）` });
     }
     if ((li.fixed ?? null) !== (ri.fixed ?? null)) {
@@ -7066,10 +7111,17 @@ function diffNasSchema(left, right) {
     // 同名消息：逐实例配对（同 direction 按序、失配回退下标——见 pairLeftByDirection）
     const rinsts = rmsg[name];
     const linsts = lmsg[name];
-    const paired = pairLeftByDirection(linsts, rinsts);
+    const { paired, unused } = pairLeftByDirection(linsts, rinsts);
+    for (const li of unused) {
+      findings.push({ severity: 'info', kind: 'nas-inst-del', msg: `${name}（${li.direction || '?'}）：删除消息表实例` });
+    }
     for (let i = 0; i < rinsts.length; i++) {
       const ri = rinsts[i];
       const li = paired[i];
+      if (!li) {
+        findings.push({ severity: 'info', kind: 'nas-inst-add', msg: `${name}（${ri.direction || '?'}）：新增消息表实例（旧版本无对应表分片）` });
+        continue;
+      }
       if (li.msgType != null && ri.msgType != null && li.msgType !== ri.msgType) {
         findings.push({ severity: 'break', kind: 'nas-msgtype', msg: `${name}（${ri.direction || '?'}）：消息类型值变更 0x${li.msgType.toString(16)} → 0x${ri.msgType.toString(16)}` });
       }
@@ -12601,13 +12653,18 @@ function nasDoDiff() {
   const L = nasState.schemas[lk], R = nasState.schemas[rk];
   const isGtp = (s) => s && (s.spec === '29060' || s.spec === '29274');
   let out;
-  if (isGtp(L) && isGtp(R)) {
-    if (L.spec !== R.spec) { inlineMsg('nasDiffOut', `跨规范对比（${L.spec} vs ${R.spec}）无语义可比性——选同一规范的两个版本。`); return; }
-    out = diffGtpSchema(L, R); // GTP 族：消息表行级 + IE 节定义/布局行级（批次L）
-  } else if (!isGtp(L) && !isGtp(R)) {
-    out = diffNasSchema(L, R);
-  } else {
-    inlineMsg('nasDiffOut', `混族对比（${L.spec || '?'} vs ${R.spec || '?'}）不支持——NAS 与 GTP 的消息/IE 表语义不同。`);
+  try {
+    if (isGtp(L) && isGtp(R)) {
+      if (L.spec !== R.spec) { inlineMsg('nasDiffOut', `跨规范对比（${L.spec} vs ${R.spec}）无语义可比性——选同一规范的两个版本。`); return; }
+      out = diffGtpSchema(L, R); // GTP 族：消息表行级 + IE 节定义/布局行级（批次L）
+    } else if (!isGtp(L) && !isGtp(R)) {
+      out = diffNasSchema(L, R);
+    } else {
+      inlineMsg('nasDiffOut', `混族对比（${L.spec || '?'} vs ${R.spec || '?'}）不支持——NAS 与 GTP 的消息/IE 表语义不同。`);
+      return;
+    }
+  } catch (e) {
+    inlineMsg('nasDiffOut', `Diff 失败：${e.message}`);
     return;
   }
   const { findings, counts } = out;

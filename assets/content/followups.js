@@ -661,6 +661,30 @@
         a: '§16.14.3.2.3：透明载荷、准地对固定场景、同 SSB 频、同 gNB 下支持；靠维持同一 PCI 避免 L3 移动。**软切换**=UE **可在源卫星结束服务前**开始与目标卫星同步、切换时**不要求仍连着源**；**硬切换**=**只能等源卫星结束服务后**才开始同步；与 CHO 同时触发时由 UE 实现决定走哪个；重同步的随机接入可由**目标卫星的 PDCCH order** 触发（M60 课 c3）。',
         ref: '38.300#16.14.3.2.3' }
     ] },
+    'm61:q0': { levels: [
+      { q: '切片、SNPN、PNI-NPN 三种身份分别写在哪？',
+        a: '§16.3.1：切片身份=**S-NSSAI**（必选 **SST 8 bit，0–255**+可选 **SD 24 bit**；NSSAI 至多 **8 个**，UE 不必支持超过 8 个）；§16.6.1：SNPN 身份=**PLMN ID+NID**，在 **SIB1** 广播，SNPN access mode 下只选/注册 SNPN；§16.7.1：PNI-NPN 的 **CAG identifier** 在 **SIB1** 广播，CAG-capable UE 每 PLMN 配 **Allowed CAG list+CAG-only indication**——三种身份分别写在 PLMN 内、PLMN 外与 PLMN 的封闭小区上（M61 课 h0/d1）。',
+        ref: '38.300#16.3.1' },
+      { q: 'UE 既没有 Temp ID、也没有 NSSAI 时，NG-RAN 怎么选 AMF？选路底表是什么？',
+        a: '§16.3.4.2：两者都没有时，NG-RAN **routes the UE to one of the configured default AMF(s)**；无 Temp ID 时用 UE 在 RRC 连接建立提供的 NSSAI（**MSG3 之后**）。底表=**NG Setup Response** 里的 **supported S-NSSAI 列表**，可经 **AMF Configuration Update** 更新——三条选路按 Temp ID→NSSAI→默认 AMF 排序（M61 课 a2）。',
+        ref: '38.300#16.3.4.2' }
+    ] },
+    'm61:q2': { levels: [
+      { q: '切片的三档资源是什么？切片级 RACH 的 NSAG 门槛怎么记？',
+        a: '§16.3.3.1：每张切片可分到 **shared、prioritized 或 dedicated** 无线资源（RRM 实现+SLA，28.541）；OAM 配不同配置集，RAN 按「哪套配置适用于这张切片」选择。切片级 RACH 可进 **SIB1** 并**关联 NSAG**：UE 考虑的 NSAG 没配 RACH 配置→不把它用于选切片级 RACH；**UE AS 未从 NAS 收到 RA 用 NSAG 信息→不应用切片级 RACH 配置**（M61 课 b1）。',
+        ref: '38.300#16.3.3.1' },
+      { q: '切片资源短缺时，RAN 有哪两种腾挪方法？',
+        a: '§16.3.3.2：① **Multi-Carrier Resource Sharing**——在同一张切片可用、**频率不同且覆盖重叠**的载波上建**双连接或载波聚合**；② **Resource Repartitioning**——切片自有专用/优先资源不可用时，用**共享池和/或优先池**（优先池未使用资源按 28.541）。切片 RRM 策略由 **O&M** 配，RAN 上报 **RRM 策略利用率测量**，O&M 可据此更新配置（M61 课 b2）。',
+        ref: '38.300#16.3.3.2' }
+    ] },
+    'm61:q4': { levels: [
+      { q: 'SNPN 的 suitable 条件是什么？连接态切换怎么筛目标、谁做接入控制？',
+        a: '§16.6.2.1：SNPN 接入模式 UE 只在**所选/已注册 SNPN 或等效 SNPN** 内重选，小区 suitable 需**广播的 PLMN 与 NID 都匹配**；§16.6.2.3：源节点**不把不支持服务 SNPN 或限制内等效 SNPN 的小区列为候选**，**目标节点执行接入控制**，不能接受则**切换失败并带适当 cause**（M61 课 c2）。',
+        ref: '38.300#16.6.2.1' },
+      { q: 'CAG-only indication 下的 suitable 规则是什么？onboarding UE 在什么时机发指示？',
+        a: '§16.7.2.1：配了 **CAG-only indication** 后**只有 CAG Member Cell 才 suitable**（Member Cell=广播所选/注册/等效 PLMN ID 且 CAG ID 属于 **Allowed CAG list**）；非 suitable 小区仍可 acceptable（若对该 PLMN 配了 CAG-only）。§16.6.6：UE 打算 onboarding 时**在 RRC 连接建立期间向 gNB 发 onboarding request indication**，NG-RAN 按 **AMF 的 onboarding 支持能力**选合适 AMF（M61 课 d2/c4）。',
+        ref: '38.300#16.7.2.1' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
