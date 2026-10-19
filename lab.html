@@ -8219,11 +8219,13 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
       }
     }
     // 29.274 §8.x / 29.060 §7.7.x IE 位布局表（gutter 形——parseBitTable 不识别）：布局直出。
-    // 29.060 头只占 octet 1（Type），TLV 的 Length 行由 hdrOctets<4 的 Length 行守卫剥除
+    // 29.060 头只占 octet 1（Type），TLV 的 Length 行由 hdrOctets<4 的 Length 行守卫剥除。
+    // 节归属用 splitHeadingSfx——字母后缀节号（29.060 '7.7.25A MS Not Reachable Reason' 实证）
+    // 被 splitHeading 吞进标题（section '7.7.25' + title 'A …'），布局错挂孤键、本节失明。
     if (spec === '29274') {
       const gt = parseGtpIeTable(it.rows);
       if (gt) {
-        const sh = it.heading ? splitHeading(it.heading.text) : { num: null, title: null };
+        const sh = it.heading ? splitHeadingSfx(it.heading.text) : { num: null, title: null };
         bits.push({ section: sh.num, name: sh.title, figure: it.paras?.find((p) => /^Figure/i.test(p)) || null, octets: gt.octets, ...(gt.warnings && gt.warnings.length ? { warnings: gt.warnings } : {}) });
         continue;
       }
@@ -8231,7 +8233,7 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
     if (spec === '29060') {
       const gt = parseGtpIeTable(it.rows, 1);
       if (gt) {
-        const sh = it.heading ? splitHeading(it.heading.text) : { num: null, title: null };
+        const sh = it.heading ? splitHeadingSfx(it.heading.text) : { num: null, title: null };
         bits.push({ section: sh.num, name: sh.title, figure: it.paras?.find((p) => /^Figure/i.test(p)) || null, octets: gt.octets, ...(gt.warnings && gt.warnings.length ? { warnings: gt.warnings } : {}) });
         continue;
       }
@@ -9388,6 +9390,21 @@ function buildSchema29060(structured) {
     ies[e.ref].fixed = e.fixed;
     if (GTPV1_LEN1.has(e.value)) ies[e.ref].lenBytes = 1;
   }
+  // 批次K：图形/override 布局并入——只补无位表 IE（表格布局优先；override 再压图形）。
+  // figbits = nasfiglayout.mjs 从用户 spec 内嵌 WMF/EMF 图重建的候选（accepted 已按
+  // 「无 HARD 旗标」筛过，重建规则与旗标语义见 tools/nasfiglayout.mjs 头注）；
+  // figfix = 歧义带（多命名字段）与网格错位表的手工核验布局（D 侧构建输入，逐条带证据）。
+  // 两者都是用户自带 spec 的构建期衍生物——仓库不含任何所得布局数据。
+  const figfix = structured.figfix && structured.figfix.sections ? structured.figfix.sections : {};
+  const figbits = structured.figbits && structured.figbits.accepted ? structured.figbits.accepted : {};
+  for (const [ref, fix] of Object.entries(figfix)) {
+    if (ies[ref] === undefined || ies[ref].layouts.length) continue;
+    ies[ref].layouts = [{ figure: `figfix: ${(fix.evidence || '').slice(0, 60)}`, octets: fix.octets, src: 'fix' }];
+  }
+  for (const [ref, pick] of Object.entries(figbits)) {
+    if (ies[ref] === undefined || ies[ref].layouts.length) continue;
+    ies[ref].layouts = [{ figure: `fig ${pick.fig}`, octets: pick.octets, src: 'fig', ...(pick.flags.length ? { warnings: pick.flags } : {}) }];
+  }
   // 消息实例（§7.2-7.5A）：行 ref 反查 IE 主表
   const out = {};
   for (const m of structured.msgs || []) {
@@ -10383,7 +10400,7 @@ function renderShell() {
 <header class="topbar">
   <div class="logo">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1" y="1" width="7" height="7" rx="1.5" fill="#0f62fe"/><rect x="10" y="1" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="1" y="10" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="10" y="10" width="7" height="7" rx="1.5" fill="#0f62fe"/></svg>
-    RRC&nbsp;Workbench <span class="dim">v1.20.0</span>
+    RRC&nbsp;Workbench <span class="dim">v1.21.0</span>
   </div>
   <nav class="tabs">
     <button class="tab on" data-page="encode">帧生成器</button>
@@ -10394,7 +10411,7 @@ function renderShell() {
     <button class="tab" data-page="library">规范库</button>
     <button class="tab" data-page="about">关于</button>
   </nav>
-  <span class="ver">v1.20.0 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
+  <span class="ver">v1.21.0 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
 </header>
 <main>
   <section class="page on" id="page-encode"></section>
@@ -10405,7 +10422,7 @@ function renderShell() {
   <section class="page" id="page-library"></section>
   <section class="page" id="page-about"></section>
 </main>
-<div class="foot">RRC Workbench v1.20.0 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
+<div class="foot">RRC Workbench v1.21.0 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => goto(t.dataset.page)));
 }
 function goto(id) {
