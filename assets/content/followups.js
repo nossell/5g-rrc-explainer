@@ -613,6 +613,30 @@
         a: '§16.9.8：**scheme 1=优选/非优选资源**（触发两路：本 UE 条件/对端显式请求；载体 **MAC CE 与二阶 SCI 或仅 MAC CE**；显式请求两件全单播、条件触发的非优选集可三 cast）；**scheme 2=对端 SCI 资源上的预期/潜在冲突**（载体 **PSFCH**）——scheme 1 给地图、scheme 2 给警告（M58 课 d1）。',
         ref: '38.300#16.9.8' }
     ] },
+    'm59:q0': { levels: [
+      { q: '广播与多播两族服务的授权边界与可收状态差别是什么？',
+        a: '§16.10.1：**广播**=同一内容给**地理区域内所有 UE**（区域内全授权），交付用 **broadcast session**，**三态全可收**（IDLE/INACTIVE/CONNECTED）；**多播**=给**专属的一组 UE**（非服务区内全授权），交付用 **multicast session**，**CONNECTED** 用 PTP 和/或 PTM、**INACTIVE** 用 PTM，且 CONNECTED 下 **HARQ 反馈/重传对两腿都可用**——「对区域喊」vs「对名单发」（M59 课 a1）。',
+        ref: '38.300#16.10.1' },
+      { q: '多播数据只能在哪些 RRC 状态接收？状态之间靠什么搬运？',
+        a: '§16.10.5.2：多播**只能在 RRC_CONNECTED 或 RRC_INACTIVE 收**（没有 IDLE）；C→I 经 **RRCRelease**、I→C 经 **group notification 或 UE-specific paging**；组通知以 **P-RNTI** 寻址、paging 带 **MBS session ID**（不逐个页）；两者同至时**跟随 UE-specific paging 进 CONNECTED**（M59 课 b2）。',
+        ref: '38.300#16.10.5.2' }
+    ] },
+    'm59:q2': { levels: [
+      { q: '5GC 的两种 MBS 交付模式是什么？共享 NG-U 怎么用？',
+        a: '§16.10.5.1：**5GC Shared MBS traffic delivery** 与 **5GC Individual MBS traffic delivery**；只要 gNB 支持 MBS，网络 **shall 用 Shared**——**首个 UE join 时**建 MBS Session Resource，gNB 触发 **Multicast Distribution Setup** 分配**共享 NG-U**（location dependent 服务按 **Area Session ID** 各建 NG-U）；传输选项 unicast 或 multicast transport（M59 课 b1）。',
+        ref: '38.300#16.10.5.1' },
+      { q: '多播无损切换的条件是什么？PDCP COUNT 值怎么保同步？',
+        a: '§16.10.5.3.2：无损切换支持于「**目标小区 MRB 配了 PTP RLC AM**」（regardless of 源小区）——网络还须保证 **DL PDCP COUNT 同步与连续性**、可做数据转发与 PDCP status report；COUNT 同步两法（§16.10.5.1）：**DL MBS QFI Sequence Number 推导**（单流 shall、多流可取和）与 **Shared NG-U Termination**（M59 课 b3）。',
+        ref: '38.300#16.10.5.3.2' }
+    ] },
+    'm59:q4': { levels: [
+      { q: '广播的 MCCH 有哪四条原则？内容什么时候可以改？',
+        a: '§16.10.6.2 四原则：**①目录**（列所有进行中会话+session ID/G-RNTI 调度/邻区，周期性传输窗口=重复周期+窗口时长+帧/时隙偏移）；**②修改**——**只在 modification period 边界改**+变更通知机制；**③NOTE**（盯 MCCH 的时机由 UE 实现按 USD 定）；**④同期获取**——收到变更通知在**同一修改周期内**取更新 MCCH（M59 课 c2）。',
+        ref: '38.300#16.10.6.2' },
+      { q: 'UE 在 RRC_INACTIVE 续收多播、换小区不断线，靠什么条件？',
+        a: '§16.10.5.3.5：续收前提=**新小区 PTM 配置能从多播 MCCH 获得**（拿不到必须恢复连接去取）；**即使此前被指示停盯 G-RNTI**，重选后也要读新小区 MCCH；**RNA 内 cell PDCP COUNT 同步**指示时 UE **不初始化 PDCP 状态变量**（否则初始化）——配置可得性+计数连续性两根柱子（M59 课 b4）。',
+        ref: '38.300#16.10.5.3.5' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
