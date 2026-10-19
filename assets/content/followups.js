@@ -565,6 +565,30 @@
         a: '§16.21.3.1 Figure -3 step4：此刻 MP Remote UE 还没有 direct 腿——gNB **经 Relay 转发**把重配（至少含 direct 路径添加配置的目标小区）发给 Remote；随后 Remote 同步目标小区下行+随机接入、**把目标小区配置为 PCell**，直连腿立起（M56 课 c3）。',
         ref: '38.300#16.21.3.1' }
     ] },
+    'm57:q0': { levels: [
+      { q: 'A-IoT 里 reader 的角色由谁担当？设备侧为什么不发周期信号？',
+        a: '§16.23.1：本版本 **A-IoT reader 就是 gNB-reader**（reader 是 gNB 的一项能力，没有独立网元）；设备侧第一性原理是「**只要能量够就监听 R2D 消息**」——不主动扫网、不周期上报，一切从「听到 R2D」开始：发射的能量重活交给网络侧，标签只留最省电的监听动作（M57 课 a1）。',
+        ref: '38.300#16.23.1' },
+      { q: 'gNB、reader 与 A-IoT Area 三者的关系怎么记？',
+        a: '§16.23.2 增补七条：**一台 gNB 服务一个或多个 reader**、**一台 reader 只属于一台 gNB**（归属唯一）；**Area 与 reader 多对多**——A-IoT Area 可包含同一或不同 gNB 的 reader、一个 reader 可映射多个 Area；而这一切映射**全靠 OAM 配置**下发（M57 课 a2）。',
+        ref: '38.300#16.23.2' }
+    ] },
+    'm57:q2': { levels: [
+      { q: 'CN 侧 AIOTF 直连与经 AMF 间接，差别在哪？',
+        a: '§16.23.2：A-IoT CN 节点要么是 **AIOTF（直连）**要么是 **AMF（间接）**；间接形态下 **A-IoT 特定信息经 AMF 透明转发**——AMF 只当信使不改内容（抓包在 AMF 侧看不到 A-IoT 语义）；gNB 经 **OAM** 得知自己是否直连；本版本**不期望**直连与间接并存的部署（NOTE）（M57 课 a3）。',
+        ref: '38.300#16.23.2' },
+      { q: '本版本的 A-IoT 有哪些「不」要背？',
+        a: '三条版本级边界（§16.23.2）：**gNB 之间无 A-IoT 特定通信**（Area 可跨 gNB，但 gNB 间不为 A-IoT 通话）、**不支持 split gNB 架构**、**直连+间接并列部署不期望**（NOTE）——都是「In this version」合同范围，不是实现选项；再加位置只承诺 **Reader ID 粒度**（M57 课 d1/d2）。',
+        ref: '38.300#16.23.2' }
+    ] },
+    'm57:q4': { levels: [
+      { q: 'CBRA 与 CFA 的关键区别是什么？',
+        a: '§16.23.5.3：**CBRA**——在寻呼配置的 access occasion 里随机选一个、监听 Access Trigger、发 MSG1（Access Random ID）、等 MSG2 竞争解决（**含匹配频率索引且随机 ID 相同才算成功**）；**CFA**——用寻呼提供的**专用资源直发 D2R 上层数据、不监听 Access Trigger**（省掉整个竞争环节）；两者都由**寻呼消息的显式指示**选择（M57 课 c1）。',
+        ref: '38.300#16.23.5.3' },
+      { q: '访问与数据的失败重入各有哪几把钥匙？',
+        a: '§16.23.5.3/5.4：CBRA 竞争失败后**应（shall）在收到带同一 transaction ID 的寻呼时重入**；数据侧两条线——收到**含本设备 AS ID 的 MSG2**→重传 D2R 上层数据；收到**含本设备 AS ID 的 NACK**→重入（待同事务寻呼）；无 SDU 场景另有一枚指示区分「尚不可用（reader 可 follow-up）/被忽略」（M57 课 c1/c2）。',
+        ref: '38.300#16.23.5.4.1' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
