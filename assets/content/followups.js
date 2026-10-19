@@ -637,6 +637,30 @@
         a: '§16.10.5.3.5：续收前提=**新小区 PTM 配置能从多播 MCCH 获得**（拿不到必须恢复连接去取）；**即使此前被指示停盯 G-RNTI**，重选后也要读新小区 MCCH；**RNA 内 cell PDCP COUNT 同步**指示时 UE **不初始化 PDCP 状态变量**（否则初始化）——配置可得性+计数连续性两根柱子（M59 课 b4）。',
         ref: '38.300#16.10.5.3.5' }
     ] },
+    'm60:q0': { levels: [
+      { q: '透明载荷与再生载荷的核心区别是什么？服务链路与馈电链路各指哪一段？',
+        a: '§16.14.1：**透明载荷**把从 UE（经**服务链路 service link**）收到的无线协议**透明转发**给 NTN Gateway（经**馈电链路 feeder link**），反向亦然——gNB 在地面；**再生载荷**则**终结 Uu（经服务链路）、NG 与 Xn 接口**——gNB 上星；一个 Gateway 可服务多个载荷、一个载荷可被多个 Gateway 服务，再生载荷还可终结星间链路（M60 课 a1）。',
+        ref: '38.300#16.14.1' },
+      { q: '三种会动的小区型分别怎么定义？GSO 与 NGSO 各能提供哪些？',
+        a: '§16.14.1：**Earth-fixed**=波束持续覆盖同一地理区域（GSO）；**Quasi-Earth-fixed**=一个区域覆盖有限时间、另一时段换区域（NGSO 可控波束）；**Earth-moving**=覆盖区在地表滑动（NGSO 固定/非可控波束）；组合：**NGSO 给 quasi 或 earth-moving，GSO 给 earth-fixed 或 quasi**（M60 课 a1）。',
+        ref: '38.300#16.14.1' }
+    ] },
+    'm60:q2': { levels: [
+      { q: 'NTN 调度与定时里有哪几笔偏移？调度偏移的条件与用途各是什么？',
+        a: '§16.14.2.1：DL/UL 在**上行时间同步参考点 RP** 帧对齐（偏移 NTA,offset）；增强项=**Common TA**（定时偏移，约等于 RP 与载荷间 RTT）与两偏移——**调度偏移**须 **≥ 服务链路 RTT+Common TA**（给 UE 足够的 DL→UL 处理时间）、**K_mac**（≈RP 与 gNB 间 RTT；用于延迟 MAC CE 配置应用、UE-gNB RTT 估计、RAR/MsgB 窗口起点）（M60 课 b1）。',
+        ref: '38.300#16.14.2.1' },
+      { q: 'UE 在什么情况下绝不允许发送？预补偿由谁算、谁算哪一段多普勒？',
+        a: '§16.14.2.2：UE **shall** 有**有效 GNSS 位置+星历+Common TA** 才连 NTN 小区；**若无有效 GNSS 位置和/或有效星历与 Common TA——shall not transmit until both are regained**；UE 自算 UE↔RP 的 RTT 并**自主预补偿 TTA**、自算**服务链路多普勒**并预补偿；**馈电链路多普勒与转发器频率误差留给网络实现**（M60 课 b2）。',
+        ref: '38.300#16.14.2.2' }
+    ] },
+    'm60:q4': { levels: [
+      { q: 'Mapped Cell ID 在哪些场景使用？哪些消息里期望的是 Uu Cell ID？',
+        a: '§16.14.5：Mapped Cell ID 五处——**ULI（User Location Information）/NG 寻呼优化/Area of Interest/PWS/MBS 广播服务**（与轨道、服务链型无关）；而**NG/Xn 切换消息、Xn Setup、Xn NG-RAN Node Configuration Update** 里的 cell identity **expected to be Uu Cell ID**；映射配在 RAN 与 CN 两侧、**gNB 负责构建**，特殊 Mapped Cell ID/TAC 可指示服务 PLMN 国家之外的区域（M60 课 a2）。',
+        ref: '38.300#16.14.5' },
+      { q: '卫星重同步切换（satellite switch with re-synchronization）软/硬的同步时间窗差别？',
+        a: '§16.14.3.2.3：透明载荷、准地对固定场景、同 SSB 频、同 gNB 下支持；靠维持同一 PCI 避免 L3 移动。**软切换**=UE **可在源卫星结束服务前**开始与目标卫星同步、切换时**不要求仍连着源**；**硬切换**=**只能等源卫星结束服务后**才开始同步；与 CHO 同时触发时由 UE 实现决定走哪个；重同步的随机接入可由**目标卫星的 PDCCH order** 触发（M60 课 c3）。',
+        ref: '38.300#16.14.3.2.3' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
