@@ -709,6 +709,30 @@
         a: '§16.16：**SMF 请求 + gNB 回状态 + Xn 切换交底**对 gNB 标记/UPF 标记/拥塞上报**各来一遍**；CE 码点设在 **DL/UL SDAP SDU**，依据 **RFC 9330/9331/9332**。§16.17 只有一句：NG-RAN **may support** TSN enabled Transport Network，细节在 **23.501**——38.300 不定义传输网机制（M62 课 d1-d3/f5）。',
         ref: '38.300#16.16' }
     ] },
+    'm63:q0': { levels: [
+      { q: 'PWS 的寻呼监听为什么要分状态？告警寻呼与普通配置变更最大的区别是什么？',
+        a: '§16.4：IDLE 与 INACTIVE（无 SDT 进行中）守**自己的寻呼时机**；CONNECTED 以及 INACTIVE 的 SDT 中听**任意寻呼时机**——网络知道连接态 UE 在哪、可随时叫。寻呼指示 **ETWS/CMAS** 时**triggers acquisition of system information (without delaying until the next modification period)**，即**不等修改周期**立刻取 SIB；ePWS 支持语言无关内容与无界面终端，KPAS/EU-Alert 复用 CMAS 的 AS 机制（M63 课 a1/a2/f1）。',
+        ref: '38.300#16.4' },
+      { q: 'ims-EmergencySupport 与 eCallOverIMS-Support 的共享环境条件为什么相反？受限态 UE 为什么要两个都看？',
+        a: '§16.5.2：ims-EmergencySupport 在非共享环境看**任一 AMF**、共享环境看**至少一个 PLMN**；§16.5.3e：eCallOverIMS-Support 在共享环境要求**所有 PLMN** 都支持。受限服务态的 UE 判断 eCall 时必须**同时看**两个指示；非受限态才**只看** eCallOverIMS-Support（M63 课 a3/a4/f2）。',
+        ref: '38.300#16.5.3e' }
+    ] },
+    'm63:q2': { levels: [
+      { q: '灾难漫游的放行范围与负载控制分别由什么决定？为什么用 Access Identity 3？',
+        a: '§16.11：小区广播**有灾难条件的 PLMN 列表**，灾难漫游**只在覆盖灾区范围的区域**提供；负载控制用**灾难漫游专用接入控制参数**，接入尝试基于 **Access Identity 3**——网络可把 AI 3 参数设得使这些 UE **更易被禁**，实现「放你进来但按容量收着放」（M63 课 b1/f3）。',
+        ref: '38.300#16.11' },
+      { q: 'RedCap 与 eRedCap 的接入门禁有哪些硬规则？IFRI 缺失意味着什么？',
+        a: '§16.13.3：MSG3/MSGA 用**专用 LCID** 识别，**无论是否配置专用随机接入配置**；MSG1/MSGA 可选。1Rx/2Rx 与 HD-FDD 可分别经系统信息允许；**RedCap/eRedCap 专用 IFRI 缺失时不允许接入**（白名单门禁）；1Rx 对广播 RSRP 阈值应用偏置。§16.13.4/.5 另有测量放松与初始 BWP 锚 CD-SSB 的省电账（M63 课 b3/b4/f4）。',
+        ref: '38.300#16.13.3' }
+    ] },
+    'm63:q4': { levels: [
+      { q: 'Aerial UE 的干扰检测为什么会抑制后续报告？飞行路径更新由哪些条件触发？',
+        a: '§16.18.5：干扰检测用 A3/A4/A5/AxHy；触发小区列表**仍≥配置数量**时**不再发更多报告**，除非配置 **reportOnLeave**（列表本身仍更新）。§16.18.6：NG-RAN 可**基于或不基于** UE 的「有航路信息」指示请求航路；航路=3D 航点（37.355），可带时间戳；配置**距离/时间阈值**且任一航点满足，或**新增航点/未来航点被删除**时，UE 指示有更新（M63 课 c3/f5）。',
+        ref: '38.300#16.18.5' },
+      { q: 'ATG 的 UE 在接入前要自己算什么？AI/ML for NG-RAN 的模型边界在哪？',
+        a: '§16.19.2.2：UE 接入 ATG 小区前须有**有效 GNSS 位置与 gNB 位置**，据二者**自算 RTT** 并**自主预补偿 TTA**；连接态持续更新 TA，可事件触发上报。§16.20.2：AI/ML **算法与模型在 3GPP 范围之外**；**模型性能信息不在 38.401 的 NG-RAN 接口交换**；**不适用 ng-eNB**；流程与用例/数据类型无关、**不指示数据用途**（M63 课 d1-d3/f6）。',
+        ref: '38.300#16.20.2' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

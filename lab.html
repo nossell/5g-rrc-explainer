@@ -6473,6 +6473,37 @@ function encPfcpMsg(inst, parts = [], hdr = {}) {
   return Uint8Array.from([...out, ...body]);
 }
 
+// ---- 批次 Y：F-SEID 头部联动（会话请求/响应样例帧组） ------------------------------
+// F-SEID 值 = flags(1) + SEID(8) + 可选地址；返回 SEID 8 字节 hex，布局不足返回 null。
+function pfcpSeidHex(value) {
+  if (!value || value.length < 9) return null;
+  return Array.from(value.slice(1, 9)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 请求/响应头 SEID 联动（29.244 §7.2.2.2/.3）：会话消息头 SEID 指向会话的 CP 侧 SEID。
+// establishment=true（建立流程）时请求头 SEID 保持 0（会话尚未建立），响应头 SEID =
+// 请求 CP F-SEID；其余流程（mod/del/report）请求与响应头 SEID 均 = CP 侧 SEID——请求未带
+// F-SEID（条件 IE 未采样）时用调用方提供的 sessionSeid（CLI 按 seed 确定性生成）。
+// 响应 UP F-SEID 仅作展示（UP 侧独立分配，不互相复制）。
+function pfcpLinkFlow(reqInst, reqBytes, resInst, resBytes, { establishment = false, sessionSeid = null } = {}) {
+  const warnings = [];
+  const rq = decPfcpMsg(reqInst, reqBytes, null);
+  const rs = decPfcpMsg(resInst, resBytes, null);
+  const cpPart = rq.parts.find((p) => /CP F-SEID/i.test(String((p.row && p.row.name) || '')));
+  const cpSeid = cpPart ? pfcpSeidHex(cpPart.value) : null;
+  const session = cpSeid || (sessionSeid
+    ? String(sessionSeid).replace(/[^0-9a-f]/gi, '').padStart(16, '0').slice(-16)
+    : null);
+  if (!session) warnings.push('请求缺少 CP F-SEID 且未提供 sessionSeid——请求/响应头 SEID 保持原值');
+  const upPart = rs.parts.find((p) => /UP F-SEID/i.test(String((p.row && p.row.name) || '')));
+  const upSeid = upPart ? pfcpSeidHex(upPart.value) : null;
+  const headReq = session && !establishment ? session : null;
+  const headRes = session || null;
+  const reqOut = encPfcpMsg(reqInst, rq.parts, { seidHex: headReq != null ? headReq : rq.hdr.seidHex, seq: rq.hdr.seq });
+  const resOut = encPfcpMsg(resInst, rs.parts, { seidHex: headRes != null ? headRes : rs.hdr.seidHex, seq: rs.hdr.seq });
+  return { reqBytes: reqOut, resBytes: resOut, cpSeidHex: session, upSeidHex: upSeid, warnings };
+}
+
 // ==== src/nas/gtpu.js ====
 // src/nas/gtpu.js — 29.281（GTP-U）隧道头 + 扩展头链构造/反解。
 //
@@ -6566,6 +6597,83 @@ function gtpuExtBytes(type, content, next = 0) {
   out.set(c.slice(0, n * 4 - 2), 1);
   out[n * 4 - 1] = next & 0xff;
   return out;
+}
+
+// ---- 批次 X：T-PDU 载荷构造（最小合法 IPv4/IPv6/以太网帧）+ GTP-U Echo --------------
+const gtpuBytes = (v, n, what) => {
+  const a = v instanceof Uint8Array ? v : Uint8Array.from(v || []);
+  if (a.length !== n) throw new Error(`${what} 长度应为 ${n}（实为 ${a.length}）`);
+  return a;
+};
+
+// IPv4：20 字节头 + 载荷；Total Length 与头校验和实算（RFC 791）。
+function ipv4Frame({ src = [10, 0, 0, 1], dst = [10, 0, 0, 2], proto = 17, ttl = 64, tos = 0, id = 0, flagsFrag = 0, payload = [] } = {}) {
+  const s = gtpuBytes(src, 4, 'IPv4 源地址');
+  const d = gtpuBytes(dst, 4, 'IPv4 目的地址');
+  const pl = payload instanceof Uint8Array ? payload : Uint8Array.from(payload || []);
+  const total = 20 + pl.length;
+  if (total > 0xffff) throw new Error(`IPv4 Total Length 越界（${total} > 65535）`);
+  if (!Number.isInteger(ttl) || ttl < 0 || ttl > 255) throw new Error(`IPv4 TTL 越界（${ttl}）`);
+  if (!Number.isInteger(proto) || proto < 0 || proto > 255) throw new Error(`IPv4 protocol 越界（${proto}）`);
+  if (!Number.isInteger(id) || id < 0 || id > 0xffff) throw new Error(`IPv4 identification 越界（${id}）`);
+  if (!Number.isInteger(flagsFrag) || flagsFrag < 0 || flagsFrag > 0xffff) throw new Error(`IPv4 flags/fragment 越界（${flagsFrag}）`);
+  const h = new Uint8Array(20);
+  h[0] = 0x45; h[1] = tos & 0xff;
+  h[2] = total >> 8; h[3] = total & 0xff;
+  h[4] = id >> 8; h[5] = id & 0xff;
+  h[6] = (flagsFrag >> 8) & 0xff; h[7] = flagsFrag & 0xff;
+  h[8] = ttl; h[9] = proto & 0xff;
+  h.set(s, 12); h.set(d, 16);
+  let sum = 0;
+  for (let i = 0; i < 20; i += 2) sum += (h[i] << 8) | h[i + 1];
+  while (sum >> 16) sum = (sum & 0xffff) + (sum >> 16);
+  const c = (~sum) & 0xffff;
+  h[10] = c >> 8; h[11] = c & 0xff;
+  return Uint8Array.from([...h, ...pl]);
+}
+
+// IPv6：40 字节固定头 + 载荷（RFC 8200）；Payload Length 16-bit。
+function ipv6Frame({ src, dst, nextHeader = 17, hopLimit = 64, trafficClass = 0, flowLabel = 0, payload = [] } = {}) {
+  const s = gtpuBytes(src, 16, 'IPv6 源地址');
+  const d = gtpuBytes(dst, 16, 'IPv6 目的地址');
+  const pl = payload instanceof Uint8Array ? payload : Uint8Array.from(payload || []);
+  if (pl.length > 0xffff) throw new Error(`IPv6 Payload Length 越界（${pl.length} > 65535）`);
+  if (!Number.isInteger(hopLimit) || hopLimit < 0 || hopLimit > 255) throw new Error(`IPv6 Hop Limit 越界（${hopLimit}）`);
+  if (!Number.isInteger(nextHeader) || nextHeader < 0 || nextHeader > 255) throw new Error(`IPv6 Next Header 越界（${nextHeader}）`);
+  if (!Number.isInteger(trafficClass) || trafficClass < 0 || trafficClass > 255) throw new Error(`IPv6 Traffic Class 越界（${trafficClass}）`);
+  if (!Number.isInteger(flowLabel) || flowLabel < 0 || flowLabel > 0xfffff) throw new Error(`IPv6 Flow Label 越界（${flowLabel}）`);
+  const h = new Uint8Array(40);
+  h[0] = (6 << 4) | (trafficClass >> 4);
+  h[1] = ((trafficClass & 0x0f) << 4) | ((flowLabel >> 16) & 0x0f);
+  h[2] = (flowLabel >> 8) & 0xff; h[3] = flowLabel & 0xff;
+  h[4] = pl.length >> 8; h[5] = pl.length & 0xff;
+  h[6] = nextHeader & 0xff; h[7] = hopLimit;
+  h.set(s, 8); h.set(d, 24);
+  return Uint8Array.from([...h, ...pl]);
+}
+
+// 以太网 II：14 字节头 + 载荷。
+function ethernetFrame({ dst = [0, 0, 0, 0, 0, 0], src = [2, 0, 0, 0, 0, 1], etherType = 0x0800, payload = [] } = {}) {
+  const d = gtpuBytes(dst, 6, '以太网目的地址');
+  const s = gtpuBytes(src, 6, '以太网源地址');
+  if (!Number.isInteger(etherType) || etherType < 0 || etherType > 0xffff) throw new Error(`EtherType 越界（${etherType}）`);
+  const pl = payload instanceof Uint8Array ? payload : Uint8Array.from(payload || []);
+  return Uint8Array.from([...d, ...s, (etherType >> 8) & 0xff, etherType & 0xff, ...pl]);
+}
+
+// GTP-U Echo Request(1)/Response(2)：Recovery IE = 类型 14 + 1 字节值（29.281 §7.2/§8.2）。
+function gtpuEcho({ type = 1, recovery = 0, teid = 0 } = {}) {
+  if (type !== 1 && type !== 2) throw new Error(`GTP-U Echo 类型应为 1/2（${type}）`);
+  if (!Number.isInteger(recovery) || recovery < 0 || recovery > 255) throw new Error(`Recovery 越界（${recovery}）`);
+  return gtpuBuild({ teid, type, payload: Uint8Array.from([14, recovery & 0xff]) });
+}
+
+function gtpuEchoRecovery(u8) {
+  const r = gtpuParse(u8);
+  if (r.hdr.type !== 1 && r.hdr.type !== 2) throw new Error(`非 GTP-U Echo 消息（type ${r.hdr.type}）`);
+  const p = r.payload;
+  if (p.length >= 2 && p[0] === 14) return p[1];
+  throw new Error('Echo 消息缺少 Recovery IE');
 }
 
 function gtpuBuild({ teid = 0, type = 0xff, seq = null, npdu = null, exts = [], payload = [] } = {}) {
@@ -11289,7 +11397,7 @@ if (args.schema && args.out) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, gtpuBuild, GTPU_EXT_TYPES, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, GTPU_EXT_TYPES, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
