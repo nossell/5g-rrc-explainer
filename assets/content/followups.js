@@ -685,6 +685,30 @@
         a: '§16.7.2.1：配了 **CAG-only indication** 后**只有 CAG Member Cell 才 suitable**（Member Cell=广播所选/注册/等效 PLMN ID 且 CAG ID 属于 **Allowed CAG list**）；非 suitable 小区仍可 acceptable（若对该 PLMN 配了 CAG-only）。§16.6.6：UE 打算 onboarding 时**在 RRC 连接建立期间向 gNB 发 onboarding request indication**，NG-RAN 按 **AMF 的 onboarding 支持能力**选合适 AMF（M61 课 d2/c4）。',
         ref: '38.300#16.7.2.1' }
     ] },
+    'm62:q0': { levels: [
+      { q: 'URLLC 的 LCP 限制能让 RRC 控制哪些维度？为什么说它是「发牌规则」而不是调度算法？',
+        a: '§16.1.2：RRC 可把逻辑信道限制到**已配置小区、numerology、PUSCH 传输时长、CG 配置**的**子集**，并控制能否用 **Type 1 CG** 与带**物理优先级**的动态授权；因此可把**最大 SCS/最短 PUSCH 时长**留给 URLLC。RRC 还能给逻辑信道关联**不同 SR 配置**（更频繁的 SR 机会）——限制定「能上哪些资源」，选谁仍由调度器定（M62 课 a1）。',
+        ref: '38.300#16.1.2' },
+      { q: '包复制有哪些硬边界？SRB 和主 RLC 为什么特殊？',
+        a: '§16.1.3：PDCP 控制 PDU **不复制**、永远交主 RLC；复制激活时**原始与副本不得同载波**；DRB 复制初态由 RRC 设、MAC CE 动态开关（DC 不分 MCG/SCG）；**SRB 复制恒激活、不可动态关**；**主 RLC 不可去激活**；辅 RLC 去激活**不重建不冲 HARQ**，PDCP 指示它丢弃复制 PDU（M62 课 a2/f1/f2）。',
+        ref: '38.300#16.1.3' }
+    ] },
+    'm62:q2': { levels: [
+      { q: 'PUCCH 小区切换的两种指示方式分别适用哪些 UCI？为什么 TDD 需要它？',
+        a: '§16.1.8：为降低 **TDD** 下 URLLC 的 **HARQ-ACK 反馈时延**；每 PUCCH 组可配 **PUCCH sSCell**，发送小区由**高层半静态时域图样**或**调度 PUCCH 的 PDCCH 动态指示**确定；图样适用**全部 UCI 类型**，动态指示**只适用 HARQ 反馈**（M62 课 b1）。',
+        ref: '38.300#16.1.8' },
+      { q: '10 ns 时间参考怎么变成真正的同步？PDC 的两种执行侧区别是什么？',
+        a: '§16.8.1：gNB 用单播/广播 RRC 发 5G 系统时间参考，粒度 **10 ns**、可带**不确定度**；UE 可用 **UAI** 表达偏好；**PDC 基于 RTT 或 TA**，可在 UE 或 gNB 侧执行，**UE 侧由 RRC 控制**；RTT 法用**一对 TRS/PRS 与 SRS** 的 **Rx-Tx 时间差**五步，两侧镜像——区别只在谁收测量、谁算 PDC（M62 课 b3）。',
+        ref: '38.300#16.8.1' }
+    ] },
+    'm62:q4': { levels: [
+      { q: 'TSCAI 告诉调度器什么？survival time 状态进入后做什么？',
+        a: '§16.8.1：TSCAI 含**突发到达时间、周期、survival time**，可来自 CN（QoS 流建立时）或切换中另一 gNB；调度器用 **CG/SPS/动态授权**。上行周期业务用 CG 建立业务-CG 映射，gNB 用 **CS-RNTI** 的 CG 重传调度触发 survival time 状态；进入后**该 DRB 全部 RLC 激活做复制**；已激活 CA/DC 复制时，收到**任一活跃 LCH 的任一重传授权**即进入（M62 课 b4/f6）。',
+        ref: '38.300#16.8.1' },
+      { q: 'L4S 的 ECN 三件套是什么？TSN 传输网在 38.300 里有多重？',
+        a: '§16.16：**SMF 请求 + gNB 回状态 + Xn 切换交底**对 gNB 标记/UPF 标记/拥塞上报**各来一遍**；CE 码点设在 **DL/UL SDAP SDU**，依据 **RFC 9330/9331/9332**。§16.17 只有一句：NG-RAN **may support** TSN enabled Transport Network，细节在 **23.501**——38.300 不定义传输网机制（M62 课 d1-d3/f5）。',
+        ref: '38.300#16.16' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

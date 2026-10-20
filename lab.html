@@ -6431,6 +6431,8 @@ function pfcpWalk(rows, u8, start, end, schema, depth = 0) {
         const sub = pfcpWalk(grouped, val, 0, val.length, schema, depth + 1);
         part.children = sub.parts;
         notes.push(...sub.warnings.map((w) => `${row.name}: ${w}`));
+      } else if (grouped) {
+        notes.push(`${row.name}: 分组 IE 嵌套超 4 层，子行未展开`);
       }
       parts.push(part);
     }
@@ -6455,7 +6457,8 @@ function encPfcpMsg(inst, parts = [], hdr = {}) {
   for (const p of parts) {
     const row = p.row || (inst.rows && inst.rows[p.rowIdx]);
     const type = parseInt(row && row.iei, 10);
-    if (!Number.isFinite(type)) continue;
+    // 批次 U5：无法定行的 part 不能静默丢弃——编码结果会少 IE 且调用方无感知。
+    if (!Number.isFinite(type)) throw new Error(`PFCP 编码：part 无 IE 类型（rowIdx ${p.rowIdx}），无法序列化`);
     body.push(...pfcpIe(type, p.value || new Uint8Array(0)));
   }
   const hdrLen = s ? 16 : 8;
@@ -6576,6 +6579,11 @@ function gtpuBuild({ teid = 0, type = 0xff, seq = null, npdu = null, exts = [], 
   const pl = payload instanceof Uint8Array ? payload : Uint8Array.from(payload || []);
   const hdrLen = withOpt ? 12 : 8;
   const length = hdrLen - 8 + chain.length + pl.length;
+  // 批次 U5：Length 是 16-bit，超出即无法表达——静默按位掩码会产出坏帧。
+  if (length > 0xffff) throw new Error(`GTP-U 编码：载荷超 16-bit Length（${length} > 65535）`);
+  if (seq != null && (!Number.isInteger(seq) || seq < 0 || seq > 0xffff)) throw new Error(`GTP-U 编码：seq 越界（${seq}）`);
+  if (npdu != null && (!Number.isInteger(npdu) || npdu < 0 || npdu > 0xff)) throw new Error(`GTP-U 编码：N-PDU 越界（${npdu}）`);
+  if (!Number.isInteger(teid) || teid < 0 || teid > 0xffffffff) throw new Error(`GTP-U 编码：TEID 越界（${teid}）`);
   const flags = (1 << 5) | (1 << 4)
     | (chain.length ? 0x04 : 0) | (seq != null ? 0x02 : 0) | (npdu != null ? 0x01 : 0);
   const out = [flags, type & 0xff, ...gtpuWr16(length), ...gtpuWr32(teid >>> 0)];
@@ -7020,8 +7028,13 @@ function isLenRow(row) {
 // 采样值域（批次 R）：数字域（MCC/MNC/IMSI 等）只取 0-9，避免独立实现方按 BCD
 // 解码时因 0xA-0xF 非法数字早停；8 位 IMSI/MSISDN/IMEI 格按两个 BCD 数字填，
 // 其余字段仍全域均匀。语义级内容（TFT/APN 内部长度等）不在采样器建模范围。
+// 批次 U3：Value-Digits 是二进制整数（29244 §8.2.84 Multiplier 的 48-bit 值）的
+// 字节，不是 BCD 数字串——排除出 digit 分支，按全域采样。
+const NON_BCD_DIGIT = /^value[-\s]?digits?$/i;
 function sampleValue(f, rng) {
-  if (/digit/i.test(f.name)) return Math.floor(rng() * Math.min(10, 2 ** f.bits));
+  if (/digit/i.test(f.name) && !NON_BCD_DIGIT.test(String(f.name || '').trim())) {
+    return Math.floor(rng() * Math.min(10, 2 ** f.bits));
+  }
   if (/^(IMSI|MSISDN|IMEI)$/i.test(f.name) && f.bits === 8) {
     return (Math.floor(rng() * 10) << 4) | Math.floor(rng() * 10);
   }
@@ -10840,6 +10853,85 @@ function rng32(a) {
   };
 }
 
+// ---- 批次 W：值域语义采样（按 IE 名白名单） -------------------------------------
+// 目标：消除「线缆结构合法但随机值违反内容语义」类 malformed——值内长度前缀与实际
+// 字节数一致、PFCP 标志位（V4/V6）与变长地址部分一致、BCD 数字域合法。
+// 只覆盖高杠杆 IE；嵌入协议类（RAN Transparent/CAMEL 容器等）保持随机（既定归因）。
+function rndByte(rng) { return Math.floor(rng() * 256); }
+function bcdDigits(rng, nDigits) {
+  const out = [];
+  let left = nDigits;
+  while (left >= 2) { out.push((Math.floor(rng() * 10) << 4) | Math.floor(rng() * 10)); left -= 2; }
+  if (left) out.push((Math.floor(rng() * 10) << 4) | 0xf); // 奇数位：末半字节 F 结束标记
+  return out;
+}
+function ipv4(rng) { return [rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng)]; }
+function ipv6(rng) { return Array.from({ length: 16 }, () => rndByte(rng)); }
+
+// GTP 族（29274/29060）按 IE 规范名匹配（行名可能是别名，如 SGSN Identifier for MT SMS）。
+function semanticGtpValue(name, rng) {
+  const n = String(name || '').trim().toUpperCase();
+  if (/^(INTERNATIONAL MOBILE SUBSCRIBER IDENTITY \(IMSI\)|IMSI|ALTERNATIVE IMSI|C-MSISDN|MSISDN)$/.test(n)) {
+    return Uint8Array.from(bcdDigits(rng, 5 + Math.floor(rng() * 11))); // 5..15 位 BCD
+  }
+  if (/^(MOBILE EQUIPMENT IDENTITY \(MEI\)|MEI|IMEISV)$/.test(n)) {
+    return Uint8Array.from(bcdDigits(rng, 15)); // IMEI 15 位（奇数位末半字节 F）
+  }
+  if (/^(TWAN IDENTIFIER|WLAN LOCATION INFORMATION)$/.test(n)) {
+    // 8.100：部标志全 0；SSID Length 与实际 SSID 字节数一致。注意本 schema 的 SSID 行
+    // 只建模 1 字节（变长部分未摄取），取 1 字节使 tshark 与本构建解析结构一致。
+    return Uint8Array.from([0x00, 0x01, 0x41 + Math.floor(rng() * 26)]);
+  }
+  if (n === 'NODE IDENTIFIER') {
+    // 8.107：Length of Node Name 与 Node Name 字节数一致（本布局建模 1 字节名称）
+    return Uint8Array.from([0x01, 0x61 + Math.floor(rng() * 26)]);
+  }
+  if (n === 'NODE NUMBER') {
+    // 8.106：Length of Node Number 与内容字节数一致（节点号为数字串）
+    return Uint8Array.from([0x01, 0x30 + Math.floor(rng() * 10)]);
+  }
+  if (n === 'LOAD METRIC') {
+    // 29.274 §8.xxx：Load Metric 取值 0..100（百分比）——随机全域会被独立实现方判非法。
+    return Uint8Array.from([Math.floor(rng() * 101)]);
+  }
+  if (/^FULLY QUALIFIED TEID \(F-TEID\)$/.test(n)) {
+    // 8.22：V4/V6 双 0（不带地址，仅 TEID）+ Interface Type 低 6 位；TEID 4 字节。
+    // 本 schema 只建模 flag+TEID 定长部（IP 地址为条件变长部，未摄取）——双 0 形态
+    // 使 tshark 与本构建解析结构一致。
+    const ifType = Math.floor(rng() * 16);
+    return Uint8Array.from([ifType, rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'SCEF PDN CONNECTION') {
+    // 29.060 7.7.121：APN Length 与实际 APN 字节数一致（本布局建模 1 字节 APN）
+    return Uint8Array.from([0x01, 0x61 + Math.floor(rng() * 26)]);
+  }
+  return null;
+}
+
+// PFCP：标志位与变长地址部分一致（V4/V6 恒有且仅有所选地址族）。
+function semanticPfcpValue(name, rng) {
+  const n = String(name || '').trim().toUpperCase();
+  if (n === 'NODE ID') {
+    // 8.2.38：Type 0=IPv4（4B）/ 1=IPv6（16B）
+    return rng() < 0.7
+      ? Uint8Array.from([0x00, ...ipv4(rng)])
+      : Uint8Array.from([0x01, ...ipv6(rng)]);
+  }
+  if (n === 'F-SEID' || n === 'F-TEID') {
+    const seid = n === 'F-SEID';
+    const v4 = rng() < 0.75;
+    const flags = v4 ? 0x02 : 0x01; // V4@bit2 / V6@bit1，其余（CHID/CH）为 0
+    const body = Array.from({ length: seid ? 8 : 4 }, () => rndByte(rng));
+    return Uint8Array.from([flags, ...body, ...(v4 ? ipv4(rng) : ipv6(rng))]);
+  }
+  if (n === 'UE IP ADDRESS' || n === 'SOURCE IP ADDRESS' || n === 'ALTERNATIVE SMF IP ADDRESS') {
+    const v4 = rng() < 0.75;
+    const flags = v4 ? 0x02 : 0x01; // 其余标志（S/D/CHV/IP6PL/MPL/PPE）全 0
+    return Uint8Array.from([flags, ...(v4 ? ipv4(rng) : ipv6(rng))]);
+  }
+  return null;
+}
+
 function fixedLenOf(lenStr) {
   const s = (lenStr || '').trim();
   if (s === '1/2') return 0.5;
@@ -10978,15 +11070,24 @@ function gtpcSampleValue(r, schema, rng, depth = 0) {
   const ref = r.def || (r.ref && schema.ies[r.ref] ? r.ref : null);
   if (ref && depth < 4) {
     const ie = schema.ies[ref];
+    // 分组 IE 优先按子行表递归构值——语义值规则只作用于非分组 IE
+    // （例：29274 8.126 分组名与 29.060 的 SCEF PDN Connection IE 同名）。
     if (ie.grouped) {
       const body = [];
       for (const cr of ie.grouped) {
-        if (cr.iei == null) continue;
+        if (cr.iei == null) {
+          // 批次 W：分组内必配行若无类型值，该组不可完整构造——抛错交由采样重试，
+          // 否则会产出缺必配子行的帧（解码端「必配行缺失」，此前潜伏未命中）。
+          if (/^M$/i.test((cr.presence || '').trim())) throw new Error(`分组必配行无类型值: ${cr.name}`);
+          continue;
+        }
         if (!/^M$/i.test((cr.presence || '').trim()) && rng() > 0.4) continue;
         body.push(...gtpcTli(parseInt(cr.iei, 10), cr.ins != null ? cr.ins : 0, gtpcSampleValue(cr, schema, rng, depth + 1)));
       }
       return Uint8Array.from(body);
     }
+    const sem = semanticGtpValue(ie.name, rng);
+    if (sem) return sem;
     if (ie.layouts && ie.layouts[0] && ie.layouts[0].octets.length) {
       const { bytes } = layoutSample(ie.layouts[0].octets, rng, false);
       if (bytes.length) return bytes;
@@ -11046,12 +11147,17 @@ function pfcpSampleValue(r, schema, rng, depth = 0) {
     if (ie.grouped) {
       const body = [];
       for (const cr of ie.grouped) {
-        if (cr.iei == null) continue;
+        if (cr.iei == null) {
+          if (/^M$/i.test((cr.presence || '').trim())) throw new Error(`分组必配行无类型值: ${cr.name}`);
+          continue;
+        }
         if (!/^M$/i.test((cr.presence || '').trim()) && rng() > 0.4) continue;
         body.push(...pfcpIe(parseInt(cr.iei, 10), pfcpSampleValue(cr, schema, rng, depth + 1)));
       }
       return Uint8Array.from(body);
     }
+    const sem = semanticPfcpValue(ie.name, rng);
+    if (sem) return sem;
     if (ie.layouts && ie.layouts[0] && ie.layouts[0].octets.length) {
       const { bytes } = layoutSample(ie.layouts[0].octets, rng, false);
       if (bytes.length) return bytes;
@@ -11111,6 +11217,11 @@ function gtpv1SampleValue(r, schema, rng) {
   const fixed = r.len != null && /^\d+$/.test(r.len) ? parseInt(r.len, 10) : null;
   if (ref) {
     const ie = schema.ies[ref];
+    if (ie) {
+      const sem = semanticGtpValue(ie.name, rng);
+      // 定长行（TV）须与声明长度一致，否则回退布局采样（布局本身已按位表产出合法值）
+      if (sem && (r.format === 'TLV' || fixed == null || sem.length === fixed)) return sem;
+    }
     if (ie && ie.layouts && ie.layouts[0] && ie.layouts[0].octets.length) {
       const { bytes } = layoutSample(ie.layouts[0].octets, rng, true);
       if (bytes.length && (r.format === 'TLV' || fixed == null || bytes.length === fixed)) return bytes;
