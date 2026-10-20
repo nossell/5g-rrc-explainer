@@ -3418,7 +3418,16 @@ function sevOf(n) { return n; }
 function diffIR(l, r, path = '', lines = { left: [], right: [] }, out = null) {
   if (!out) out = { findings: [], report: { ok: 0, warn: 0, info: 0, verdict: '' } };
   const push = (sev, title, detail, ln) => {
-    out.findings.push({ sev, title, detail, lines: ln || lines });
+    const useLines = ln || lines;
+    // 批次 Q1：与 NAS/GTP 引擎对齐的通用字段（severity/kind/msg/loc）——ASN.1 的
+    // 结构路径即定位键；旧字段 sev/title/detail/lines 保留（UI 与既有导出不回归）。
+    out.findings.push({
+      sev, title, detail, lines: useLines,
+      severity: sev === 'warn' ? 'break' : sev,
+      kind: 'asn1-change',
+      msg: detail ? `${title}：${detail}` : title,
+      loc: { path, ...(useLines && (useLines.left?.length || useLines.right?.length) ? { lines: { left: useLines.left || [], right: useLines.right || [] } } : {}) },
+    });
     out.report[sev === 'ok' ? 'ok' : sev === 'warn' ? 'warn' : 'info']++;
   };
 
@@ -4388,7 +4397,9 @@ function parseGtpIeTable(rowsRaw, hdrOctets = 4) {
   const inBits = (s, e) => s >= bitHi && e <= bitEnd;
   const octets = [];
   const notes = [];
+  let skipRow = -1;
   for (let i = rulerI + 1; i < rows.length; i++) {
+    if (i === skipRow) continue;
     const r = rows[i];
     let col = 0;
     let label = null;
@@ -4402,6 +4413,39 @@ function parseGtpIeTable(rowsRaw, hdrOctets = 4) {
       if (inBits(s, e) && normWs(c.text)) fields.push({ start: s, end: e, text: normWs(c.text) });
     }
     if (!label) continue;
+    // 变长示例行（IMSI/MSISDN/STN-SR 形态）：'5' '6' '…' 'n+4' —— 具体示例行 + 省略号 +
+    // 变长尾行。把末尾同几何的连续示例行折叠为一行 open（'5-n*'），省略号与 n+K 行消费掉；
+    // 采样按 open 行重复 1..3 个 octet（v1.24.0，批次 R：原先只取示例两行，IMSI 恒 4 位）。
+    if (/^(?:…|\.\.\.)$/.test(label)) {
+      let nk = -1;
+      for (let j = i + 1; j < rows.length && j <= i + 3; j++) {
+        let col2 = 0;
+        let lab2 = null;
+        for (const c of rows[j]) {
+          const s = col2;
+          col2 += c.span;
+          if (s < labelStart && lab2 === null) continue;
+          if (s === labelStart || (lab2 === null && s < digits[0].start)) { lab2 = normWs(c.text); continue; }
+        }
+        const t = (lab2 || '').trim();
+        if (/^(?:n|m|p|q)\s*\+\s*\d+$/i.test(t)) { nk = j; break; }
+        if (/^\d/.test(t)) break;
+      }
+      if (nk >= 0 && octets.length) {
+        const geom = (row) => row.fields.map((f) => `${f.bits}:${f.hi}:${f.lo}`).join(',');
+        let st = octets.length - 1;
+        const g = geom(octets[st]);
+        while (st > 0 && geom(octets[st - 1]) === g) st--;
+        const f0 = octets[st];
+        if (!f0.open) {
+          const merged = octets.length - st;
+          octets.splice(st, merged, { octet: `${f0.octet}-n*`, count: 1, open: true, fields: f0.fields.map((f) => ({ ...f })) });
+          notes.push(`octet ${label}: 变长示例行折叠为 ${f0.octet}-n*（示例行 ${merged} 行）`);
+          skipRow = nk;
+        }
+      }
+      continue;
+    }
     const lm = /^(\d+)\s*(?:to\s*(?:\(?\s*n\s*\+\s*(\d+)\s*\)?|(\d+))|-(\d+))?/i.exec(label);
     if (!lm) { if (/[a-d]/i.test(label[0])) notes.push(`octet ${label}: 字母标号行跳过`); continue; }
     const first = +lm[1];
@@ -4420,6 +4464,8 @@ function parseGtpIeTable(rowsRaw, hdrOctets = 4) {
       // 位归属：数据格与标尺位格按区间重叠认领，同位格多格重叠时先到先得（左优先）——
       // Word 网格错位两形态（标尺数字格跨 2 网格列、数据格吞并尾 gutter 列）下恢复位格；
       // 精确共边的规整表退化为逐格原结果（v1.22.0；v1.21.0 台账五表复现在案）。
+      // 加宽标尺格被数据格边界切开时会被左右两格重复计（'4' 跨 2 列）；不在此处猜，
+      // 由下方字面格（x 游程 / 0-1 串）的字符数定宽并顺序重排（7.7.64 '1111' 实证）。
       const owner = new Array(digits.length).fill(-1);
       fields.forEach((f, fi) => {
         for (let di = 0; di < digits.length; di++) {
@@ -4440,6 +4486,7 @@ function parseGtpIeTable(rowsRaw, hdrOctets = 4) {
       }
       const fs = [];
       let prevLo = 9;
+      const raw = [];
       for (let fi = 0; fi < fields.length; fi++) {
         const bits = [];
         for (let di = 0; di < digits.length; di++) if (owner[di] === fi) bits.push(di);
@@ -4449,7 +4496,67 @@ function parseGtpIeTable(rowsRaw, hdrOctets = 4) {
         if (hi - lo + 1 !== bits.length) { notes.push(`octet ${label}: 字段「${fields[fi].text.slice(0, 24)}」位格不连续，弃`); continue; }
         const pre = prevLo - hi - 1;
         prevLo = lo;
-        fs.push({ name: fields[fi].text, bits: hi - lo + 1, hi, lo, ...(pre > 0 ? { pre } : {}) });
+        raw.push({ name: fields[fi].text, ownBits: hi - lo + 1, ownHi: hi, ownLo: lo, pre });
+      }
+      // 字面格定宽（29.060 §7.7.64 / 29.274 §8.50 的 '1111' filler）：纯 x 游程 / 0-1 串
+      // 的字符数就是该格位数——加宽标尺格被边界切开时网格重叠计数会多算一位
+      // （'1111' 被读成 5 位、MCC digit 3 被压成 3 位；filler 的高半字节因此错位）。
+      // 任一字面格与网格读数不符时按字面宽度顺序重排整行（pre 空档保留）；不自洽则回退。
+      const litBits = (t) => {
+        const s = t.replace(/\s+/g, '');
+        return /^x+$/i.test(s) || /^[01]+$/.test(s) ? s.length : null;
+      };
+      let changed = false;
+      // PLMN 数字对（MCC/MNC digit N）：每位数字恒 4 位（MCC digit 2 | MCC digit 1 等）。
+      // 加宽标尺格 '4' 被边界切开时旧重叠计数给出 5/3——数字编码不存在 5 位数字，按 4/4 钉住。
+      const isDigit = (n) => /^(?:MCC|MNC)\s+digit\s+\d$/i.test(n);
+      if (raw.length === 2 && raw.every((f) => isDigit(f.name))) {
+        raw[0].bits = 4;
+        raw[1].bits = 4;
+        changed = true;
+      }
+      for (const f of raw) {
+        if (f.bits != null) continue; // 数字对已钉宽
+        const L = litBits(f.name);
+        f.isLit = L != null;
+        f.bits = L != null && L !== f.ownBits ? L : f.ownBits;
+        if (f.bits !== f.ownBits) changed = true;
+      }
+      // 字面格只钉住**自己**的宽度；差额由同行非字面格吸收（7.7.64：'1111' 从 5→4，
+      // MCC digit 3 从 3→4；反之亦然）。多非字面格按原宽度比例分配，保底 1 位。
+      let delta = 8 - raw.reduce((s, f) => s + f.bits + (f.pre > 0 ? f.pre : 0), 0);
+      if (changed && delta !== 0) {
+        const cand = raw.filter((f) => !f.isLit);
+        while (delta !== 0 && cand.length) {
+          if (delta > 0) {
+            cand.sort((a, b) => b.bits - a.bits);
+            cand[0].bits += 1; delta -= 1;
+          } else {
+            const c = cand.find((f) => f.bits > 1);
+            if (!c) break;
+            c.bits -= 1; delta += 1;
+          }
+        }
+      }
+      if (changed) {
+        let bit = 8;
+        let ok = true;
+        const reflow = [];
+        for (const f of raw) {
+          const hi = bit - (f.pre > 0 ? f.pre : 0);
+          const lo = hi - f.bits + 1;
+          if (lo < 1) { ok = false; break; }
+          reflow.push({ ...f, hi, lo });
+          bit = lo - 1;
+        }
+        if (ok && bit === 0) {
+          fs.push(...reflow.map((f) => ({ name: f.name, bits: f.bits, hi: f.hi, lo: f.lo, ...(f.pre > 0 ? { pre: f.pre } : {}) })));
+        } else {
+          notes.push(`octet ${label}: 字面格定宽后位序不自洽，保留网格读数`);
+          fs.push(...raw.map((f) => ({ name: f.name, bits: f.ownBits, hi: f.ownHi, lo: f.ownLo, ...(f.pre > 0 ? { pre: f.pre } : {}) })));
+        }
+      } else {
+        fs.push(...raw.map((f) => ({ name: f.name, bits: f.ownBits, hi: f.ownHi, lo: f.ownLo, ...(f.pre > 0 ? { pre: f.pre } : {}) })));
       }
       if (fs.length) {
         if (gapUnclaimed) notes.push(`octet ${label}: ${gapUnclaimed} 个标尺位格未被字段认领（内部空档并入邻字段 pre，审计注记）`);
@@ -4481,6 +4588,51 @@ function parseGtpMsgRows(rowsRaw) {
   if (hi < 0) return null;
   return { groupName, rows: texts.slice(hi + 1) };
 }
+
+// 29.244 §7.x PFCP 内容表：9 列（IE 名 | P | Condition | Appl.×5 | IE Type），分组 IE
+// 定义表在表头前带两行预置（'Octet 1 and 2 … <名> IE Type = N (decimal)' + 'Length = n'）。
+// 返回 { groupName, groupType, rows }，rows 统一为 [名, P, 条件, IE Type 名, ''] 供
+// gtpTranslateRows 复用（PFCP 无 Ins. 列）。
+function parsePfcpMsgRows(rowsRaw) {
+  if (!rowsRaw.length) return null;
+  const rows = resolveVMerge(rowsRaw);
+  const texts = rows.map((r) => r.map((c) => normWs(String(c.text || '').replace(/\n/g, ' '))));
+  let groupName = null;
+  let groupType = null;
+  for (let i = 0; i < Math.min(texts.length, 4); i++) {
+    for (const c of texts[i]) {
+      const m = /^(.+?)\s*(?:IE(?:\s+Type)?\s*)?=\s*(\d+)\s*\(decimal\)/i.exec(c);
+      if (m) {
+        groupName = m[1].replace(/^octets?\s*\d+(?:\s*(?:and|to)\s*\(?\w+\)?)?[\s,:-]*/i, '').trim();
+        groupType = parseInt(m[2], 10);
+        break;
+      }
+    }
+    if (groupType != null) break;
+  }
+  let hi = -1;
+  for (let i = 0; i < texts.length && i <= 12; i++) {
+    const r = texts[i];
+    if (r.some((c) => /information element/i.test(c)) && r.some((c) => /^P$/i.test(c.trim())) && r.some((c) => /^IE type$/i.test(c.trim()))) { hi = i; break; }
+  }
+  if (hi < 0) return null;
+  const out = [];
+  for (let i = hi + 1; i < texts.length; i++) {
+    const r = texts[i];
+    const ne = r.map((c) => c.trim()).filter(Boolean);
+    if (!ne.length) continue;
+    if (/^note\b/i.test(ne[0]) || ne.every((c) => /^(Sxa|Sxb|Sxc|N4|N4mb|X|-)$/i.test(c))) continue;
+    const name = ne[0];
+    const pi = ne.findIndex((c) => /^(M|C|O)$/.test(c));
+    if (pi < 0) continue; // 条件续行 / NOTE
+    const type = ne[ne.length - 1];
+    if (!type || type === ne[pi] || /^(X|-)$/i.test(type) || /^IE type$/i.test(type)) continue;
+    const cond = ne.slice(pi + 1, -1).filter((c) => !/^(X|-)$/i.test(c)).join(' ');
+    out.push([name, ne[pi], cond, type, '']);
+  }
+  return { groupName, groupType, rows: out };
+}
+
 
 // 29.060 §7.x 消息内容表（v1.19.0）：3 列（Information element | Presence requirement |
 // Reference）——列映射动态（容多出的 Condition 列）。Reference 列 '7.7.2' 本规范节号；
@@ -6207,6 +6359,230 @@ function encGtpv1Msg(inst, parts = [], hdr = {}) {
   return Uint8Array.from(out);
 }
 
+// ==== src/nas/pfcp.js ====
+// src/nas/pfcp.js — 29.244（PFCP）编解码：头（Flags/Type/Length/SEID/Seq/Spare）+
+// IE 框架 Type(2 字节)+Length(2 字节)+Value。无 Instance 列（与 GTPv2-C TLIV 的区别）。
+//
+// 头（§7.2.2）：
+//   octet1: Version(3) | spare | spare | FO | MP | S；Version=1，S=1 表示含 SEID
+//   octet2: Message Type；octet3-4: Message Length（= 总长 - 4，含 SEID/Seq/Spare）
+//   S=1: SEID(8) + Seq(3) + Spare(1)；S=0: Seq(3) + Spare(1)
+// 会话消息（类型 ≥ 50）S=1；节点消息 S=0（29.244 §7.2.2.2/.3）。
+
+const pfcpRd16 = (u8, o) => (u8[o] << 8) | u8[o + 1];
+const pfcpRd32 = (u8, o) => ((u8[o] << 24) | (u8[o + 1] << 16) | (u8[o + 2] << 8) | u8[o + 3]) >>> 0;
+
+function pfcpHeader(u8) {
+  if (!u8 || u8.length < 8) throw new Error('PFCP 头截断');
+  const flags = u8[0];
+  const ver = flags >> 5;
+  if (ver !== 1) throw new Error(`PFCP 版本非 1: ${ver}`);
+  const s = flags & 1;
+  const mp = (flags >> 1) & 1;
+  const fo = (flags >> 2) & 1;
+  const msgType = u8[1];
+  const msgLen = pfcpRd16(u8, 2);
+  let off = 4;
+  let seidHex = null;
+  if (s) {
+    if (u8.length < 16) throw new Error('PFCP 头截断（SEID）');
+    seidHex = Array.from(u8.slice(4, 12)).map((b) => b.toString(16).padStart(2, '0')).join('');
+    off = 12;
+  }
+  if (off + 4 > u8.length) throw new Error('PFCP 头截断（Seq/Spare）');
+  const seq = (u8[off] << 16) | (u8[off + 1] << 8) | u8[off + 2];
+  const spare = u8[off + 3];
+  off += 4;
+  return { flags, ver, s, mp, fo, msgType, msgLen, seidHex, seq, spare, off, total: 4 + msgLen };
+}
+
+function pfcpIe(type, content) {
+  const n = content.length;
+  return Uint8Array.from([(type >> 8) & 255, type & 255, (n >> 8) & 255, n & 255, ...content]);
+}
+
+// IE 序列扫描：Type(2)+Length(2)+Value；未知类型按 Length 跳过（前向兼容）。
+// 行匹配按 (Type) 首个未消费行（PFCP 允许同类型重复出现）；分组 IE 递归解出 children。
+function pfcpWalk(rows, u8, start, end, schema, depth = 0) {
+  const notes = [];
+  const parts = [];
+  const used = new Set();
+  let off = start;
+  while (off + 4 <= end) {
+    const type = pfcpRd16(u8, off);
+    const len = pfcpRd16(u8, off + 2);
+    if (off + 4 + len > end) throw new Error(`IE 0x${type.toString(16)} 长度越界（${len}，余 ${end - off - 4}）`);
+    const val = u8.slice(off + 4, off + 4 + len);
+    let ri = -1;
+    for (let i = 0; i < rows.length; i++) {
+      if (used.has(i)) continue;
+      if (rows[i].iei != null && parseInt(rows[i].iei, 10) === type) { ri = i; break; }
+    }
+    if (ri < 0) {
+      // 已消费的同类型行（重复次数超出表行）→ 仍按未知 IE 跳过，但提示
+      notes.push(`未知/超额 IE type ${type}（${len} 字节，按 Length 跳过）`);
+    } else {
+      used.add(ri);
+      const row = rows[ri];
+      const part = { row, rowIdx: ri, value: val };
+      const def = row.def;
+      const grouped = def && schema && schema.ies && schema.ies[def] && schema.ies[def].grouped;
+      if (grouped && depth < 4) {
+        const sub = pfcpWalk(grouped, val, 0, val.length, schema, depth + 1);
+        part.children = sub.parts;
+        notes.push(...sub.warnings.map((w) => `${row.name}: ${w}`));
+      }
+      parts.push(part);
+    }
+    off += 4 + len;
+  }
+  if (off !== end) throw new Error(`PFCP IE 区尾部余 ${end - off} 字节`);
+  return { parts, warnings: notes };
+}
+
+function decPfcpMsg(inst, u8, schema) {
+  const hdr = pfcpHeader(u8);
+  const end = Math.min(hdr.total, u8.length);
+  const { parts, warnings } = pfcpWalk(inst.rows || [], u8, hdr.off, end, schema);
+  return { hdr, parts, warnings };
+}
+
+function encPfcpMsg(inst, parts = [], hdr = {}) {
+  const s = inst.session != null ? !!inst.session : (inst.msgType != null ? inst.msgType >= 50 : false);
+  const fo = hdr.fo ? 1 : 0;
+  const mp = hdr.mp ? 1 : 0;
+  const body = [];
+  for (const p of parts) {
+    const row = p.row || (inst.rows && inst.rows[p.rowIdx]);
+    const type = parseInt(row && row.iei, 10);
+    if (!Number.isFinite(type)) continue;
+    body.push(...pfcpIe(type, p.value || new Uint8Array(0)));
+  }
+  const hdrLen = s ? 16 : 8;
+  const msgLen = hdrLen - 4 + body.length;
+  const out = [(1 << 5) | (fo << 2) | (mp << 1) | (s ? 1 : 0), inst.msgType ?? hdr.msgType ?? 0, (msgLen >> 8) & 255, msgLen & 255];
+  if (s) {
+    const hex = (hdr.seidHex || '').replace(/[^0-9a-f]/gi, '').padStart(16, '0').slice(-16);
+    out.push(...Array.from({ length: 8 }, (_, i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16)));
+  }
+  const seq = hdr.seq != null ? hdr.seq : 0;
+  out.push((seq >> 16) & 255, (seq >> 8) & 255, seq & 255, 0);
+  return Uint8Array.from([...out, ...body]);
+}
+
+// ==== src/nas/gtpu.js ====
+// src/nas/gtpu.js — 29.281（GTP-U）隧道头 + 扩展头链构造/反解。
+//
+// 头（§5.1）：Flags(Version 3 | PT | spare | E | S | PN) | Message Type | Length(2) |
+//   TEID(4)；E/S/PN 任一置位时追加 Sequence(2) + N-PDU(1) + Next Extension Header Type(1)。
+//   最小头 8 字节，Length = 总长 - 8。
+// 扩展头（§5.2.1）：Length(1，以 4 octet 为单位) + Content(4n-2) + Next Type(1)。
+//   类型值表见 §5.2.2（Figure 5.2.1-3）：0x00 结束、0x40 UDP Port、0x85 PDU Session
+//   Container 等；高比特=comprehension required，未知且 required 时告警。
+const gtpuRd16 = (u8, o) => (u8[o] << 8) | u8[o + 1];
+const gtpuRd32 = (u8, o) => ((u8[o] << 24) | (u8[o + 1] << 16) | (u8[o + 2] << 8) | u8[o + 3]) >>> 0;
+const gtpuWr16 = (v) => [(v >> 8) & 255, v & 255];
+const gtpuWr32 = (v) => [(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255];
+
+const GTPU_EXT_TYPES = {
+  0x00: 'No more extension headers',
+  0x03: 'Long PDCP PDU Number',
+  0x04: 'PDU Set Information Container',
+  0x20: 'Service Class Indicator',
+  0x40: 'UDP Port',
+  0x81: 'RAN Container',
+  0x82: 'Long PDCP PDU Number (legacy)',
+  0x83: 'Xw RAN Container',
+  0x84: 'NR RAN Container',
+  0x85: 'PDU Session Container',
+  0x86: 'PDU Set Information Container (legacy)',
+  0xC0: 'PDCP PDU Number',
+};
+
+function gtpuHeader(u8) {
+  if (!u8 || u8.length < 8) throw new Error('GTP-U 头截断');
+  const flags = u8[0];
+  const ver = flags >> 5;
+  if (ver !== 1) throw new Error(`GTP-U 版本非 1: ${ver}`);
+  const pt = (flags >> 4) & 1;
+  const e = (flags >> 2) & 1;
+  const s = (flags >> 1) & 1;
+  const pn = flags & 1;
+  const type = u8[1];
+  const length = gtpuRd16(u8, 2);
+  const teid = gtpuRd32(u8, 4);
+  let off = 8;
+  let seq = null;
+  let npdu = null;
+  let nextExt = 0;
+  if (e || s || pn) {
+    if (u8.length < 12) throw new Error('GTP-U 头截断（Seq/NextExt）');
+    seq = gtpuRd16(u8, 8);
+    npdu = u8[10];
+    nextExt = u8[11];
+    off = 12;
+  }
+  return { flags, ver, pt, e, s, pn, type, length, teid, seq, npdu, nextExt, off, total: 8 + length };
+}
+
+// 扩展头链：返回 [{type,length,content,next,raw}] 与 T-PDU payload。
+function gtpuExtensionChain(u8, start, nextType, end = u8.length) {
+  const exts = [];
+  const warnings = [];
+  let pos = start;
+  let type = nextType;
+  while (type) {
+    if (pos + 4 > end) throw new Error(`GTP-U 扩展头截断（type 0x${type.toString(16)}）`);
+    const n = u8[pos];
+    if (!n) throw new Error(`GTP-U 扩展头长度 0（type 0x${type.toString(16)}）`);
+    const total = n * 4;
+    if (pos + total > end) throw new Error(`GTP-U 扩展头长度越界（type 0x${type.toString(16)}，${total}）`);
+    const content = u8.slice(pos + 1, pos + total - 1);
+    const next = u8[pos + total - 1];
+    exts.push({ type, length: n, content, next, raw: u8.slice(pos, pos + total) });
+    if (!(type in GTPU_EXT_TYPES) && (type & 0x80)) warnings.push(`未知扩展头 type 0x${type.toString(16)}（comprehension required）`);
+    pos += total;
+    type = next;
+  }
+  return { exts, payload: u8.slice(pos, end), warnings };
+}
+
+function gtpuParse(u8) {
+  const h = gtpuHeader(u8);
+  const end = Math.min(h.total, u8.length);
+  const chain = gtpuExtensionChain(u8, h.off, h.e ? h.nextExt : 0, end);
+  return { hdr: h, exts: chain.exts, payload: chain.payload, warnings: chain.warnings };
+}
+
+// 单个扩展头编码：Length 向上取整到 4 octet；content 尾部补 0；Next Type 由链式编码填。
+function gtpuExtBytes(type, content, next = 0) {
+  const c = content instanceof Uint8Array ? content : Uint8Array.from(content || []);
+  const n = Math.max(1, Math.ceil((c.length + 2) / 4));
+  const out = new Uint8Array(n * 4);
+  out[0] = n;
+  out.set(c.slice(0, n * 4 - 2), 1);
+  out[n * 4 - 1] = next & 0xff;
+  return out;
+}
+
+function gtpuBuild({ teid = 0, type = 0xff, seq = null, npdu = null, exts = [], payload = [] } = {}) {
+  const chain = [];
+  for (let i = 0; i < exts.length; i++) {
+    const e = exts[i];
+    const next = i + 1 < exts.length ? (exts[i + 1].type & 0xff) : 0;
+    chain.push(...gtpuExtBytes(e.type, e.content, next));
+  }
+  const withOpt = chain.length > 0 || seq != null || npdu != null;
+  const pl = payload instanceof Uint8Array ? payload : Uint8Array.from(payload || []);
+  const hdrLen = withOpt ? 12 : 8;
+  const length = hdrLen - 8 + chain.length + pl.length;
+  const flags = (1 << 5) | (1 << 4)
+    | (chain.length ? 0x04 : 0) | (seq != null ? 0x02 : 0) | (npdu != null ? 0x01 : 0);
+  const out = [flags, type & 0xff, ...gtpuWr16(length), ...gtpuWr32(teid >>> 0)];
+  if (withOpt) out.push(...gtpuWr16(seq || 0), (npdu || 0) & 0xff, chain.length ? (exts[0].type & 0xff) : 0);
+  return Uint8Array.from([...out, ...chain, ...pl]);
+}
+
 // ==== src/nas/codec.js ====
 // src/nas/codec.js — M4：NAS 消息级编解码（schema 驱动，行序扫描）。
 //
@@ -6319,6 +6695,8 @@ function decMsg(inst, bytes, spec = '24501', schema = null) {
   if (spec === '29274') return decGtpcMsg(inst, u8, schema);
   // GTPv1-C（29.060）：头 8 八位组必配 + TV/TLV 主表驱动，派发专用实现（src/nas/gtpv1.js）
   if (spec === '29060') return decGtpv1Msg(inst, u8, schema);
+  // PFCP（29.244）：Type(2)+Length(2) IE 框架，派发专用实现（src/nas/pfcp.js）
+  if (spec === '29244') return decPfcpMsg(inst, u8, schema);
   // 歧义行：非头部的 C/O 定长 V 行
   const amb = [];
   for (let ri = 0; ri < inst.rows.length; ri++) {
@@ -6520,6 +6898,7 @@ function encMsg(inst, parts = [], spec = '24501', gtpcHdr = undefined) {
   // GTPv2-C：头（TEID/Seq 非表内 IE）经第 4 参还原，缺省 T=1/TEID=0/Seq=0（采样/回环零值）
   if (spec === '29274') return encGtpcMsg(inst, parts, gtpcHdr);
   if (spec === '29060') return encGtpv1Msg(inst, parts, gtpcHdr);
+  if (spec === '29244') return encPfcpMsg(inst, parts, gtpcHdr);
   const byRow = new Map(parts.map((p) => [p.rowIdx, p.value]));
   const out = [];
   for (let ri = 0; ri < inst.rows.length; ri++) {
@@ -6638,15 +7017,31 @@ function isLenRow(row) {
   return row.fields.length === 1 && row.fields[0].bits === 8 && /^length of /i.test(row.fields[0].name);
 }
 
+// 采样值域（批次 R）：数字域（MCC/MNC/IMSI 等）只取 0-9，避免独立实现方按 BCD
+// 解码时因 0xA-0xF 非法数字早停；8 位 IMSI/MSISDN/IMEI 格按两个 BCD 数字填，
+// 其余字段仍全域均匀。语义级内容（TFT/APN 内部长度等）不在采样器建模范围。
+function sampleValue(f, rng) {
+  if (/digit/i.test(f.name)) return Math.floor(rng() * Math.min(10, 2 ** f.bits));
+  if (/^(IMSI|MSISDN|IMEI)$/i.test(f.name) && f.bits === 8) {
+    return (Math.floor(rng() * 10) << 4) | Math.floor(rng() * 10);
+  }
+  return Math.floor(rng() * 2 ** f.bits);
+}
+
 function packRow(row, fields, rng, rep, reps) {
   const out = [];
   let acc = 0;
   let bits = 0;
   for (const f of row.fields) {
     let v;
-    if (isSpare(f)) v = 0;
+    const fv = fillerValue(f);
+    if (fv != null) {
+      v = fv;
+      const key = reps > 1 ? `${f.name}[${rep}]` : f.name;
+      fields[key] = v; // 填充位按字面常量展示（'1111' → 15）
+    } else if (isSpare(f)) v = 0;
     else {
-      v = Math.floor(rng() * (2 ** f.bits));
+      v = sampleValue(f, rng);
       const key = reps > 1 ? `${f.name}[${rep}]` : f.name;
       fields[key] = v;
     }
@@ -6679,7 +7074,10 @@ function layoutPack(octets, fieldVals, framed = false) {
       let bits = 0;
       for (const f of row.fields) {
         const key = n > 1 ? `${f.name}[${k}]` : f.name;
-        const v = fieldVals[key] ?? 0;
+        const fv = fillerValue(f);
+        // 填充位是规范字面常量（29.060 §7.7.64 '1111' = MNC 第三位无值）：回编恒写字面，
+        // 不采信编辑值——写错即filler 语义破坏（反解侧对非字面值告警）。
+        const v = fv != null ? fv : (fieldVals[key] ?? 0);
         acc = (acc << ((f.pre || 0) + f.bits)) | (v & ((1 << f.bits) - 1));
         bits += (f.pre || 0) + f.bits;
       }
@@ -6695,6 +7093,13 @@ function layoutPack(octets, fieldVals, framed = false) {
 function isSpare(f) {
   return /spare/i.test(f.name) || f.name === '0' || f.name === ''
     || /^x(\nx)*$/.test(f.name); // x 位 = spare（29.060 §7.7.25B 散文锚：'The spare bits x … shall be set to 0 by the sending side and shall not be evaluated by the receiving side'——v1.22.0 起表/图管线的 x 记号统一按 spare 置 0，不再随机取值）
+}
+
+// 填充位：字段名是纯 0/1 串（29.060 §7.7.64 '1111'：MNC 只两位时 bits 5-8 of octet 5
+// 编码为 1111——规范字面常量，不是 spare 也不是随机值）。返回字面数值，否则 null。
+function fillerValue(f) {
+  const s = String(f.name || '').replace(/\s+/g, '');
+  return /^[01]+$/.test(s) ? parseInt(s, 2) : null;
 }
 
 // ---- 位布局反解（layoutPack/layoutSample 的逆） --------------------------------
@@ -6751,6 +7156,12 @@ function layoutUnpack(octets, bytes, framed = false) {
         }
         shift -= f.bits;
         const v = (acc >> shift) & ((1 << f.bits) - 1);
+        const fv = fillerValue(f);
+        if (fv != null) {
+          if (v !== fv) warnings.push(`${f.name} 应为填充值 ${fv}（二进制 ${f.name.replace(/\s+/g, '')}），实为 ${v}`);
+          fields[f.name] = v;
+          continue;
+        }
         if (isSpare(f)) {
           if (v !== 0) warnings.push(`${f.name} 应为 spare 0，实为 ${v}`);
           continue;
@@ -6784,6 +7195,12 @@ function layoutUnpack(octets, bytes, framed = false) {
         shift -= f.bits;
         const v = (acc >> shift) & ((1 << f.bits) - 1);
         const key = n > 1 || row.open ? `${f.name}[${k}]` : f.name;
+        const fv = fillerValue(f);
+        if (fv != null) {
+          if (v !== fv) warnings.push(`${key} 应为填充值 ${fv}（二进制 ${f.name.replace(/\s+/g, '')}），实为 ${v}`);
+          fields[key] = v;
+          continue;
+        }
         if (isSpare(f)) {
           if (v !== 0) warnings.push(`${key} 应为 spare 0，实为 ${v}`);
           continue; // spare 不进字段表
@@ -6880,6 +7297,7 @@ function diffMessageRows(name, li, ri, findings) {
         msg: hasIei
           ? `${name}：新增 IE 行 ${rr.name}（IEI ${rr.iei}，${framed ? '老收端按未知 IE 跳过' : 'TV 无长度域——老收端不识该 IEI 即无法跳过，后续 IE 错位风险'}）`
           : `${name}：新增 IE 行 ${rr.name}（无 IEI——老收端无法定位，后续 IE 错位风险）`,
+        loc: { msg: name, ...(hasIei ? { iei: String(rr.iei) } : {}), ...(rr.ref ? { ref: rr.ref } : {}) },
       });
     }
   }
@@ -6890,6 +7308,7 @@ function diffMessageRows(name, li, ri, findings) {
         severity: 'info',
         kind: 'nas-row-del',
         msg: `${name}：删除 IE 行 ${lr.name}${lr.iei ? `（IEI ${lr.iei}）` : ''}`,
+        loc: { msg: name, ...(lr.iei ? { iei: String(lr.iei) } : {}), ...(lr.ref ? { ref: lr.ref } : {}) },
       });
       continue;
     }
@@ -6899,15 +7318,16 @@ function diffMessageRows(name, li, ri, findings) {
         severity: 'break',
         kind: 'nas-row-format',
         msg: `${name}：IE ${rr.name} 框架变更 ${lr.format}/${lr.len} → ${rr.format}/${rr.len}`,
+        loc: { msg: name, ...(rr.iei ? { iei: String(rr.iei) } : {}), ...(rr.ref ? { ref: rr.ref } : {}) },
       });
     }
     const lp = (lr.presence || '').trim();
     const rp = (rr.presence || '').trim();
     if (lp !== rp) {
       if (lp === 'M' && rp !== 'M') {
-        findings.push({ severity: 'info', kind: 'nas-row-presence', msg: `${name}：IE ${rr.name} 必配→可选（${lp}→${rp}）` });
+        findings.push({ severity: 'info', kind: 'nas-row-presence', msg: `${name}：IE ${rr.name} 必配→可选（${lp}→${rp}）`, loc: { msg: name, ...(rr.iei ? { iei: String(rr.iei) } : {}), ...(rr.ref ? { ref: rr.ref } : {}) } });
       } else if (lp !== 'M' && rp === 'M') {
-        findings.push({ severity: 'warn', kind: 'nas-row-presence', msg: `${name}：IE ${rr.name} 可选→必配（${lp}→${rp}，新版本要求）` });
+        findings.push({ severity: 'warn', kind: 'nas-row-presence', msg: `${name}：IE ${rr.name} 可选→必配（${lp}→${rp}，新版本要求）`, loc: { msg: name, ...(rr.iei ? { iei: String(rr.iei) } : {}), ...(rr.ref ? { ref: rr.ref } : {}) } });
       }
     }
   }
@@ -6955,6 +7375,7 @@ const rowMapGtp = (rows) => mapWithOrdinal(rows, (r) => String(r.iei));
 const gtpFramed = (fmt) => /^(tlv|lv|tliv)/i.test(fmt || ''); // 带长度域、收端自界
 
 function diffGtpIeLayout(ref, layL, layR, framed, findings) {
+  const L = (octet, field) => ({ ref, octet: String(octet), ...(field ? { field } : {}) });
   // octet 标签出现序号配对：变体行共用同一标签（7.7.29 '3'×6、8.123 '5-n*'×8），
   // v1.23.0 前 Map 只保留最后一变体，其余被遮蔽（改第一变体将漏报）。
   const lmap = mapWithOrdinal(layL || [], (r) => String(r.octet));
@@ -6965,6 +7386,7 @@ function diffGtpIeLayout(ref, layL, layR, framed, findings) {
       severity: framed ? 'info' : 'warn',
       kind: 'gtp-ie-layout',
       msg: `${ref}：布局新增八位组行「${rr.octet}」（IE 总长变化——${framed ? 'TLV/LV 收端按 Length 跳过，框架自界' : '定长 IE：老收端按固定长度读会错位'}`,
+      loc: L(rr.octet),
     });
   }
   for (const [k, lr] of lmap) {
@@ -6974,11 +7396,12 @@ function diffGtpIeLayout(ref, layL, layR, framed, findings) {
         severity: framed ? 'info' : 'warn',
         kind: 'gtp-ie-layout',
         msg: `${ref}：布局删除八位组行「${lr.octet}」（IE 总长变化——${framed ? 'TLV/LV 框架自界' : '定长 IE：老收端会读到多余字节'}`,
+        loc: L(lr.octet),
       });
       continue;
     }
     if ((lr.count || 1) !== (rr.count || 1) || !!lr.open !== !!rr.open) {
-      findings.push({ severity: 'info', kind: 'gtp-ie-rowcount', msg: `${ref}：行「${rr.octet}」重复/开区间语义变化（count ${lr.count || 1}→${rr.count || 1}${lr.open || rr.open ? '、open 标记变化' : ''}）` });
+      findings.push({ severity: 'info', kind: 'gtp-ie-rowcount', msg: `${ref}：行「${rr.octet}」重复/开区间语义变化（count ${lr.count || 1}→${rr.count || 1}${lr.open || rr.open ? '、open 标记变化' : ''}）`, loc: L(rr.octet) });
     }
     const fkey = (f) => (String(f.name).split('\n')[0] || f.name).trim(); // 主名（字段名可带换行脚注句——脚注措辞微调不算字段变更）
     // 同名字段出现序号配对（行内重复的 Spare/字面量位字段）——与 octet 行同则
@@ -6986,13 +7409,13 @@ function diffGtpIeLayout(ref, layL, layR, framed, findings) {
     const rf = mapWithOrdinal(rr.fields || [], fkey);
     for (const [nm, f] of rf) {
       const g = lf.get(nm);
-      if (!g) { findings.push({ severity: 'info', kind: 'gtp-ie-field', msg: `${ref}：行「${rr.octet}」新增字段 ${nm}（bit ${f.hi}-${f.lo}）` }); continue; }
+      if (!g) { findings.push({ severity: 'info', kind: 'gtp-ie-field', msg: `${ref}：行「${rr.octet}」新增字段 ${nm}（bit ${f.hi}-${f.lo}）`, loc: L(rr.octet, nm) }); continue; }
       if (g.bits !== f.bits || g.hi !== f.hi || g.lo !== f.lo) {
-        findings.push({ severity: 'info', kind: 'gtp-ie-field', msg: `${ref}：行「${rr.octet}」字段 ${nm} 位区间变化（bit ${g.hi}-${g.lo} → ${f.hi}-${f.lo}）` });
+        findings.push({ severity: 'info', kind: 'gtp-ie-field', msg: `${ref}：行「${rr.octet}」字段 ${nm} 位区间变化（bit ${g.hi}-${g.lo} → ${f.hi}-${f.lo}）`, loc: L(rr.octet, nm) });
       }
     }
     for (const [nm, g] of lf) {
-      if (!rf.has(nm)) findings.push({ severity: 'info', kind: 'gtp-ie-field', msg: `${ref}：行「${rr.octet}」删除字段 ${nm}（bit ${g.hi}-${g.lo}）` });
+      if (!rf.has(nm)) findings.push({ severity: 'info', kind: 'gtp-ie-field', msg: `${ref}：行「${rr.octet}」删除字段 ${nm}（bit ${g.hi}-${g.lo}）`, loc: L(rr.octet, nm) });
     }
   }
 }
@@ -7007,24 +7430,24 @@ function diffGtpSchema(left, right) {
   // 消息层：同名消息配对（同 direction 按序、失配回退下标——GTP 表分片 direction 全 null）+ 行级
   for (const name of Object.keys(rmsg)) {
     if (!lmsg[name]) {
-      findings.push({ severity: 'info', kind: 'gtp-msg-add', msg: `新增消息 ${name}（类型 ${rmsg[name][0] && rmsg[name][0].msgType != null ? rmsg[name][0].msgType : '?'}）` });
+      findings.push({ severity: 'info', kind: 'gtp-msg-add', msg: `新增消息 ${name}（类型 ${rmsg[name][0] && rmsg[name][0].msgType != null ? rmsg[name][0].msgType : '?'}）`, loc: { msg: name } });
       continue;
     }
     const rinsts = rmsg[name];
     const linsts = lmsg[name];
     const { paired, unused } = pairLeftByDirection(linsts, rinsts);
     for (const li of unused) {
-      findings.push({ severity: 'info', kind: 'gtp-inst-del', msg: `${name}：删除消息表实例${li.direction ? `（direction ${li.direction}）` : ''}` });
+      findings.push({ severity: 'info', kind: 'gtp-inst-del', msg: `${name}：删除消息表实例${li.direction ? `（direction ${li.direction}）` : ''}`, loc: { msg: name } });
     }
     for (let i = 0; i < rinsts.length; i++) {
       const ri = rinsts[i];
       const li = paired[i];
       if (!li) {
-        findings.push({ severity: 'info', kind: 'gtp-inst-add', msg: `${name}：新增消息表实例${ri.direction ? `（direction ${ri.direction}）` : ''}（旧版本无对应表分片）` });
+        findings.push({ severity: 'info', kind: 'gtp-inst-add', msg: `${name}：新增消息表实例${ri.direction ? `（direction ${ri.direction}）` : ''}（旧版本无对应表分片）`, loc: { msg: name } });
         continue;
       }
       if (li.msgType != null && ri.msgType != null && li.msgType !== ri.msgType) {
-        findings.push({ severity: 'break', kind: 'gtp-msgtype', msg: `${name}：消息类型值变更 ${li.msgType} → ${ri.msgType}（0x${li.msgType.toString(16)} → 0x${ri.msgType.toString(16)}）` });
+        findings.push({ severity: 'break', kind: 'gtp-msgtype', msg: `${name}：消息类型值变更 ${li.msgType} → ${ri.msgType}（0x${li.msgType.toString(16)} → 0x${ri.msgType.toString(16)}）`, loc: { msg: name } });
       }
       const lrow = rowMapGtp(li.rows);
       const rrow = rowMapGtp(ri.rows);
@@ -7035,61 +7458,63 @@ function diffGtpSchema(left, right) {
             severity: framedAdd ? 'ok' : 'warn',
             kind: 'gtp-row-add',
             msg: `${name}：新增 IE 行 ${rr.name}（IEI ${rr.iei}，${framedAdd ? 'TLV/LV 收端按 Length 跳过未知 IE' : 'TV/fixed 无长度域——老收端不识 IEI 即无法跳过，错位风险'}）`,
+            loc: { msg: name, iei: String(rr.iei), ...(rr.ref ? { ref: rr.ref } : {}) },
           });
           continue;
         }
         const lr = lrow.get(k);
         if ((lr.ref || null) !== (rr.ref || null)) {
-          findings.push({ severity: 'break', kind: 'gtp-row-ref', msg: `${name}：IEI ${rr.iei}（${rr.name}）指向的 IE 节变更 ${lr.ref || '?'} → ${rr.ref || '?'}（原 ${lr.name}）` });
+          findings.push({ severity: 'break', kind: 'gtp-row-ref', msg: `${name}：IEI ${rr.iei}（${rr.name}）指向的 IE 节变更 ${lr.ref || '?'} → ${rr.ref || '?'}（原 ${lr.name}）`, loc: { msg: name, iei: String(rr.iei), ...(rr.ref ? { ref: rr.ref } : {}) } });
         }
         if ((lr.format || '').trim().toUpperCase() !== (rr.format || '').trim().toUpperCase() ||
             (lr.len || '').replace(/\s/g, '') !== (rr.len || '').replace(/\s/g, '')) {
-          findings.push({ severity: 'break', kind: 'gtp-row-format', msg: `${name}：IE ${rr.name} 框架变更 ${lr.format}/${lr.len || ''} → ${rr.format}/${rr.len || ''}` });
+          findings.push({ severity: 'break', kind: 'gtp-row-format', msg: `${name}：IE ${rr.name} 框架变更 ${lr.format}/${lr.len || ''} → ${rr.format}/${rr.len || ''}`, loc: { msg: name, iei: String(rr.iei), ...(rr.ref ? { ref: rr.ref } : {}) } });
         }
         const lc = gtpPresClass(lr.presence);
         const rc = gtpPresClass(rr.presence);
         if (lc !== rc) {
-          if (lc === 'M') findings.push({ severity: 'info', kind: 'gtp-row-presence', msg: `${name}：IE ${rr.name} 必配→非必配（${(lr.presence || '').trim()}→${(rr.presence || '').trim()}）` });
-          else if (rc === 'M') findings.push({ severity: 'warn', kind: 'gtp-row-presence', msg: `${name}：IE ${rr.name} 非必配→必配（${(lr.presence || '').trim()}→${(rr.presence || '').trim()}，新版本要求）` });
-          else findings.push({ severity: 'info', kind: 'gtp-row-presence', msg: `${name}：IE ${rr.name} presence 档位变化（${(lr.presence || '').trim()}→${(rr.presence || '').trim()}）` });
+          const loc = { msg: name, iei: String(rr.iei), ...(rr.ref ? { ref: rr.ref } : {}) };
+          if (lc === 'M') findings.push({ severity: 'info', kind: 'gtp-row-presence', msg: `${name}：IE ${rr.name} 必配→非必配（${(lr.presence || '').trim()}→${(rr.presence || '').trim()}）`, loc });
+          else if (rc === 'M') findings.push({ severity: 'warn', kind: 'gtp-row-presence', msg: `${name}：IE ${rr.name} 非必配→必配（${(lr.presence || '').trim()}→${(rr.presence || '').trim()}，新版本要求）`, loc });
+          else findings.push({ severity: 'info', kind: 'gtp-row-presence', msg: `${name}：IE ${rr.name} presence 档位变化（${(lr.presence || '').trim()}→${(rr.presence || '').trim()}）`, loc });
         }
       }
       for (const [k, lr] of lrow) {
-        if (!rrow.has(k)) findings.push({ severity: 'info', kind: 'gtp-row-del', msg: `${name}：删除 IE 行 ${lr.name}（IEI ${lr.iei}）` });
+        if (!rrow.has(k)) findings.push({ severity: 'info', kind: 'gtp-row-del', msg: `${name}：删除 IE 行 ${lr.name}（IEI ${lr.iei}）`, loc: { msg: name, iei: String(lr.iei), ...(lr.ref ? { ref: lr.ref } : {}) } });
       }
     }
   }
   for (const name of Object.keys(lmsg)) {
-    if (!rmsg[name]) findings.push({ severity: 'info', kind: 'gtp-msg-del', msg: `删除消息 ${name}` });
+    if (!rmsg[name]) findings.push({ severity: 'info', kind: 'gtp-msg-del', msg: `删除消息 ${name}`, loc: { msg: name } });
   }
   // IE 定义层：同名节（键=节号）全量对比（未被消息引用的节变更同样入账）
   const lies = left.ies || {};
   const ries = right.ies || {};
   for (const [ref, ri] of Object.entries(ries)) {
     const li = lies[ref];
-    if (!li) { findings.push({ severity: 'info', kind: 'gtp-ie-add', msg: `新增 IE 节 ${ref} ${ri.name}` }); continue; }
-    if (li.name !== ri.name) findings.push({ severity: 'info', kind: 'gtp-ie-name', msg: `${ref}：IE 名称变更 ${li.name} → ${ri.name}` });
+    if (!li) { findings.push({ severity: 'info', kind: 'gtp-ie-add', msg: `新增 IE 节 ${ref} ${ri.name}`, loc: { ref } }); continue; }
+    if (li.name !== ri.name) findings.push({ severity: 'info', kind: 'gtp-ie-name', msg: `${ref}：IE 名称变更 ${li.name} → ${ri.name}`, loc: { ref } });
     if (li.ieType != null && ri.ieType != null && li.ieType !== ri.ieType) {
-      findings.push({ severity: 'break', kind: 'gtp-ie-type', msg: `${ref} ${ri.name}：IE Type 值变更 ${li.ieType} → ${ri.ieType}（老收端认不出/错认）` });
+      findings.push({ severity: 'break', kind: 'gtp-ie-type', msg: `${ref} ${ri.name}：IE Type 值变更 ${li.ieType} → ${ri.ieType}（老收端认不出/错认）`, loc: { ref } });
     }
     if ((li.format || '').trim().toUpperCase() !== (ri.format || '').trim().toUpperCase()) {
-      findings.push({ severity: 'break', kind: 'gtp-ie-format', msg: `${ref} ${ri.name}：格式变更 ${li.format || '?'} → ${ri.format || '?'}（框架判读破坏）` });
+      findings.push({ severity: 'break', kind: 'gtp-ie-format', msg: `${ref} ${ri.name}：格式变更 ${li.format || '?'} → ${ri.format || '?'}（框架判读破坏）`, loc: { ref } });
     }
     if ((li.fixed ?? null) !== (ri.fixed ?? null)) {
-      findings.push({ severity: 'warn', kind: 'gtp-ie-fixed', msg: `${ref} ${ri.name}：定长语义变更（fixed ${li.fixed ?? '无'} → ${ri.fixed ?? '无'}）` });
+      findings.push({ severity: 'warn', kind: 'gtp-ie-fixed', msg: `${ref} ${ri.name}：定长语义变更（fixed ${li.fixed ?? '无'} → ${ri.fixed ?? '无'}）`, loc: { ref } });
     }
     const ll = (li.layouts || [])[0], rl = (ri.layouts || [])[0];
     if (ll && rl) {
       const framed = gtpFramed(ri.format || li.format);
       diffGtpIeLayout(ref, ll.octets, rl.octets, framed, findings);
     } else if (rl && !ll) {
-      findings.push({ severity: 'info', kind: 'gtp-ie-nolayout', msg: `${ref} ${ri.name}：旧版本无位布局（建库覆盖差异，非规范变更）` });
+      findings.push({ severity: 'info', kind: 'gtp-ie-nolayout', msg: `${ref} ${ri.name}：旧版本无位布局（建库覆盖差异，非规范变更）`, loc: { ref } });
     } else if (ll && !rl) {
-      findings.push({ severity: 'info', kind: 'gtp-ie-nolayout', msg: `${ref} ${li.name}：新版本无位布局（建库覆盖差异，非规范变更）` });
+      findings.push({ severity: 'info', kind: 'gtp-ie-nolayout', msg: `${ref} ${li.name}：新版本无位布局（建库覆盖差异，非规范变更）`, loc: { ref } });
     }
   }
   for (const [ref, li] of Object.entries(lies)) {
-    if (!ries[ref]) findings.push({ severity: 'info', kind: 'gtp-ie-del', msg: `删除 IE 节 ${ref} ${li.name}` });
+    if (!ries[ref]) findings.push({ severity: 'info', kind: 'gtp-ie-del', msg: `删除 IE 节 ${ref} ${li.name}`, loc: { ref } });
   }
   const sevRank = { break: 0, warn: 1, info: 2, ok: 3 };
   findings.sort((a, b) => sevRank[a.severity] - sevRank[b.severity]);
@@ -7105,7 +7530,7 @@ function diffNasSchema(left, right) {
   for (const name of Object.keys(rmsg)) {
     if (!lmsg[name]) {
       const mt = msgTypeOf(right, name);
-      findings.push({ severity: 'info', kind: 'nas-msg-add', msg: `新增消息 ${name}（${mt != null ? `类型 0x${mt.toString(16)}` : '附件/保护类'}）` });
+      findings.push({ severity: 'info', kind: 'nas-msg-add', msg: `新增消息 ${name}（${mt != null ? `类型 0x${mt.toString(16)}` : '附件/保护类'}）`, loc: { msg: name } });
       continue;
     }
     // 同名消息：逐实例配对（同 direction 按序、失配回退下标——见 pairLeftByDirection）
@@ -7113,24 +7538,24 @@ function diffNasSchema(left, right) {
     const linsts = lmsg[name];
     const { paired, unused } = pairLeftByDirection(linsts, rinsts);
     for (const li of unused) {
-      findings.push({ severity: 'info', kind: 'nas-inst-del', msg: `${name}（${li.direction || '?'}）：删除消息表实例` });
+      findings.push({ severity: 'info', kind: 'nas-inst-del', msg: `${name}（${li.direction || '?'}）：删除消息表实例`, loc: { msg: name } });
     }
     for (let i = 0; i < rinsts.length; i++) {
       const ri = rinsts[i];
       const li = paired[i];
       if (!li) {
-        findings.push({ severity: 'info', kind: 'nas-inst-add', msg: `${name}（${ri.direction || '?'}）：新增消息表实例（旧版本无对应表分片）` });
+        findings.push({ severity: 'info', kind: 'nas-inst-add', msg: `${name}（${ri.direction || '?'}）：新增消息表实例（旧版本无对应表分片）`, loc: { msg: name } });
         continue;
       }
       if (li.msgType != null && ri.msgType != null && li.msgType !== ri.msgType) {
-        findings.push({ severity: 'break', kind: 'nas-msgtype', msg: `${name}（${ri.direction || '?'}）：消息类型值变更 0x${li.msgType.toString(16)} → 0x${ri.msgType.toString(16)}` });
+        findings.push({ severity: 'break', kind: 'nas-msgtype', msg: `${name}（${ri.direction || '?'}）：消息类型值变更 0x${li.msgType.toString(16)} → 0x${ri.msgType.toString(16)}`, loc: { msg: name } });
       }
       diffMessageRows(name, li, ri, findings);
     }
   }
   for (const name of Object.keys(lmsg)) {
     if (!rmsg[name]) {
-      findings.push({ severity: 'info', kind: 'nas-msg-del', msg: `删除消息 ${name}` });
+      findings.push({ severity: 'info', kind: 'nas-msg-del', msg: `删除消息 ${name}`, loc: { msg: name } });
     }
   }
   const sevRank = { break: 0, warn: 1, info: 2, ok: 3 };
@@ -7138,6 +7563,20 @@ function diffNasSchema(left, right) {
   const counts = { break: 0, warn: 0, info: 0, ok: 0 };
   for (const f of findings) counts[f.severity]++;
   return { findings, counts };
+}
+
+// 批次 Q3：链式多版本 diff（A→B→C…）。entries = [{ label, schema }]（已按版本序），
+// diffFn = diffNasSchema | diffGtpSchema。返回逐段 findings/counts 与累计计数
+// （break/warn 趋势 = Release 演进审查的主视图）。
+function diffChain(entries, diffFn) {
+  const segments = [];
+  for (let i = 1; i < entries.length; i++) {
+    const out = diffFn(entries[i - 1].schema, entries[i].schema);
+    segments.push({ from: entries[i - 1].label, to: entries[i].label, findings: out.findings, counts: out.counts });
+  }
+  const cumulative = { break: 0, warn: 0, info: 0, ok: 0 };
+  for (const s of segments) for (const k of Object.keys(cumulative)) cumulative[k] += s.counts[k];
+  return { segments, cumulative };
 }
 
 // ==== src/nas/security.js ====
@@ -8410,8 +8849,29 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
   let other = 0;
   const sections = [];
   let curH3 = null;
-  for (const it of items) {
+  const hStack = [];
+  // 表后题注：本批文档的 Figure 题注排在表的**后面**（flowFromXml 的 paras 是表前段），
+  // 于是表 2 拿到表 1 的题注（29.060 7.7.64 实证：2-digit MNC 布局挂 'Figure .2 3-digit'）。
+  // 只在紧邻的表后段里取 Figure 题注（遇 Heading/下一表即停），没有才回退表前段。
+  const figureAfter = (idx) => {
+    for (let j = idx + 1; j < items.length && j <= idx + 3; j++) {
+      const x = items[j];
+      if (x.kind !== 'p') break;
+      if (/^Heading\d$/.test(x.style)) break;
+      if (/^Figure\b/i.test(x.text)) return x.text;
+      if (/^Table\b/i.test(x.text)) break;
+    }
+    return null;
+  };
+  for (let ii = 0; ii < items.length; ii++) {
+    const it = items[ii];
     if (it.kind === 'p') {
+      // 标题祖先栈（29.244 消息表落在 Heading5 'General' 下，消息名在 Heading4——需要祖先）
+      if (/^Heading[1-5]$/.test(it.style) && it.text) {
+        const lvl = +it.style.slice(-1);
+        const hs = splitHeading(it.text);
+        if (hs.num) { hStack[lvl] = { num: hs.num, title: hs.title, style: it.style }; hStack.length = lvl + 1; }
+      }
       if (/^Heading[234]$/.test(it.style) && it.text) {
         const sh = splitHeading(it.text);
         const hm = /^\s*((?:\d+\.)+\d+)([a-zA-Z])\s+(.*)$/.exec(it.text);
@@ -8435,6 +8895,11 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
     // 29.274：§6.1-1 消息类型值表（§6.1 标题段无 Heading 样式，表落在 6.1.0 'Message Type'
     // 标题下）+ §8.1-1 IE 类型值表——节号精确匹配防 6.1.x/8.1.x 子节混入
     if (spec === '29274' && curH3 && /^(6\.1|6\.1\.0|8\.1)$/.test(curH3.num || '')) {
+      typeTables.push({ section: curH3.num, title: curH3.title, rows: it.rows.map((r) => r.map((c) => c.text)) });
+      continue;
+    }
+    // 29.244：§7.3 消息类型值表 + §8.1.2 IE 类型值表
+    if (spec === '29244' && curH3 && /^(7\.3|8\.1\.2)$/.test(curH3.num || '')) {
       typeTables.push({ section: curH3.num, title: curH3.title, rows: it.rows.map((r) => r.map((c) => c.text)) });
       continue;
     }
@@ -8477,6 +8942,47 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
         continue;
       }
     }
+    // 29.244 §8.2.x IE 位布局表（TLV 头 Type 1-2 / Length 3-4，hdrOctets=4）。
+    // 非位表节（值语义表/散文）不落 bits——ies 条目由 §8.1.2 类型表补 name/ieType。
+    if (spec === '29244' && curH3 && /^8\.2\.\d+[a-z]?$/i.test(curH3.num || '')) {
+      const gt = parseGtpIeTable(it.rows, 4);
+      if (gt) {
+        const cap = (it.paras || []).map((p) => /^Figure\s+([\d.]+-\d+)\s*:/i.exec(p)).find(Boolean);
+        bits.push({ section: curH3.num, name: curH3.title, figure: cap ? it.paras.find((p) => /^Figure/i.test(p)) : null, octets: gt.octets, ...(gt.warnings && gt.warnings.length ? { warnings: gt.warnings } : {}) });
+      }
+      continue;
+    }
+    // 29.244 §7.x 消息内容表 / 分组 IE 定义表（9 列 + Appl.×5）
+    if (spec === '29244') {
+      const pm = parsePfcpMsgRows(it.rows);
+      if (pm && pm.rows.length) {
+        const capText = (it.paras || []).filter((p) => /^Table\s+/i.test(p)).slice(-1)[0] || '';
+        const capId = (/^Table\s+([\d.]+-\d+)/i.exec(capText) || [])[1] || null;
+        const capTitle = (/^Table\s+[\d.]+-\d+\s*[:.]\s*(.*)$/i.exec(capText) || [])[1] || '';
+        // 消息名取最近的「消息节」祖先（Heading5 'General' 下的表仍归属 Heading4 消息）
+        let msgH = null;
+        for (let lv = hStack.length - 1; lv >= 1; lv--) {
+          const h = hStack[lv];
+          if (!h) continue;
+          if (/^7\.[45]\.\d+(\.\d+)?$/.test(h.num) && !/\bIE\s+(within|in)\b/i.test(h.title) && !/^General$/i.test(h.title)) { msgH = h; break; }
+        }
+        let groupName = pm.groupName;
+        let groupType = pm.groupType;
+        if (groupType == null) {
+          const gm = /^(.+?)\s+IE\s+(?:within|in)\b/i.exec(capTitle);
+          if (gm) groupName = gm[1].trim();
+        }
+        if (groupType != null || groupName) {
+          msgs.push({ section: msgH ? msgH.num : (curH3 ? curH3.num : null), tableId: capId, name: groupName || capTitle, kind: 'grouped', groupName: groupName || capTitle, groupType, rows: pm.rows });
+          continue;
+        }
+        if (msgH) {
+          msgs.push({ section: msgH.num, tableId: capId, name: msgH.title, kind: 'message', rows: pm.rows });
+          continue;
+        }
+      }
+      continue;
+    }
     // 29.274 §8.x / 29.060 §7.7.x IE 位布局表（gutter 形——parseBitTable 不识别）：布局直出。
     // 29.060 头只占 octet 1（Type），TLV 的 Length 行由 hdrOctets<4 的 Length 行守卫剥除。
     // 节归属用 splitHeadingSfx——字母后缀节号（29.060 '7.7.25A MS Not Reachable Reason' 实证）
@@ -8485,7 +8991,7 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
       const gt = parseGtpIeTable(it.rows);
       if (gt) {
         const sh = it.heading ? splitHeadingSfx(it.heading.text) : { num: null, title: null };
-        bits.push({ section: sh.num, name: sh.title, figure: it.paras?.find((p) => /^Figure/i.test(p)) || null, octets: gt.octets, ...(gt.warnings && gt.warnings.length ? { warnings: gt.warnings } : {}) });
+        bits.push({ section: sh.num, name: sh.title, figure: figureAfter(ii) || it.paras?.find((p) => /^Figure/i.test(p)) || null, octets: gt.octets, ...(gt.warnings && gt.warnings.length ? { warnings: gt.warnings } : {}) });
         continue;
       }
     }
@@ -8493,7 +8999,7 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
       const gt = parseGtpIeTable(it.rows, 1);
       if (gt) {
         const sh = it.heading ? splitHeadingSfx(it.heading.text) : { num: null, title: null };
-        bits.push({ section: sh.num, name: sh.title, figure: it.paras?.find((p) => /^Figure/i.test(p)) || null, octets: gt.octets, ...(gt.warnings && gt.warnings.length ? { warnings: gt.warnings } : {}) });
+        bits.push({ section: sh.num, name: sh.title, figure: figureAfter(ii) || it.paras?.find((p) => /^Figure/i.test(p)) || null, octets: gt.octets, ...(gt.warnings && gt.warnings.length ? { warnings: gt.warnings } : {}) });
         continue;
       }
     }
@@ -9101,6 +9607,7 @@ function buildMessages(msgs, msgTypes, bits) {
 function buildSchema(structured, opts = {}) {
   if (structured.spec === '24008') return buildSchema24008(structured, opts);
   if (structured.spec === '29274') return buildSchema29274(structured);
+  if (structured.spec === '29244') return buildSchema29244(structured);
   if (structured.spec === '29060') return buildSchema29060(structured);
   if (structured.spec === '44018') return buildSchema44018(structured, opts.fillBits, opts.fillValueTables, opts.fillCsn1);
   if (structured.spec === '24080') return buildSchema24080(structured);
@@ -9452,6 +9959,8 @@ function gtpIeNameKeys(name) {
   const keys = new Set([GTP_KEY(name)]);
   const noParen = String(name || '').replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
   keys.add(GTP_KEY(noParen));
+  // 斜杠别名（29.244 'APN/DNN' ↔ 消息表 'DNN' 实证）
+  for (const part of noParen.split('/')) if (part.trim()) keys.add(GTP_KEY(part));
   for (const m of String(name || '').matchAll(/\(([^)]+)\)/g)) keys.add(GTP_KEY(m[1]));
   // 首字母缩写键（§8.1 名称无括号缩写、消息表用缩写的形态——'Trusted WLAN Mode Indication'↔TWMI 实证）
   const words = noParen.split(/\s+/).filter((w) => /^[A-Za-z]/.test(w));
@@ -9543,6 +10052,12 @@ function gtpTranslateRows(rows, ctx, problems) {
     const typeClean = typeCell.replace(/\(\s*see\s+note[^)]*\)/ig, '').replace(/\s+/g, ' ').trim(); // 'IP Address\n(See NOTE 2)' 格内注记后缀
     if (!typeClean || /^note\b/i.test(typeClean)) continue;
     let e = ctx.keyMap.get(GTP_KEY(typeClean));
+    // 长名前缀别名（29.244：'Node level Mitigation Actions Information' ↔ 类型表
+    // 'Node Level Mitigation Actions Rules'——前 4 词相同、末词规范内文不一致）
+    if (!e) {
+      const ws = typeClean.split(/\s+/).filter((w) => /^[A-Za-z0-9]/.test(w));
+      if (ws.length >= 5) e = ctx.keyMap.get(GTP_KEY(ws.slice(0, 4).join(' '))) || null;
+    }
     if (!e) e = gtpFuzzyEntry(typeClean, ctx.entries); // 拼写容差（唯一命中才接受）
     if (!e) {
       // docx 格内粘词伪影：'Local Distinguished Name (LDN)Name'（Modify Bearer Response
@@ -9745,6 +10260,145 @@ function buildSchema29274(structured) {
     out[m.name].push(inst);
   }
   return { schema: { spec: '29274', version: structured.version, msgTypes, ies, messages: out }, problems };
+}
+
+// ---- 29.244（PFCP）建库 --------------------------------------------------------------
+// 表结构与 29.274 同构的 TLV 族，差异：
+//   - §7.3 消息类型值表（值|名，名带 'PFCP ' 前缀）；§8.1.2 IE 类型表（值|名|Comment|定长），
+//     Comment 形如 'Extendable / Table 7.5.2.2-1'（分组 IE）或 'Fixed / Clause 8.2.1'（位表 IE）；
+//   - §7.x 内容表 9 列（IE 名|P|Condition|Appl.×5|IE Type），分组表前置两行 Type/Length；
+//   - IE 框架 = Type(2)+Length(2)+Value，无 Instance 列（分组子 IE 同）。
+// IE 节键：位表 IE = §8.2.x 节号；分组 IE = §7.5 表号（如 '7.5.2.2-1'）。
+function parsePfcpMsgTypes(rows) {
+  const out = {};
+  for (const cells of rows || []) {
+    const first = (cells[0] || '').trim();
+    let name = (cells[1] || '').split('\n')[0].replace(/\s+/g, ' ').trim();
+    if (!name || !/^\d+$/.test(first) || /^reserved/i.test(name) || /^spare/i.test(name)) continue;
+    name = name.replace(/^PFCP\s+/i, '');
+    out[GTP_KEY(name)] = { type: parseInt(first, 10), mask: 0xff, name };
+  }
+  return out;
+}
+
+function parsePfcpIeTypes(rows) {
+  const entries = [];
+  for (const cells of rows || []) {
+    const first = (cells[0] || '').trim();
+    const name = (cells[1] || '').split('\n')[0].replace(/\s+/g, ' ').trim();
+    const comment = (cells[2] || '').trim();
+    const fixedCell = (cells[3] || '').trim();
+    if (!name || !/^\d+$/.test(first) || /^reserved|^spare/i.test(name)) continue;
+    const km = /^(Extendable|Variable(?:\s+Length)?|Extendable\s+Length|Fixed(?:\s+Length)?)\s*\/\s*(.*)$/i.exec(comment);
+    const refRaw = (km ? km[2] : comment).replace(/\b(8\.\d+)\s+(\d+)\b/g, '$1.$2'); // 'Clause 8.2 37' 排版空格
+    const tm = /(?:Table|Clause)\s+(7\.[\d.]+(?:-\d+)?)/i.exec(refRaw);
+    const cm = /Clause\s+(8\.\d+(?:\.\d+)*[a-z]?)/i.exec(refRaw);
+    entries.push({
+      value: parseInt(first, 10),
+      name,
+      ref: tm ? tm[1] : cm ? cm[1] : null,
+      refKind: tm ? 'table' : cm ? 'clause' : null,
+      kind: km ? km[1].toLowerCase().replace(/\s+/g, ' ') : null,
+      fixed: /^\d+$/.test(fixedCell) ? parseInt(fixedCell, 10) : null,
+    });
+  }
+  const keyMap = new Map();
+  for (const e of entries) {
+    for (const k of gtpIeNameKeys(e.name)) if (!keyMap.has(k)) keyMap.set(k, e);
+    // 'X within <message>' / 'X IE within <message>' → 基名键（内容表格常用短名）
+    const base = e.name.replace(/\s+IE\s+within\b.*$/i, '').replace(/\s+within\b.*$/i, '').replace(/\s+IE$/i, '').trim();
+    if (base && base !== e.name) for (const k of gtpIeNameKeys(base)) if (!keyMap.has(k)) keyMap.set(k, e);
+    // 长名前缀别名：末词不同的规范内文写法（'Node Level Mitigation Actions Rules' ↔
+    // 消息表 'Node level Mitigation Actions Information'）取前 4 词归一
+    const words = base.split(/\s+/).filter((w) => /^[A-Za-z0-9]/.test(w));
+    if (words.length >= 5) {
+      const k = GTP_KEY(words.slice(0, 4).join(' '));
+      if (!keyMap.has(k)) keyMap.set(k, e);
+    }
+  }
+  return { entries, keyMap };
+}
+
+function buildSchema29244(structured) {
+  const problems = [];
+  const t73 = (structured.typeTables || []).find((t) => t.section === '7.3');
+  const t812 = (structured.typeTables || []).find((t) => t.section === '8.1.2');
+  const msgTypes = parsePfcpMsgTypes(t73 && t73.rows);
+  if (!Object.keys(msgTypes).length) problems.push('§7.3 消息类型值表未捕获');
+  const ieTypes = parsePfcpIeTypes(t812 && t812.rows);
+  if (!ieTypes.entries.length) problems.push('§8.1.2 IE 类型值表未捕获');
+  const ies = {};
+  for (const b of structured.bits || []) {
+    if (!b.section || !/^8\.2\./.test(b.section)) continue;
+    ies[b.section] = { name: b.name, layouts: [{ figure: b.figure, octets: b.octets }], ...(b.warnings && b.warnings.length ? { warnings: b.warnings } : {}) };
+  }
+  for (const e of ieTypes.entries) {
+    if (e.refKind === 'clause' && e.ref && /^8\.2\./.test(e.ref)) {
+      if (!ies[e.ref]) ies[e.ref] = { name: e.name, layouts: [] };
+      ies[e.ref].ieType = e.value;
+      ies[e.ref].fixed = e.fixed;
+      ies[e.ref].kind = e.kind;
+    }
+  }
+  // 分组 IE：§7.x 定义表 → 挂到 IE 类型表的 Table 键（或已存在位表节）
+  const keyOfGroup = new Map(); // groupType → ies key
+  for (const e of ieTypes.entries) if (e.refKind === 'table' && e.ref) keyOfGroup.set(e.value, e.ref);
+  const ctx = { ies, keyMap: ieTypes.keyMap, entries: ieTypes.entries };
+  const groupJobs = [];
+  for (const m of structured.msgs || []) {
+    if (m.kind !== 'grouped') continue;
+    // 组类型：preamble 的 IE Type 值优先；无 preamble 的表用表号反查 §8.1.2 的 Comment 引用
+    let e = m.groupType != null ? ieTypes.entries.find((x) => x.value === m.groupType) : null;
+    if (!e && m.tableId) e = ieTypes.entries.find((x) => x.ref && (x.ref === m.tableId || m.tableId.startsWith(x.ref + '-') || x.ref.startsWith(m.tableId + '-')));
+    if (!e && m.groupName) e = ieTypes.keyMap.get(GTP_KEY(m.groupName)) || null;
+    const gType = m.groupType != null ? m.groupType : e ? e.value : null;
+    if (gType == null) { problems.push(`${m.tableId || m.section} 分组 IE「${m.groupName}」无 IE Type 值`); continue; }
+    // §8.1.2 的引用可省略 '-N' 后缀（'Table 7.5.4.8' vs 题注 'Table 7.5.4.8-1'）——
+    // 组键确定后把类型表条目 ref 归一，消息行即可直接挂到组内容
+    if (e && e.ref !== m.tableId && m.tableId) { e.ref = m.tableId; e.refKind = 'table'; }
+    // 内容表用组名引用子 IE（'IP Multicast Addressing Info'）——把组名登记为别名
+    if (e) for (const k of gtpIeNameKeys(m.groupName || e.name)) if (!ieTypes.keyMap.has(k)) ieTypes.keyMap.set(k, e);
+    let key = m.tableId || keyOfGroup.get(gType);
+    if (!key && e && e.ref && e.refKind === 'clause' && ies[e.ref]) key = e.ref;
+    if (!key) key = `pfcp-group-${gType}`;
+    if (!ies[key]) ies[key] = { name: m.groupName || e.name || key, layouts: [] };
+    if (ies[key].ieType == null) { ies[key].ieType = gType; ies[key].fixed = e ? e.fixed : null; ies[key].kind = e ? e.kind : 'extendable'; }
+    keyOfGroup.set(gType, key);
+    groupJobs.push({ m, key });
+  }
+  // 先登记全部组名别名，再翻译组内行——否则后出现的组名被前面的组引用时解析不到
+  for (const { m, key } of groupJobs) ies[key].grouped = gtpTranslateRows(m.rows, ctx, problems);
+  // 消息实例（§7.4/§7.5 内容表）
+  const out = {};
+  const fuzzyType = (name) => {
+    const k = GTP_KEY(name.replace(/^PFCP\s+/i, ''));
+    if (msgTypes[k]) return msgTypes[k];
+    let hit = null;
+    for (const [kk, v] of Object.entries(msgTypes)) {
+      if (Math.abs(kk.length - k.length) > 2) continue;
+      if (gtpLev(kk, k) <= 1) { if (hit) return null; hit = v; } // 规范笔误（'Modifcation'）
+    }
+    return hit;
+  };
+  for (const m of structured.msgs || []) {
+    if (m.kind !== 'message' || !/^7\.[45]\./.test(m.section || '')) continue;
+    const rows = gtpTranslateRows(m.rows, ctx, problems);
+    const t = fuzzyType(m.name);
+    if (!t) problems.push(`${m.section} ${m.name}: 无消息类型值`);
+    const inst = { section: m.section, tableId: m.tableId || null, direction: null, pd: null, msgType: t ? t.type : null, session: !!(t && t.type >= 50), rows };
+    if (!out[m.name]) out[m.name] = [];
+    out[m.name].push(inst);
+  }
+  // 无内容表的纯头消息（29.244 §7.4.4.7 Version Not Supported Response 实证）：
+  // 按 §7.3 类型表补空实例，保证类型覆盖完整（编码 = 仅头）。
+  const have = new Set(Object.values(out).flat().map((i) => i.msgType));
+  for (const t of Object.values(msgTypes)) {
+    if (have.has(t.type)) continue;
+    const nm = t.name;
+    if (!out[nm]) out[nm] = [];
+    out[nm].push({ section: null, tableId: null, direction: null, pd: null, msgType: t.type, session: t.type >= 50, rows: [] });
+  }
+  return { schema: { spec: '29244', version: structured.version, msgTypes, ies, messages: out }, problems };
 }
 
 // ---- 44.018（GSM RR）建库 -----------------------------------------------------------------
@@ -10204,6 +10858,7 @@ function lenRangeOf(lenStr, fmt) {
 function sampleSchema(schema, N, seed, msgRe = null) {
   if (schema.spec === '29274') return sampleGtpcSchema(schema, N, seed, msgRe);
   if (schema.spec === '29060') return sampleGtpv1Schema(schema, N, seed, msgRe);
+  if (schema.spec === '29244') return samplePfcpSchema(schema, N, seed, msgRe);
   const rng = rng32(seed);
   const rnd = (n) => Math.floor(rng() * n);
   const rbytes = (n) => Uint8Array.from({ length: n }, () => rnd(256));
@@ -10383,6 +11038,71 @@ function sampleGtpcSchema(schema, N, seed, msgRe) {
   return { lines, skipped, okMsgs };
 }
 
+// ---- PFCP（29.244）采样：IE 框架 Type(2)+Length(2)，分组子 IE 同；M 必采、其余 p=0.4。
+function pfcpSampleValue(r, schema, rng, depth = 0) {
+  const ref = r.def || (r.ref && schema.ies[r.ref] ? r.ref : null);
+  if (ref && depth < 4) {
+    const ie = schema.ies[ref];
+    if (ie.grouped) {
+      const body = [];
+      for (const cr of ie.grouped) {
+        if (cr.iei == null) continue;
+        if (!/^M$/i.test((cr.presence || '').trim()) && rng() > 0.4) continue;
+        body.push(...pfcpIe(parseInt(cr.iei, 10), pfcpSampleValue(cr, schema, rng, depth + 1)));
+      }
+      return Uint8Array.from(body);
+    }
+    if (ie.layouts && ie.layouts[0] && ie.layouts[0].octets.length) {
+      const { bytes } = layoutSample(ie.layouts[0].octets, rng, false);
+      if (bytes.length) return bytes;
+    }
+    if (r.len && /^\d+$/.test(r.len)) return Uint8Array.from({ length: +r.len }, () => Math.floor(rng() * 256));
+  }
+  return Uint8Array.from({ length: 2 + Math.floor(rng() * 8) }, () => Math.floor(rng() * 256));
+}
+
+function samplePfcpSchema(schema, N, seed, msgRe) {
+  const rng = rng32(seed);
+  const lines = [];
+  const skipped = {};
+  let okMsgs = 0;
+  for (const [msgName, insts] of Object.entries(schema.messages)) {
+    if (msgRe && !msgRe.test(msgName)) continue;
+    for (let ii = 0; ii < insts.length; ii++) {
+      const inst = insts[ii];
+      const instKey = `${msgName}#${ii}`;
+      if (inst.msgType == null) { skipped[instKey] = skipped[instKey] || '无消息类型值'; continue; }
+      let made = 0;
+      for (let k = 0; k < N * 3 && made < N; k++) {
+        try {
+          const parts = [];
+          let ok = true;
+          for (let ri = 0; ri < inst.rows.length; ri++) {
+            const r = inst.rows[ri];
+            if (r.iei == null) {
+              if (/^M$/i.test((r.presence || '').trim())) { ok = false; break; }
+              continue;
+            }
+            if (!/^M$/i.test((r.presence || '').trim()) && rng() > 0.4) continue;
+            parts.push({ rowIdx: ri, value: pfcpSampleValue(r, schema, rng) });
+          }
+          if (!ok) { skipped[instKey] = skipped[instKey] || '必配行无类型值'; continue; }
+          const bytes = encMsg(inst, parts, schema.spec);
+          lines.push({
+            msg: msgName, inst: ii, section: inst.section,
+            hex: Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join(''),
+          });
+          made++;
+        } catch (e) {
+          skipped[instKey] = skipped[instKey] || e.message.slice(0, 60);
+        }
+      }
+      if (made > 0) okMsgs++;
+    }
+  }
+  return { lines, skipped, okMsgs };
+}
+
 // ---- GTPv1-C（29.060）采样：头缺省 PT=1/S=1/TEID=0/Seq=0（encGtpv1Msg 缺省值，回环确定性）；
 // 行序 TV 定长 / TLV；值来源优先级：IE 位布局（layoutSample framed，TV 定长校验不符回退
 // 随机定长）> 定长随机（TV）/ 1-6 字节随机（TLV）。M 必采、Conditional/Optional p=0.4。
@@ -10458,7 +11178,7 @@ if (args.schema && args.out) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, gtpuBuild, GTPU_EXT_TYPES, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
@@ -11695,7 +12415,7 @@ function registryAddVersion(label) {
 // 官方 docx/zip → schema/ASN.1 全程本机：NAS 走 ingestDocxZip（与 CLI 同一纯函数，
 // 导出 JSON 与 nasdef 产物逐字节一致）；ASN.1 走 extractFromDocumentXml（ASN1START 块拼接）。
 const ingestState = { results: [], seq: 0 };
-const NAS_SPECS = ['24501', '24301', '24008', '44018', '24080', '24011', '23040', '29274', '29060'];
+const NAS_SPECS = ['24501', '24301', '24008', '44018', '24080', '24011', '23040', '29274', '29060', '29244'];
 
 function ingestAutoName(fname) {
   const m = /^(?:[3GPP ]*)?(\d{5})-([0-9a-z]+)\.(?:zip|docx)$/i.exec(fname.trim());
@@ -12008,7 +12728,9 @@ function renderNasPage() {
         <div id="nasDecOut" style="margin-top:10px"></div>
       </div></div>
       <div class="card"><div class="card-h">版本 Diff（同名消息/行级语义；GTP 两族含 IE 定义与布局行级）
-        <button class="btn sm" id="nasDiffMd" style="margin-left:auto" title="导出 findings 全文 Markdown">导出 .md</button></div><div class="card-b">
+        <button class="btn sm" id="nasDiffChain" style="margin-left:auto" title="同规范全部已载版本按序链式比对（A→B→C…）">链式</button>
+        <button class="btn sm" id="nasDiffJson" title="导出 findings 结构化 JSON（含 provenance）">导出 .json</button>
+        <button class="btn sm" id="nasDiffMd" title="导出 findings 全文 Markdown">导出 .md</button></div><div class="card-b">
         <div style="display:flex;gap:8px">
           <select id="nasDiffL" style="flex:1"></select>
           <select id="nasDiffR" style="flex:1"></select>
@@ -12074,6 +12796,9 @@ function renderNasPage() {
   $('nasDecMd').addEventListener('click', () => nasExportDecode('md'));
   $('nasDecJson').addEventListener('click', () => nasExportDecode('json'));
   $('nasDiffMd').addEventListener('click', nasExportDiffMd);
+  $('nasDiffJson').addEventListener('click', nasExportDiffJson);
+  $('nasDiffChain').addEventListener('click', nasDoDiffChain);
+  $('nasDiffOut').addEventListener('click', nasDiffLocate);
   $('nasWsMd').addEventListener('click', nasExportWsMd);
   $('nasDiffGo').addEventListener('click', nasDoDiff);
   $('nasWsBtn').addEventListener('click', () => $('nasWsFile').click());
@@ -12228,7 +12953,7 @@ function nasRefreshSelectors() {
   // 33.501/33.401 SHT 安全帧封装仅 LTE/5G NAS 有：GSM RR 的 A5 在 RR 层（44.018 无
   // SHT 帧形态）、SS 消息不加密——这两族隐藏安全卡
   const secCard = $('nasSecCard');
-  if (secCard) secCard.style.display = ['44018', '24080', '24011', '23040', '29274', '29060'].includes(nasState.spec) ? 'none' : '';
+  if (secCard) secCard.style.display = ['44018', '24080', '24011', '23040', '29274', '29060', '29244'].includes(nasState.spec) ? 'none' : '';
   $('nasDiffL').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${k}</option>`).join('');
   $('nasDiffR').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${k}</option>`).join('');
   nasSecRefreshAlgos();
@@ -12279,7 +13004,7 @@ function nasRenderForm() {
     const badge = optional
       ? `<label style="display:flex;align-items:center;gap:4px;font:400 11px var(--sans);color:var(--t3);white-space:nowrap"><input type="checkbox" data-ri="${ri}" data-kind="on" ${nasState.form[ri] && nasState.form[ri].on ? 'checked' : ''}>${r.presence}</label>`
       : `<span style="font:400 11px var(--mono);color:var(--t4);white-space:nowrap">${r.presence}</span>`;
-    return `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--bd-faint)">
+    return `<div data-ref="${esc(r.ref || r.def || '')}" data-iei="${esc(r.iei || '')}" style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--bd-faint)">
       <span style="font:400 11px var(--mono);color:var(--t4);width:44px;flex-shrink:0">${r.iei || '·'}</span>
       <span style="font:400 12px var(--sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${name}">${name}<span class="dim" style="font:10px var(--mono)"> ${fmt}</span></span>
       ${input}${badge}</div>`;
@@ -12603,19 +13328,57 @@ function nasExportDecode(format) {
 }
 
 function nasExportDiffMd() {
+  const c = nasState._chain;
+  if (c) {
+    const lines = [
+      `# NAS 链式版本 Diff — ${c.spec}`,
+      '',
+      `- 版本序：${c.labels.join(' → ')}（${c.segments.length} 段）`,
+      `- 累计：break ${c.cumulative.break} · warn ${c.cumulative.warn} · info ${c.cumulative.info} · ok ${c.cumulative.ok}`,
+      `- 导出时间：${new Date().toISOString()}`,
+      '',
+      '## 逐段计数',
+      '',
+      '| 段 | break | warn | info | ok |',
+      '|---|---:|---:|---:|---:|',
+      ...c.segments.map((s) => `| ${s.from} → ${s.to} | ${s.counts.break} | ${s.counts.warn} | ${s.counts.info} | ${s.counts.ok} |`),
+      '',
+      '## 逐段 findings',
+      '',
+      ...c.segments.flatMap((s) => [
+        `### ${s.from} → ${s.to}`,
+        '',
+        ...s.findings.map((f) => `- \`${f.severity}\` \`${f.kind}\` ${f.msg}${f.loc && (f.loc.msg || f.loc.ref) ? `（定位：${[f.loc.msg, f.loc.iei && 'IEI ' + f.loc.iei, f.loc.ref, f.loc.octet && 'octet ' + f.loc.octet].filter(Boolean).join(' / ')}）` : ''}`),
+        '',
+      ]),
+    ];
+    ingestDownload(`nas-diff-chain-${c.spec}-${c.labels.join('_')}.md`, lines.join('\n'), 'text/markdown');
+    return;
+  }
   const d = nasState._diff;
-  if (!d) { inlineMsg('nasDiffOut', '先运行一次版本比对再导出。'); return; }
+  if (!d) { inlineMsg('nasDiffOut', '先运行一次版本比对或链式比对再导出。'); return; }
   const lines = [
     `# NAS 版本 Diff — ${d.lk} → ${d.rk}`,
     '',
     `- 汇总：break ${d.counts.break} · warn ${d.counts.warn} · info ${d.counts.info} · ok ${d.counts.ok}`,
     `- 导出时间：${new Date().toISOString()}`,
     '',
-    '| 级别 | 发现 |',
-    '|---|---|',
-    ...d.findings.map((f) => `| ${f.severity} | ${f.msg.replace(/\|/g, '\\|')} |`),
+    '| 级别 | kind | 定位 | 发现 |',
+    '|---|---|---|---|',
+    ...d.findings.map((f) => `| ${f.severity} | ${f.kind} | ${[f.loc && f.loc.msg, f.loc && f.loc.iei && 'IEI ' + f.loc.iei, f.loc && f.loc.ref, f.loc && f.loc.octet && 'octet ' + f.loc.octet].filter(Boolean).join(' / ').replace(/\|/g, '\\|')} | ${f.msg.replace(/\|/g, '\\|')} |`),
   ];
   ingestDownload(`nas-diff-${d.lk.replace(/\s+/g, '_')}-to-${d.rk.replace(/\s+/g, '_')}.md`, lines.join('\n'), 'text/markdown');
+}
+
+function nasExportDiffJson() {
+  const c = nasState._chain;
+  if (c) {
+    ingestDownload(`nas-diff-chain-${c.spec}-${c.labels.join('_')}.json`, JSON.stringify({ type: 'chain', ...c }, null, 1), 'application/json');
+    return;
+  }
+  const d = nasState._diff;
+  if (!d) { inlineMsg('nasDiffOut', '先运行一次版本比对或链式比对再导出。'); return; }
+  ingestDownload(`nas-diff-${d.lk.replace(/\s+/g, '_')}-to-${d.rk.replace(/\s+/g, '_')}.json`, JSON.stringify({ type: 'diff', ...d }, null, 1), 'application/json');
 }
 
 function nasExportWsMd() {
@@ -12651,7 +13414,7 @@ function nasDoDiff() {
   if (!lk || !rk) return;
   if (lk === rk) { inlineMsg('nasDiffOut', '左右选了同一个版本——选两个不同版本再比对。'); return; }
   const L = nasState.schemas[lk], R = nasState.schemas[rk];
-  const isGtp = (s) => s && (s.spec === '29060' || s.spec === '29274');
+  const isGtp = (s) => s && (s.spec === '29060' || s.spec === '29274' || s.spec === '29244');
   let out;
   try {
     if (isGtp(L) && isGtp(R)) {
@@ -12669,14 +13432,93 @@ function nasDoDiff() {
   }
   const { findings, counts } = out;
   nasState._diff = { lk, rk, findings, counts };
+  nasState._chain = null;
   const color = { break: '#da1e28', warn: '#f1c21b', info: 'var(--t3)', ok: '#198038' };
   $('nasDiffOut').innerHTML = `
-    <p style="font:400 12px var(--sans);color:var(--t3);margin-bottom:8px">${lk} → ${rk}：break ${counts.break} · warn ${counts.warn} · info ${counts.info} · ok ${counts.ok}</p>
+    <p style="font:400 12px var(--sans);color:var(--t3);margin-bottom:8px">${lk} → ${rk}：break ${counts.break} · warn ${counts.warn} · info ${counts.info} · ok ${counts.ok}　<span class="dim">（点击带定位的条目跳到消息表）</span></p>
     <div style="max-height:420px;overflow:auto">
-    ${findings.map((f) => `<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--bd-faint)">
+    ${findings.map((f) => `<div class="diff-finding" data-loc="${esc(JSON.stringify(f.loc || {}))}" style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--bd-faint);${f.loc && (f.loc.msg || f.loc.ref) ? 'cursor:pointer' : ''}">
       <span style="color:${color[f.severity]};font:600 10px var(--mono);width:40px;flex-shrink:0">${f.severity.toUpperCase()}</span>
-      <span style="font:400 12px/1.5 var(--sans)">${f.msg}</span></div>`).join('') || '<p class="muted">无差异。</p>'}
+      <span style="font:400 12px/1.5 var(--sans)">${esc(f.msg)}</span></div>`).join('') || '<p class="muted">无差异。</p>'}
     </div>`;
+}
+
+// Q3：同规范全部已载版本按版本序链式比对（A→B→C…），逐段计数 + 累计趋势。
+function nasDiffFnFor(spec) {
+  return spec === '29060' || spec === '29274' || spec === '29244' ? diffGtpSchema : diffNasSchema;
+}
+function nasDoDiffChain() {
+  const lk = $('nasDiffL').value;
+  if (!lk) return;
+  const spec = lk.split(' ')[0];
+  const keys = Object.keys(nasState.schemas).filter((k) => k.split(' ')[0] === spec);
+  const entries = keys
+    .map((k) => ({ label: k.slice(spec.length + 1), schema: nasState.schemas[k] }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'en', { numeric: true }));
+  if (entries.length < 2) { inlineMsg('nasDiffOut', `${spec} 只载入 ${entries.length} 个版本——链式比对至少需 2 个。`); return; }
+  let chain;
+  try {
+    chain = diffChain(entries, nasDiffFnFor(spec));
+  } catch (e) {
+    inlineMsg('nasDiffOut', `链式 Diff 失败：${e.message}`);
+    return;
+  }
+  nasState._chain = { spec, labels: entries.map((e) => e.label), segments: chain.segments, cumulative: chain.cumulative };
+  nasState._diff = null;
+  const color = { break: '#da1e28', warn: '#f1c21b', info: 'var(--t3)', ok: '#198038' };
+  const cells = (c) => ['break', 'warn', 'info', 'ok'].map((k) => `<td style="text-align:right;color:${c[k] ? color[k] : 'var(--t3)'}">${c[k]}</td>`).join('');
+  $('nasDiffOut').innerHTML = `
+    <p style="font:400 12px var(--sans);color:var(--t3);margin-bottom:8px">链式 ${spec}：${entries.map((e) => esc(e.label)).join(' → ')}（${entries.length} 版本 / ${chain.segments.length} 段）</p>
+    <table style="width:100%;border-collapse:collapse;font:12px var(--sans)">
+      <thead><tr style="color:var(--t3)"><th style="text-align:left">段</th><th style="text-align:right">break</th><th style="text-align:right">warn</th><th style="text-align:right">info</th><th style="text-align:right">ok</th></tr></thead>
+      <tbody>${chain.segments.map((s) => `<tr style="border-top:1px solid var(--bd-faint)"><td>${esc(s.from)} → ${esc(s.to)}</td>${cells(s.counts)}</tr>`).join('')}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--bd-faint);font-weight:600"><td>累计</td>${cells(chain.cumulative)}</tr></tfoot>
+    </table>
+    <div style="max-height:320px;overflow:auto;margin-top:8px">
+      ${chain.segments.map((s) => `<details style="margin:4px 0"><summary style="cursor:pointer;font:400 12px var(--sans)">${esc(s.from)} → ${esc(s.to)}：break ${s.counts.break} · warn ${s.counts.warn} · info ${s.counts.info} · ok ${s.counts.ok}</summary>
+        ${s.findings.map((f) => `<div class="diff-finding" data-loc="${esc(JSON.stringify(f.loc || {}))}" style="display:flex;gap:8px;padding:3px 0 3px 12px;${f.loc && (f.loc.msg || f.loc.ref) ? 'cursor:pointer' : ''}">
+          <span style="color:${color[f.severity]};font:600 10px var(--mono);width:40px;flex-shrink:0">${f.severity.toUpperCase()}</span>
+          <span style="font:400 12px/1.5 var(--sans)">${esc(f.msg)}</span></div>`).join('') || '<p class="muted" style="padding-left:12px">无差异。</p>'}
+      </details>`).join('')}
+    </div>`;
+}
+
+// Q1：finding 点击定位——loc.msg 直接切消息；仅 loc.ref 时找首个引用该 IE 节的消息；
+// 渲染后高亮对应行（data-ref/data-iei）。定位到右版本（diff 的目标版本）。
+function nasDiffLocate(ev) {
+  const el = ev.target.closest && ev.target.closest('.diff-finding');
+  if (!el) return;
+  let loc;
+  try { loc = JSON.parse(el.dataset.loc || '{}'); } catch { return; }
+  const d = nasState._diff;
+  if (!d) return;
+  const schema = nasState.schemas[d.rk];
+  if (!schema) return;
+  let msg = loc.msg && schema.messages[loc.msg] ? loc.msg : null;
+  if (!msg && loc.ref) {
+    for (const [name, insts] of Object.entries(schema.messages || {})) {
+      if (insts.some((inst) => (inst.rows || []).some((r) => r.ref === loc.ref || r.def === loc.ref))) { msg = name; break; }
+    }
+  }
+  if (!msg) return;
+  nasState.spec = schema.spec;
+  nasState.ver = schema.version;
+  nasState.msg = msg;
+  nasState.instIdx = 0;
+  nasRefreshSelectors();
+  const host = $('nasForm');
+  if (!host) return;
+  const sel = loc.ref
+    ? `[data-ref="${CSS.escape ? CSS.escape(loc.ref) : loc.ref}"]`
+    : (loc.iei ? `[data-iei="${CSS.escape ? CSS.escape(String(loc.iei)) : String(loc.iei)}"]` : '');
+  const hit = sel ? host.querySelector(sel) : null;
+  if (hit) {
+    hit.style.outline = '2px solid #f1c21b';
+    hit.style.outlineOffset = '-2px';
+    hit.scrollIntoView({ block: 'center' });
+  } else {
+    host.scrollIntoView({ block: 'start' });
+  }
 }
 
 // 控制台/自动化入口（schema 注入与状态检视）
