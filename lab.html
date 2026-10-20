@@ -6723,6 +6723,203 @@ function gtpuBuild({ teid = 0, type = 0xff, seq = null, npdu = null, exts = [], 
   return Uint8Array.from([...out, ...chain, ...pl]);
 }
 
+// ---- PDU Session Information（38.415 §5.5，GTP-U 扩展头 0x85 内容）----------------
+// 批次 V（v1.31.0）：字段级构造/反解。位布局与域序以线帧格式常量实现（§5.5.2.1 DL
+// PDU Type 0 / §5.5.2.2 UL PDU Type 1 两张帧格式表 + §5.5.3.x 各 IE 位宽散文）；
+// 权威布局摄取进 38415 schema（tools/nas38415.mjs），gate:nas38415 做 schema ↔ 本常量
+// 交叉校验 + 随机回环，防两处漂移。帧长（含 padding/future ext）= n*4-2 octets（§5.5.3.5）。
+const PSC_FIELDS = {
+  dl: {
+    octet1: [{ key: 'pduType', hi: 7, lo: 4 }, { key: 'qmp', hi: 3, lo: 3 }, { key: 'snp', hi: 2, lo: 2 }, { key: 'msnp', hi: 1, lo: 1 }, { key: 'spare', hi: 0, lo: 0, implOnly: true }],
+    octet2: [{ key: 'ppp', hi: 7, lo: 7 }, { key: 'rqi', hi: 6, lo: 6 }, { key: 'qfi', hi: 5, lo: 0 }],
+    condBitField: {
+      on: 'ppp',
+      fields: [{ key: 'ppi', hi: 7, lo: 5 }, { key: 'spare', hi: 4, lo: 2, implOnly: true }, { key: 'bssi', hi: 1, lo: 1 }, { key: 'ttnbi', hi: 0, lo: 0 }],
+    },
+    condOctets: ['dlSendTs:8:qmp', 'dlSeq:3:snp', 'dlMbsSeq:4:msnp', 'bssize:3:bssi', 'ttnb:2:ttnbi'],
+  },
+  ul: {
+    octet1: [{ key: 'pduType', hi: 7, lo: 4 }, { key: 'qmp', hi: 3, lo: 3 }, { key: 'dlDelayInd', hi: 2, lo: 2 }, { key: 'ulDelayInd', hi: 1, lo: 1 }, { key: 'snp', hi: 0, lo: 0 }],
+    octet2: [{ key: 'n3n9DelayInd', hi: 7, lo: 7 }, { key: 'newIeFlag', hi: 6, lo: 6 }, { key: 'qfi', hi: 5, lo: 0 }],
+    condOctets: ['dlSendTsRep:8:qmp', 'dlRecvTs:8:qmp', 'ulSendTs:8:qmp', 'dlDelay:4:dlDelayInd', 'ulDelay:4:ulDelayInd', 'ulSeq:3:snp', 'n3n9Delay:4:n3n9DelayInd', 'd1Ind:1:@newIe:0', 'ulCong:2:@newIe:1', 'dlCong:2:@newIe:2', 'ulBitrate:4:@newIe:3', 'dlBitrate:4:@newIe:4'],
+  },
+  // New IE Flags Octet 位号（§5.5.2.2 正文：bit0=D1、1=UL 拥塞、2=DL 拥塞、3=UL 码率、
+  // 4=DL 码率；末位 bit7=扩展旗标 E，§A.1.1）
+  newIeFlags: { d1Ind: 0, ulCong: 1, dlCong: 2, ulBitrate: 3, dlBitrate: 4, ext: 7 },
+};
+
+const PSC_U8 = (v, name, max) => {
+  if (!Number.isInteger(v) || v < 0 || v > max) throw new Error(`PSC ${name} 越界（${v}，0..${max}）`);
+  return v;
+};
+function pscWr64(v, name) {
+  const b = typeof v === 'bigint' ? v : BigInt(v);
+  if (b < 0n || b >= 1n << 64n) throw new Error(`PSC ${name} 越界（64-bit，§5.5.3.9）`);
+  const out = [];
+  for (let i = 7; i >= 0; i--) out.push(Number((b >> BigInt(i * 8)) & 0xffn));
+  return out;
+}
+const pscWrN = (v, name, bytes, max) => {
+  const n = PSC_U8(v, name, max);
+  const out = [];
+  for (let i = bytes - 1; i >= 0; i--) out.push((n >> (i * 8)) & 0xff);
+  return out;
+};
+
+// 构造 PDU Session Information 帧（扩展头 0x85 内容）。存在性推导：条件域给值 ⇒ 指示位=1
+//（ppi/ppp、dlSeq/snp、dlMbsSeq/msnp、bssize/bssi、ttnb/ttnbi、dlDelay/dlDelayInd、
+// ulDelay/ulDelayInd、n3n9Delay/n3n9DelayInd、新 IE/flags 位）；反向矛盾（域缺位=1 或
+// 位=0 域在）按规范不可能出现，构造器以域存在性为唯一事实源。QMP=1 而时间戳未给时补
+// 0 值并告警（0 是合法 {0..2^64-1} 值）；QMP=0 而给了时间戳抛错（§5.5.3.8）。
+function pduSessionInfo(f = {}) {
+  const dir = f.dir || 'dl';
+  const warnings = [];
+  const qfi = f.qfi != null ? PSC_U8(f.qfi, 'QFI', 63) : 0;
+  const body = [];
+  if (dir === 'dl') {
+    const qmp = f.qmp ? 1 : 0;
+    if (!qmp && f.dlSendTs != null) throw new Error('PSC DL：给出 DL Sending Time Stamp 但 QMP=0（§5.5.3.8——时间戳仅在 QMP=1 时在场）');
+    const ts = f.dlSendTs != null ? f.dlSendTs : (qmp ? (warnings.push('QMP=1 未给 DL Sending Time Stamp——按 0 值构造'), 0) : null);
+    const oct1 = (qmp << 3) | ((f.dlSeq != null ? 1 : 0) << 2) | ((f.dlMbsSeq != null ? 1 : 0) << 1);
+    const ppp = f.ppi != null ? 1 : 0;
+    const oct2 = (ppp << 7) | ((f.rqi ? 1 : 0) << 6) | qfi;
+    body.push(oct1, oct2);
+    if (ppp) body.push(((f.ppi & 7) << 5) | ((f.bssize != null ? 1 : 0) << 1) | (f.ttnb != null ? 1 : 0));
+    if (qmp) body.push(...pscWr64(ts, 'DL Sending Time Stamp'));
+    if (f.dlSeq != null) body.push(...pscWrN(f.dlSeq, 'DL QFI Sequence Number', 3, 0xffffff));
+    if (f.dlMbsSeq != null) body.push(...pscWrN(f.dlMbsSeq, 'DL MBS QFI Sequence Number', 4, 0xffffffff));
+    if (f.bssize != null) body.push(...pscWrN(f.bssize, 'BSSize', 3, 0xffffff));
+    if (f.ttnb != null) body.push(...pscWrN(f.ttnb, 'TTNB', 2, 0xffff));
+  } else if (dir === 'ul') {
+    const qmp = f.qmp ? 1 : 0;
+    const tsReq = [['dlSendTsRep', 'DL Sending Time Stamp Repeated'], ['dlRecvTs', 'DL Received Time Stamp'], ['ulSendTs', 'UL Sending Time Stamp']];
+    for (const [k, nm] of tsReq) {
+      if (!qmp && f[k] != null) throw new Error(`PSC UL：给出 ${nm} 但 QMP=0（§5.5.3.8）`);
+      if (qmp && f[k] == null) warnings.push(`QMP=1 未给 ${nm}——按 0 值构造`);
+    }
+    const newIe = f.d1Ind != null || f.ulCong != null || f.dlCong != null || f.ulBitrate != null || f.dlBitrate != null;
+    const oct1 = (1 << 4) | (qmp << 3) | ((f.dlDelay != null ? 1 : 0) << 2) | ((f.ulDelay != null ? 1 : 0) << 1) | (f.ulSeq != null ? 1 : 0);
+    const oct2 = ((f.n3n9Delay != null ? 1 : 0) << 7) | ((newIe ? 1 : 0) << 6) | qfi;
+    body.push(oct1, oct2);
+    if (qmp) for (const [k] of tsReq) body.push(...pscWr64(f[k] != null ? f[k] : 0, k));
+    if (f.dlDelay != null) body.push(...pscWrN(f.dlDelay, 'DL Delay Result', 4, 0xffffffff));
+    if (f.ulDelay != null) body.push(...pscWrN(f.ulDelay, 'UL Delay Result', 4, 0xffffffff));
+    if (f.ulSeq != null) body.push(...pscWrN(f.ulSeq, 'UL QFI Sequence Number', 3, 0xffffff));
+    if (f.n3n9Delay != null) body.push(...pscWrN(f.n3n9Delay, 'N3/N9 Delay Result', 4, 0xffffffff));
+    if (newIe) {
+      const F = PSC_FIELDS.newIeFlags;
+      let flags = 0;
+      if (f.d1Ind != null) flags |= 1 << F.d1Ind;
+      if (f.ulCong != null) flags |= 1 << F.ulCong;
+      if (f.dlCong != null) flags |= 1 << F.dlCong;
+      if (f.ulBitrate != null) flags |= 1 << F.ulBitrate;
+      if (f.dlBitrate != null) flags |= 1 << F.dlBitrate;
+      body.push(flags);
+      if (f.d1Ind != null) body.push(PSC_U8(f.d1Ind, 'D1 UL PDCP Delay Result Ind', 1));
+      if (f.ulCong != null) body.push(...pscWrN(f.ulCong, 'UL Congestion Information', 2, 10000));
+      if (f.dlCong != null) body.push(...pscWrN(f.dlCong, 'DL Congestion Information', 2, 10000));
+      if (f.ulBitrate != null) body.push(...pscWrN(f.ulBitrate, 'UL Available Bitrate', 4, 4000000000));
+      if (f.dlBitrate != null) body.push(...pscWrN(f.dlBitrate, 'DL Available Bitrate', 4, 4000000000));
+    }
+  } else throw new Error(`PSC dir 应为 dl/ul（${dir}）——PDU Type 2-15 保留（§5.5.3.1）`);
+  // future ext（raw）与 padding：总长（含两者）= n*4-2，即本内容 + 扩展头 type/len 字节凑 4 的倍数
+  const fext = f.futureExt instanceof Uint8Array ? f.futureExt : Uint8Array.from(f.futureExt || []);
+  let pad = f.padding instanceof Uint8Array ? f.padding : Uint8Array.from(f.padding || []);
+  if (f.padding == null) {
+    const need = (2 + body.length + fext.length) % 4;
+    pad = Uint8Array.from(need ? new Array(4 - need).fill(0) : []);
+  }
+  const out = new Uint8Array(body.length + fext.length + pad.length);
+  out.set(Uint8Array.from(body), 0);
+  out.set(fext, body.length);
+  out.set(pad, body.length + fext.length);
+  if (warnings.length) out.warnings = warnings;
+  return out;
+}
+
+// 反解：域序与条件位按 §5.5.2 两表；指示位=1 而域截断即抛错；指示位=0 的多余尾部按
+// 全 0=padding、非 0=futureExt raw（不猜测语义，告警）。时间戳以 BigInt 返回（64-bit
+// 无损）；New IE Flags 的 E 位（bit7）按 §A.1.1 连续读扩展 flags octet（其新 IE 值不
+// 解析，raw 保留——诚实边界）。
+function parsePduSessionInfo(u8) {
+  if (!u8 || u8.length < 2) throw new Error('PSC 帧截断（<2 octet）');
+  const warnings = [];
+  const pduType = u8[0] >> 4;
+  if (pduType > 1) throw new Error(`PSC PDU Type ${pduType} 保留（2-15，§5.5.3.1）`);
+  const dir = pduType === 0 ? 'dl' : 'ul';
+  const rd = (off, n, name) => {
+    if (off + n > u8.length) throw new Error(`PSC ${dir} ${name} 截断（需 ${n} 字节 @${off}，总 ${u8.length}）`);
+    let v = 0n;
+    for (let i = 0; i < n; i++) v = (v << 8n) | BigInt(u8[off + i]);
+    return v;
+  };
+  const f = { pduType, dir, warnings };
+  let off = 2;
+  if (dir === 'dl') {
+    f.qmp = (u8[0] >> 3) & 1;
+    f.snp = (u8[0] >> 2) & 1;
+    f.msnp = (u8[0] >> 1) & 1;
+    if (u8[0] & 1) warnings.push('PSC DL octet1 bit0（spare）非 0');
+    f.ppp = (u8[1] >> 7) & 1;
+    f.rqi = (u8[1] >> 6) & 1;
+    f.qfi = u8[1] & 0x3f;
+    if (f.ppp) {
+      if (off >= u8.length) throw new Error('PSC DL：PPP=1 但 octet3（PPI）缺失');
+      const b = u8[off++];
+      f.ppi = (b >> 5) & 7;
+      f.bssi = (b >> 1) & 1;
+      f.ttnbi = b & 1;
+      if ((b >> 2) & 7) warnings.push('PSC DL octet3 bits4-2（spare）非 0');
+    }
+    if (f.qmp) f.dlSendTs = rd(off, 8, 'DL Sending Time Stamp'), off += 8;
+    if (f.snp) f.dlSeq = Number(rd(off, 3, 'DL QFI Sequence Number')), off += 3;
+    if (f.msnp) f.dlMbsSeq = Number(rd(off, 4, 'DL MBS QFI Sequence Number')), off += 4;
+    if (f.ppp && f.bssi) f.bssize = Number(rd(off, 3, 'BSSize')), off += 3;
+    if (f.ppp && f.ttnbi) f.ttnb = Number(rd(off, 2, 'TTNB')), off += 2;
+  } else {
+    f.qmp = (u8[0] >> 3) & 1;
+    f.dlDelayInd = (u8[0] >> 2) & 1;
+    f.ulDelayInd = (u8[0] >> 1) & 1;
+    f.snp = u8[0] & 1;
+    f.n3n9DelayInd = (u8[1] >> 7) & 1;
+    f.newIeFlag = (u8[1] >> 6) & 1;
+    f.qfi = u8[1] & 0x3f;
+    if (f.qmp) {
+      f.dlSendTsRep = rd(off, 8, 'DL Sending Time Stamp Repeated'), off += 8;
+      f.dlRecvTs = rd(off, 8, 'DL Received Time Stamp'), off += 8;
+      f.ulSendTs = rd(off, 8, 'UL Sending Time Stamp'), off += 8;
+    }
+    if (f.dlDelayInd) f.dlDelay = Number(rd(off, 4, 'DL Delay Result')), off += 4;
+    if (f.ulDelayInd) f.ulDelay = Number(rd(off, 4, 'UL Delay Result')), off += 4;
+    if (f.snp) f.ulSeq = Number(rd(off, 3, 'UL QFI Sequence Number')), off += 3;
+    if (f.n3n9DelayInd) f.n3n9Delay = Number(rd(off, 4, 'N3/N9 Delay Result')), off += 4;
+    if (f.newIeFlag) {
+      if (off >= u8.length) throw new Error('PSC UL：New IE Flag=1 但 New IE Flags Octet 缺失');
+      let flags = u8[off++];
+      const F = PSC_FIELDS.newIeFlags;
+      f.newIeFlagsRaw = flags;
+      const extOctets = [];
+      while ((flags >> F.ext) & 1) {
+        if (off >= u8.length) throw new Error('PSC UL：New IE Flags 扩展位 E=1 但后续 octet 缺失（§A.1.1）');
+        flags = u8[off++];
+        extOctets.push(flags);
+        warnings.push('PSC UL：New IE Flags 扩展 octet 在场——其新 IE 值不解析（raw 保留）');
+      }
+      if (extOctets.length) f.newIeFlagsExt = extOctets;
+      if ((flags >> F.d1Ind) & 1) f.d1Ind = PSC_U8(u8[off++], 'D1 Ind', 1);
+      if ((flags >> F.ulCong) & 1) f.ulCong = Number(rd(off, 2, 'UL Congestion Information')), off += 2;
+      if ((flags >> F.dlCong) & 1) f.dlCong = Number(rd(off, 2, 'DL Congestion Information')), off += 2;
+      if ((flags >> F.ulBitrate) & 1) f.ulBitrate = Number(rd(off, 4, 'UL Available Bitrate')), off += 4;
+      if ((flags >> F.dlBitrate) & 1) f.dlBitrate = Number(rd(off, 4, 'DL Available Bitrate')), off += 4;
+    }
+  }
+  const rest = u8.slice(off);
+  if (rest.length && rest.every((b) => b === 0)) f.padding = rest;
+  else if (rest.length) { f.futureRaw = rest; warnings.push(`PSC ${dir}：${rest.length} 字节非零尾部按 future extension raw 保留（不解析）`); }
+  if ((u8.length + 2) % 4 !== 0) warnings.push(`PSC 帧长 ${u8.length}（+2 扩展头字节）非 4 的倍数（§5.5.3.5）`);
+  return f;
+}
+
 // ==== src/nas/codec.js ====
 // src/nas/codec.js — M4：NAS 消息级编解码（schema 驱动，行序扫描）。
 //
@@ -11421,7 +11618,7 @@ if (args.schema && args.out) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, GTPU_EXT_TYPES, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pduSessionInfo, parsePduSessionInfo, GTPU_EXT_TYPES, PSC_FIELDS, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。

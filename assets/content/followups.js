@@ -733,6 +733,30 @@
         a: '§16.19.2.2：UE 接入 ATG 小区前须有**有效 GNSS 位置与 gNB 位置**，据二者**自算 RTT** 并**自主预补偿 TTA**；连接态持续更新 TA，可事件触发上报。§16.20.2：AI/ML **算法与模型在 3GPP 范围之外**；**模型性能信息不在 38.401 的 NG-RAN 接口交换**；**不适用 ng-eNB**；流程与用例/数据类型无关、**不指示数据用途**（M63 课 d1-d3/f6）。',
         ref: '38.300#16.20.2' }
     ] },
+    'm64:q0': { levels: [
+      { q: 'MUSIM 的三项增强分别解决什么？寻呼避撞在哪个网触发、选哪张网由谁决定？',
+        a: '§20.1：三项可任选其一或多项——**寻呼避撞**（20.2）、**切网通知**（20.3）、**能力临时限制与移除**（20.4）。§20.2：双卡在两个网络都处 **RRC_IDLE/RRC_INACTIVE** 时寻呼时机可能重叠，Network A=NR、B=E-UTRA 或 NR；UE **可判定潜在冲突并在 NR 网触发避撞动作**（23.501）；**选两个 RAT/网络中的哪一个来避撞由 UE 实现决定**，网络之间不横向协调（M64 课 a1/b1/f1）。',
+        ref: '38.300#20.2' },
+      { q: '切网前要通知什么？MUSIM gap 有几个、能否用替代模式？离开连接态的超时兜底是什么？',
+        a: '§20.3：切走前应通知 A——**离开 RRC_CONNECTED**（RRC 或 NAS 偏好；RRC 偏好后若网络配置的时间窗内未收 **RRCRelease**，UE **可自行进 RRC_IDLE**），或**保持连接态并临时切走**（scheduling gaps 偏好，含间隙建立/释放）。A **最多配 4 个 gap 模式=3 周期+1 非周期**；应至少给一个请求模式或都不给，**本版不支持替代模式**；可给周期间隙优先级并偏好 keep solution（M64 课 b2/b3/f2/f3）。',
+        ref: '38.300#20.3' }
+    ] },
+    'm64:q2': { levels: [
+      { q: 'UE 侧模型的适用性上报怎么走？周期、半持续与非周期 CSI 配置分别怎么激活？',
+        a: '§22.2.3 七步：能力问询 → **UECapabilityInformation** 报支持功能 → gNB 经 **CSI 上报配置/推理相关参数配置**给带**关联 ID** 的推理配置 → UE 按网络侧附加条件、UE 侧附加条件与**模型可用性**判定 → 在 **RRCReconfigurationComplete** 报适用性 → **周期 CSI 上报时 UE 自主激活**，半持续由 **MAC CE/DCI**、非周期由 **DCI** 激活 → 变化经 **UAI** 或 RRCReconfigurationComplete 上报。无关联 ID 时如何判定由 UE 实现（M64 课 c2/dp）。',
+        ref: '38.300#22.2.3' },
+      { q: '已激活功能变为不适用时 UE 能自行去激活吗？两侧模型的监测责任怎么分？CSI 预测有何差异？',
+        a: '§22.2.3：**UE 不自行去激活**，只向 gNB 指示适用性变化；gNB 收到后应去激活或释放；NOTE 2：**所有推理配置无论适用与否都保留，直到 gNB 释放**。§22.2.4：网络侧模型由 **gNB 负责性能监测**、UE 只提供测量/数据且不知管理决策；UE 侧模型由 **gNB 发起监测**并按结果决策，UE 可报测量或报性能指标。§22.3：CSI 预测**只支持时间域+UE 侧模型**，且适用性上报**无推理相关参数配置**（M64 课 c3/f5）。',
+        ref: '38.300#22.2.4' }
+    ] },
+    'm64:q4': { levels: [
+      { q: 'SBFD 的子带数量与 BWP 交叠规则是什么？UE 是否支持全双工？',
+        a: '§23.1：SBFD 用于 **TDD 载波**，gNB 在不重叠子带上同时下行发、上行收；**UE 侧不支持全双工**。小区级 SBFD 时频资源经 **SIB1/专用信令**；子带在 tdd-UL-DL-ConfigurationCommon 的 **DL 与灵活符号**里。每 SBFD 符号**最多 1 个 UL 子带、2 个 DL 子带**；多载波下 UE **最多配一个 TDD 载波**。SBFD 符号内除 **CLI 测量**外，UE 只在 **active BWP 与子带交叠**的 RB 收发（M64 课 a3/d1/f6）。',
+        ref: '38.300#23.1' },
+      { q: 'SBFD 随机接入的支持范围有哪些例外？两种 RACH 配置怎么选？PRACH 时机能换几次？',
+        a: '§23.2：支持 9.2.6 全部触发事件，**除 Request for Other SI 与 Early UL synchronization with an LTM candidate cell**；不支持服务小区 **additional PCI** 的 RACH；RACH-based LTM cell switch **仅 intra-DU**。CBRA/CFRA 都支持，但**只用 4-step RA type 与 SBFD RACH 资源**。配置两选一：**单套**同时支持非 SBFD 与 SBFD，或**双套**（一套非 SBFD、一套专用 SBFD）；aware UE 支持则应用、否则回落非 SBFD。CFRA 经 PDCCH order/LTM MAC CE/专用 RRC 指示时机；CBRA 按 SI 指示、否则按 SSB RSRP 阈值、都无则 UE 实现；过程中**允许切换一次，同一过程不得再切**；CFRA 回退 CBRA 用同类型 occasions（M64 课 d2-d4）。',
+        ref: '38.300#23.2' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
