@@ -4591,8 +4591,10 @@ function parseGtpMsgRows(rowsRaw) {
 
 // 29.244 §7.x PFCP 内容表：9 列（IE 名 | P | Condition | Appl.×5 | IE Type），分组 IE
 // 定义表在表头前带两行预置（'Octet 1 and 2 … <名> IE Type = N (decimal)' + 'Length = n'）。
-// 返回 { groupName, groupType, rows }，rows 统一为 [名, P, 条件, IE Type 名, ''] 供
-// gtpTranslateRows 复用（PFCP 无 Ins. 列）。
+// 返回 { groupName, groupType, applCols, rows }，rows 统一为 [名, P, 条件, IE Type 名, '', appl]
+// 供 gtpTranslateRows 复用（PFCP 无 Ins. 列；其读 cells[0..4]，appl 在 index 5 不进 schema）。
+// appl = Appl. 子列（Sxa/Sxb/Sxc/N4/N4mb）的适配串，按列序一位一列：X/- 原样，空格与其他
+// 值记 '?'（不臆造语义，审计工具单列 '?' 表）。表头下方无子列名行的表 applCols=null、appl=null。
 function parsePfcpMsgRows(rowsRaw) {
   if (!rowsRaw.length) return null;
   const rows = resolveVMerge(rowsRaw);
@@ -4616,7 +4618,18 @@ function parsePfcpMsgRows(rowsRaw) {
     if (r.some((c) => /information element/i.test(c)) && r.some((c) => /^P$/i.test(c.trim())) && r.some((c) => /^IE type$/i.test(c.trim()))) { hi = i; break; }
   }
   if (hi < 0) return null;
+  // Appl. 子列定位：'Appl.' 表头格跨 5 列（gridSpan 不展开），子列名行（Sxa…N4mb 各占 1 格）
+  // 在其下方，与数据行同网格——按列号取值。命中 <3 个视为无 Appl. 子列的变体表。
+  let applHits = null;
+  for (let i = hi; i < Math.min(texts.length, hi + 3) && !applHits; i++) {
+    const hits = [];
+    texts[i].forEach((c, col) => {
+      if (/^(Sxa|Sxb|Sxc|N4|N4mb)$/i.test(c.trim())) hits.push({ name: c.trim(), col });
+    });
+    if (hits.length >= 3) applHits = hits;
+  }
   const out = [];
+  const applNotes = {}; // rowIdx → ['X - - -', …]：'?' 位的源格原文（复合标记/空格——不臆造语义）
   for (let i = hi + 1; i < texts.length; i++) {
     const r = texts[i];
     const ne = r.map((c) => c.trim()).filter(Boolean);
@@ -4628,9 +4641,20 @@ function parsePfcpMsgRows(rowsRaw) {
     const type = ne[ne.length - 1];
     if (!type || type === ne[pi] || /^(X|-)$/i.test(type) || /^IE type$/i.test(type)) continue;
     const cond = ne.slice(pi + 1, -1).filter((c) => !/^(X|-)$/i.test(c)).join(' ');
-    out.push([name, ne[pi], cond, type, '']);
+    let appl = null;
+    if (applHits) {
+      appl = '';
+      const raws = [];
+      applHits.forEach(({ col }) => {
+        const v = String(r[col] || '').trim();
+        if (/^(X|-)$/.test(v)) appl += v;
+        else { appl += '?'; raws.push(v); }
+      });
+      if (raws.length) applNotes[out.length] = raws;
+    }
+    out.push([name, ne[pi], cond, type, '', appl]);
   }
-  return { groupName, groupType, rows: out };
+  return { groupName, groupType, applCols: applHits ? applHits.map((h) => h.name) : null, ...(Object.keys(applNotes).length ? { applNotes } : {}), rows: out };
 }
 
 
@@ -9094,11 +9118,11 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
           if (gm) groupName = gm[1].trim();
         }
         if (groupType != null || groupName) {
-          msgs.push({ section: msgH ? msgH.num : (curH3 ? curH3.num : null), tableId: capId, name: groupName || capTitle, kind: 'grouped', groupName: groupName || capTitle, groupType, rows: pm.rows });
+          msgs.push({ section: msgH ? msgH.num : (curH3 ? curH3.num : null), tableId: capId, name: groupName || capTitle, kind: 'grouped', groupName: groupName || capTitle, groupType, applCols: pm.applCols, ...(pm.applNotes ? { applNotes: pm.applNotes } : {}), rows: pm.rows });
           continue;
         }
         if (msgH) {
-          msgs.push({ section: msgH.num, tableId: capId, name: msgH.title, kind: 'message', rows: pm.rows });
+          msgs.push({ section: msgH.num, tableId: capId, name: msgH.title, kind: 'message', applCols: pm.applCols, ...(pm.applNotes ? { applNotes: pm.applNotes } : {}), rows: pm.rows });
           continue;
         }
       }
