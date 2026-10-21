@@ -757,6 +757,31 @@
         a: '§23.2：支持 9.2.6 全部触发事件，**除 Request for Other SI 与 Early UL synchronization with an LTM candidate cell**；不支持服务小区 **additional PCI** 的 RACH；RACH-based LTM cell switch **仅 intra-DU**。CBRA/CFRA 都支持，但**只用 4-step RA type 与 SBFD RACH 资源**。配置两选一：**单套**同时支持非 SBFD 与 SBFD，或**双套**（一套非 SBFD、一套专用 SBFD）；aware UE 支持则应用、否则回落非 SBFD。CFRA 经 PDCCH order/LTM MAC CE/专用 RRC 指示时机；CBRA 按 SI 指示、否则按 SSB RSRP 阈值、都无则 UE 实现；过程中**允许切换一次，同一过程不得再切**；CFRA 回退 CBRA 用同类型 occasions（M64 课 d2-d4）。',
         ref: '38.300#23.2' }
     ] },
+
+    'm65:q0': { levels: [
+      { q: 'QoE 收集支持哪三类服务与三种承载？各态支持有何差异？两基激活怎么分？',
+        a: '§21.1：三类应用层服务=**DASH streaming/MTSI/VR**；承载=**MBS broadcast/MBS multicast/Unicast**，一次收集只对应配置指示的一种通信服务类型。DASH/MTSI/VR 默认**只 RRC_CONNECTED**（MBS 广播承载除外）；**MBS 广播三态全支持**，**MBS 组播仅连接态**。两基=**management-based**（OAM 直配 gNB，gNB 按能力与 area/slice scope 选 UE）与**signalling-based**（OAM 经 5GC 发 UE-associated 信令）；Uu 口叫 application layer measurement，与 NG/Xn/OAM 口 QoE Measurement 等价（M65 课 a1/b1）。',
+        ref: '38.300#21.1' },
+      { q: '去激活与暂停有什么区别？替换配置的基座红线是什么？',
+        a: '§21.2.2：去激活**永久停**配置——OAM 发起，信令基走 **UE-associated NGAP+QoE reference 列表**，UE 删应用层与 AS 参数、弃未发报告；可放旧配新，但**不得为配 management-based 而释放 signalling-based**。§21.2.3：RAN 过载走**暂停/恢复**——RRCReconfiguration 暂停后 UE 把报告**暂存 AS 层**，恢复后回放；存与删方向相反（M65 课 b2/f1）。',
+        ref: '38.300#21.2.2' }
+    ] },
+    'm65:q2': { levels: [
+      { q: 'UE 掉到 IDLE/INACTIVE 时 QoE 配置怎么办？缓存报告怎么取回、有什么连接红线？',
+        a: '§21.2.4：INACTIVE 存 **UE Inactive AS context**；IDLE **释放全部**配置（显式指示适用的除外——MBS 广播会话可三态续收）；area scope 外**只留配置不开新会话**，报告存 AS 层，gNB 经 **SRB4/SRB5** 取回；UE **不得为发送存储报告而回连接态**，只在因其他原因回连时补交；恢复到不支持 QMC 的 gNB 则全放。§21.2.5：per-slice 配置带 slice scope、报告容器带**网络切片标识**（M65 课 b3/f2）。',
+        ref: '38.300#21.2.4' },
+      { q: '切换时 QoE 配置谁决定留放？RAN visible QoE 与 MDT 对齐各是什么账？',
+        a: '§21.3：源 gNB 经 **XnAP/NGAP** 传配置信息；目标支持 QMC 由 **target 决定留放**，不支持则 **UE 全放**；gNB↔ng-eNB 跨制式**只保一份**（源决定，UE 换用对端配置）；出 area scope 仍继续测。§21.4：RAN visible QoE 是 **gNB 可读的显式 IE**（仅 DASH/VR、须同服务类型 QoE 配置在场；暂停期封装报告存、RAN visible 照报）。§21.5：immediate MDT 与 QoE 由 **MCE/TCE 关联**，锚=**NG-RAN Trace ID+时间戳**（M65 课 b4）。',
+        ref: '38.300#21.3' }
+    ] },
+    'm65:q4': { levels: [
+      { q: 'cell DTX/DRX 的六条硬规则与非激活期行为是什么？',
+        a: '§15.4.2.3：pattern **小区公共**、DTX/DRX **分别配置激活**、每 MAC 实体对不同服务小区**最多 2 个**、只适用 **RRC_CONNECTED** 且不碰 RA/SSB/寻呼/SI 广播、**单 TRP**、经 **RRC 或 L1 组公共信令**开关。DTX 非激活可**不监控 PDCCH/SPS**；DRX 非激活**不发 CG/SR/周期半持续 SRS**（**定位 SRS 豁免**）；应急豁免；须与 UE **C-DRX on-duration 部分重叠**（周期互成倍数）（M65 课 c3/f3）。',
+        ref: '38.300#15.4.2.3' },
+      { q: 'RIM 的编组与两套框架怎么运作？CLI 测量与上报两型怎么分？',
+        a: '§17.1：victim/aggressor 按**半静态集合**编组，每小区**最多一 victim+一 aggressor set ID**（gNB 可兼两角）；victim 集合**同发同一 RIM-RS**；纯无线框架 aggressor 回 RIM-RS、**收不到即波导止**；回程框架**点到点、对核心网透明**；终止=victim 停发。§17.2：CLI 测量两型=**SRS-RSRP**（aggressor 的 SRS 资源）与 **CLI-RSSI**（RSSI 总功率）；上报 **L1/L3 互斥**——L3 带三层滤波、事件+周期，L1 按量分：SRS-RSRP **只非周期**、CLI-RSSI 周期/非周期皆可；gNB-to-gNB CLI 靠 victim gNB 报告+邻站评估，兜底 **UL resource muting**（偶/奇子载波二选一）（M65 课 d1-d4/f4/f5）。',
+        ref: '38.300#17.2' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

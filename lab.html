@@ -6701,6 +6701,26 @@ function gtpuEchoRecovery(u8) {
 }
 
 function gtpuBuild({ teid = 0, type = 0xff, seq = null, npdu = null, exts = [], payload = [] } = {}) {
+  // v1.34.0 批次 AB：29.281 §5.2 NOTE 5/6 线缆约束——PSIC（0x04）有 PSC 时应为第二
+  // 扩展头（紧跟 0x85 之后）、无 PSC 时应为第一扩展头；QFI 跨容器同现时 shall 同值。
+  // 违例不阻断构造（should/shall 混合：链序 should、QFI shall——统一以 warning 留痕，
+  // 调用方按需升格），警告以 out.warnings 属性附带。
+  const buildWarnings = [];
+  const ti = (t) => exts.findIndex((e) => (e.type & 0xff) === t);
+  const iPsc = ti(0x85);
+  const iPsic = ti(0x04);
+  if (iPsic >= 0) {
+    if (iPsc >= 0) {
+      if (iPsic !== iPsc + 1) buildWarnings.push('GTP-U 扩展头链序（29.281 §5.2 NOTE 5）：PDU Set Information Container（0x04）应为第二扩展头、紧跟 PDU Session Container（0x85）之后');
+      const c1 = exts[iPsc].content;
+      const c2 = exts[iPsic].content;
+      const q1 = c1 && c1.length >= 2 ? c1[1] & 0x3f : null; // PSC QFI：octet2 bits 5-0
+      const q2 = c2 && c2.length >= 2 ? (c2[1] >> 2) & 0x3f : null; // PSIC QFI：octet2 bits 7-2
+      if (q1 != null && q2 != null && q1 !== q2) buildWarnings.push(`GTP-U QFI 跨容器不一致（29.281 §5.2 NOTE 6，shall）：0x85 QFI ${q1} vs 0x04 QFI ${q2}——两容器同时出现时必须同值`);
+    } else if (iPsic !== 0) {
+      buildWarnings.push('GTP-U 扩展头链序（29.281 §5.2 NOTE 5）：无 PDU Session Container 时 PDU Set Information Container（0x04）应为第一扩展头');
+    }
+  }
   const chain = [];
   for (let i = 0; i < exts.length; i++) {
     const e = exts[i];
@@ -6720,7 +6740,9 @@ function gtpuBuild({ teid = 0, type = 0xff, seq = null, npdu = null, exts = [], 
     | (chain.length ? 0x04 : 0) | (seq != null ? 0x02 : 0) | (npdu != null ? 0x01 : 0);
   const out = [flags, type & 0xff, ...gtpuWr16(length), ...gtpuWr32(teid >>> 0)];
   if (withOpt) out.push(...gtpuWr16(seq || 0), (npdu || 0) & 0xff, chain.length ? (exts[0].type & 0xff) : 0);
-  return Uint8Array.from([...out, ...chain, ...pl]);
+  const buf = Uint8Array.from([...out, ...chain, ...pl]);
+  if (buildWarnings.length) buf.warnings = buildWarnings;
+  return buf;
 }
 
 // ---- PDU Session Information（38.415 §5.5，GTP-U 扩展头 0x85 内容）----------------
@@ -6747,6 +6769,34 @@ const PSC_FIELDS = {
   // 4=DL 码率；末位 bit7=扩展旗标 E，§A.1.1）
   newIeFlags: { d1Ind: 0, ulCong: 1, dlCong: 2, ulBitrate: 3, dlBitrate: 4, ext: 7 },
 };
+
+// CLI --psc-dl/--psc-ul 可设键集合 = 构造器实际读取的字段（v1.33.0 AA4：P3-2 实测
+// `dlSendTs` 误传 UL 侧被静默忽略、帧内域全 0——拼错键无任何告警）。派生指示位
+// （snp/msnp/bssi/ttnbi/ppp/newIeFlag/dlDelayInd/ulDelayInd/n3n9DelayInd）以域存在性
+// 推导、不可直设；padding 由 CLI 特判转 hex。PSC_KEYS_XCHECK 测试钉：condOctets 全部
+// 域键必须在本集合内，防 PSC_FIELDS 扩域后集合失同步。
+const PSC_SETTABLE = {
+  dl: ['qfi', 'qmp', 'ppi', 'rqi', 'dlSendTs', 'dlSeq', 'dlMbsSeq', 'bssize', 'ttnb', 'padding'],
+  ul: ['qfi', 'qmp', 'dlSendTsRep', 'dlRecvTs', 'ulSendTs', 'dlDelay', 'ulDelay', 'ulSeq', 'n3n9Delay', 'd1Ind', 'ulCong', 'dlCong', 'ulBitrate', 'dlBitrate', 'padding'],
+};
+
+// 未知键检测：返回 [{ key, near }]，near=最近似正名（大小写/分隔归一相等 > 前缀互含），
+// 无近似为 null。dir 侧集合外的键一律报出——含把对方方向键误传本方向（P3-2 场景）。
+// v1.34.0 起同时覆盖 --pset（PSET_SETTABLE）。
+function pscUnknownKeys(dir, obj) {
+  const known = PSC_SETTABLE[dir] || PSET_SETTABLE[dir] || [];
+  const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const out = [];
+  for (const k of Object.keys(obj || {})) {
+    if (k === 'dir' || known.includes(k)) continue;
+    const nk = norm(k);
+    const near = known.find((x) => norm(x) === nk)
+      || known.find((x) => norm(x).startsWith(nk) && nk.length >= 3)
+      || known.find((x) => nk.startsWith(norm(x)) && nk !== norm(x));
+    out.push({ key: k, near: near || null });
+  }
+  return out;
+}
 
 const PSC_U8 = (v, name, max) => {
   if (!Number.isInteger(v) || v < 0 || v > max) throw new Error(`PSC ${name} 越界（${v}，0..${max}）`);
@@ -6917,6 +6967,88 @@ function parsePduSessionInfo(u8) {
   if (rest.length && rest.every((b) => b === 0)) f.padding = rest;
   else if (rest.length) { f.futureRaw = rest; warnings.push(`PSC ${dir}：${rest.length} 字节非零尾部按 future extension raw 保留（不解析）`); }
   if ((u8.length + 2) % 4 !== 0) warnings.push(`PSC 帧长 ${u8.length}（+2 扩展头字节）非 4 的倍数（§5.5.3.5）`);
+  return f;
+}
+
+// ---- PDU Set Information（38.415 §6，GTP-U 扩展头 0x04 内容）------------------------
+// 批次 AB（v1.34.0）：R19 第二协议层字段级构造/反解，与 §5.5 PSC 同构。§6.5.2.1 仅
+// DL PDU Type 0（j10 无 UL 帧型）。布局：octet1 位域（PDU Type/EDB/EPDU/PSSI/Spare）+
+// octet2-3 合并 16-bit 视图（QFI bits15-10 + PSSN bits9-0——PSSN 10 bit 跨 octet2 低
+// 2 位与 octet3 全字节，§6.5.3.10）+ octet4（Spare/PSI 4 bit）+ PSN 1 octet（恒在场）
+// + PSSize 0 or 3 octets（PSSI 指示，§6.5.3.12）+ padding（n*4-2，§6.5.3.13）。布局
+// 权威摄取进 38415 schema（frames.pset），gate:nas38415 交叉校验 + 回环。
+const PSET_FIELDS = {
+  octet1: [{ key: 'pduType', hi: 7, lo: 4 }, { key: 'edb', hi: 3, lo: 3 }, { key: 'epdu', hi: 2, lo: 2 }, { key: 'pssi', hi: 1, lo: 1 }, { key: 'spare', hi: 0, lo: 0, implOnly: true }],
+  span: [{ key: 'qfi', hi: 15, lo: 10 }, { key: 'pssn', hi: 9, lo: 0 }],
+  octet4: [{ key: 'spare', hi: 7, lo: 4, implOnly: true }, { key: 'psi', hi: 3, lo: 0 }],
+  condOctets: ['psn:1:', 'pssize:3:pssi'], // on 空 = 恒在场（§6.5.2.1 表 'PSN | 1'）
+};
+// CLI --pset 可设键集合（构造器实际读取；pssi 由 pssize 存在性推导、不可直设）。
+const PSET_SETTABLE = {
+  pset: ['qfi', 'pssn', 'psi', 'psn', 'pssize', 'edb', 'epdu', 'padding'],
+};
+
+// 构造 DL PDU SET INFORMATION 帧（扩展头 0x04 内容）。存在性推导：PSSI = PSSize 在场
+//（§6.5.3.5——PSSI 指示 PSSize 在场，无独立输入）；PSN 恒在场（缺省 0）；PSI 缺省 0
+//（§6.5.3.9：0=发送方无法定义重要度）。帧长（含 padding/future ext）= n*4-2 octets。
+function pduSetInfo(f = {}) {
+  const warnings = [];
+  const qfi = f.qfi != null ? PSC_U8(f.qfi, 'QFI', 63) : 0;
+  const pssn = f.pssn != null ? PSC_U8(f.pssn, 'PSSN', 0x3ff) : 0;
+  const psi = f.psi != null ? PSC_U8(f.psi, 'PSI', 15) : 0;
+  const psn = f.psn != null ? PSC_U8(f.psn, 'PSN', 255) : 0;
+  const edb = f.edb ? 1 : 0;
+  const epdu = f.epdu ? 1 : 0;
+  const pssi = f.pssize != null ? 1 : 0;
+  const body = [
+    (edb << 3) | (epdu << 2) | (pssi << 1), // octet1（bits7-4 = PDU Type 0）
+    ((qfi << 2) | (pssn >> 8)) & 0xff, // octet2：QFI bits7-2 + PSSN 高 2 位
+    pssn & 0xff, // octet3：PSSN 低 8 位
+    psi & 0x0f, // octet4：spare bits7-4 + PSI bits3-0
+    psn & 0xff, // octet5：PSN
+  ];
+  if (pssi) body.push(...pscWrN(f.pssize, 'PSSize', 3, 0xffffff));
+  const fext = f.futureExt instanceof Uint8Array ? f.futureExt : Uint8Array.from(f.futureExt || []);
+  let pad = f.padding instanceof Uint8Array ? f.padding : Uint8Array.from(f.padding || []);
+  if (f.padding == null) {
+    const need = (2 + body.length + fext.length) % 4;
+    pad = Uint8Array.from(need ? new Array(4 - need).fill(0) : []);
+  }
+  const out = new Uint8Array(body.length + fext.length + pad.length);
+  out.set(Uint8Array.from(body), 0);
+  out.set(fext, body.length);
+  out.set(pad, body.length + fext.length);
+  if (warnings.length) out.warnings = warnings;
+  return out;
+}
+
+// 反解：§6.5.2.1 帧序；PSSI=1 而 PSSize 截断即抛错；PDU Type≠0 抛错（§6.5.3.1：1-15
+// 保留）；指示位/spare 非 0 告警；尾部全 0=padding、非 0=futureExt raw（不猜测语义）。
+function parsePduSetInfo(u8) {
+  if (!u8 || u8.length < 5) throw new Error('PSET 帧截断（<5 octet：octet1-5 恒在场）');
+  const warnings = [];
+  const pduType = u8[0] >> 4;
+  if (pduType !== 0) throw new Error(`PSET PDU Type ${pduType} 保留（仅 0=DL PDU SET INFORMATION，§6.5.3.1）`);
+  const f = { pduType, warnings };
+  f.edb = (u8[0] >> 3) & 1;
+  f.epdu = (u8[0] >> 2) & 1;
+  f.pssi = (u8[0] >> 1) & 1;
+  if (u8[0] & 1) warnings.push('PSET octet1 bit0（spare）非 0');
+  f.qfi = (u8[1] >> 2) & 0x3f;
+  f.pssn = ((u8[1] & 0x03) << 8) | u8[2];
+  if (u8[3] >> 4) warnings.push('PSET octet4 bits7-4（spare）非 0');
+  f.psi = u8[3] & 0x0f;
+  f.psn = u8[4];
+  let off = 5;
+  if (f.pssi) {
+    if (off + 3 > u8.length) throw new Error('PSET：PSSI=1 但 PSSize 截断（需 3 字节）');
+    f.pssize = (u8[off] << 16) | (u8[off + 1] << 8) | u8[off + 2];
+    off += 3;
+  }
+  const rest = u8.slice(off);
+  if (rest.length && rest.every((b) => b === 0)) f.padding = rest;
+  else if (rest.length) { f.futureRaw = rest; warnings.push(`PSET：${rest.length} 字节非零尾部按 future extension raw 保留（不解析）`); }
+  if ((u8.length + 2) % 4 !== 0) warnings.push(`PSET 帧长 ${u8.length}（+2 扩展头字节）非 4 的倍数（§6.5.3.13）`);
   return f;
 }
 
@@ -7699,7 +7831,13 @@ function msgTypeOf(schema, name) {
 //     M/C/CO/O）：必配→非必配 info；非必配→必配 warn（新要求）；条件档间变化 info；
 //   - IE 定义层：ieType 值变更 / format 变更 → break；fixed 定长变更 → warn；
 //     布局行级：总长变化——TLV/LV（收端按 Length 跳，框架自界）info、TV/fixed
-//    （收端按定长读）warn；行 count/open 变化与字段增删/位序变更 → info（值语义）。
+//    （收端按定长读）warn；行 count/open 变化与字段增删/位序变更 → info（值语义）；
+//   - 组内容表（ies[].grouped，PFCP Create/Update BAR/PDR/FAR/QER/URR 与 29.274
+//     Bearer Contexts 等组族）子行级比对（v1.33.0 AA1——v1.32.0 审计 P1：组子行
+//     变化原先完全不入账，k00→k10 的 Create/Update QER 各新增子行 IEI 408 漏报）：
+//     判定沿用消息表行级口径——新增 TLV/LV → ok（收端在组内按 Length 跳过未知子 IE）、
+//     TV/fixed → warn、删除 → info、ref 换节/格式变更 → break、presence 沿用上档；
+//     cond 文本编辑性变化不入账（措辞微调非结构变更）。
 // 只支持同 spec 两版本对比（跨规范 29060 vs 29274 无对比意义，抛错拒产）。
 const gtpPresClass = (p) => {
   const s = (p || '').trim();
@@ -7759,6 +7897,60 @@ function diffGtpIeLayout(ref, layL, layR, framed, findings) {
     for (const [nm, g] of lf) {
       if (!rf.has(nm)) findings.push({ severity: 'info', kind: 'gtp-ie-field', msg: `${ref}：行「${rr.octet}」删除字段 ${nm}（bit ${g.hi}-${g.lo}）`, loc: L(rr.octet, nm) });
     }
+  }
+}
+
+// 组内容表子行级比对（v1.33.0 AA1）。子行与消息表行同构（iei/presence/cond/format/len/
+// ref），行键/配对沿用 rowMapGtp；kind 用 gtp-grouped-* 前缀，loc.ref=组节号、loc.rowRef=
+// 子行指向的 IE 节（子行引用的节由 IE 定义层全量对比覆盖，此处不递归）。组表整侧出现/
+// 消失按 info 入账（无法区分建库覆盖差异与规范变更，如实报）。cond 文本不比。
+function diffGtpGrouped(ref, gName, lg, rg, findings) {
+  const lrows = Array.isArray(lg) ? lg : [];
+  const rrows = Array.isArray(rg) ? rg : [];
+  if (!lrows.length && !rrows.length) return;
+  if (!lrows.length || !rrows.length) {
+    findings.push({
+      severity: 'info',
+      kind: 'gtp-grouped-tbl',
+      msg: rrows.length
+        ? `${ref} ${gName}：新增组内容表（${rrows.length} 行）`
+        : `${ref} ${gName}：组内容表消失（原 ${lrows.length} 行）`,
+      loc: { ref },
+    });
+    return;
+  }
+  const lmap = rowMapGtp(lrows);
+  const rmap = rowMapGtp(rrows);
+  for (const [k, rr] of rmap) {
+    if (!lmap.has(k)) {
+      const framedAdd = gtpFramed(rr.format);
+      findings.push({
+        severity: framedAdd ? 'ok' : 'warn',
+        kind: 'gtp-grouped-row-add',
+        msg: `${ref} ${gName}：组内新增子行 ${rr.name}（IEI ${rr.iei}，${framedAdd ? 'TLV/LV 收端在组内按 Length 跳过未知子 IE' : 'TV/fixed 无长度域——老收端不识 IEI 即无法跳过，错位风险'}）`,
+        loc: { ref, iei: String(rr.iei), ...(rr.ref ? { rowRef: rr.ref } : {}) },
+      });
+      continue;
+    }
+    const lr = lmap.get(k);
+    const loc = { ref, iei: String(rr.iei), ...(rr.ref ? { rowRef: rr.ref } : {}) };
+    if ((lr.ref || null) !== (rr.ref || null)) {
+      findings.push({ severity: 'break', kind: 'gtp-grouped-row-ref', msg: `${ref} ${gName}：组内 IEI ${rr.iei}（${rr.name}）指向的 IE 节变更 ${lr.ref || '?'} → ${rr.ref || '?'}（原 ${lr.name}）`, loc });
+    }
+    if ((lr.format || '').trim().toUpperCase() !== (rr.format || '').trim().toUpperCase() ||
+        (lr.len || '').replace(/\s/g, '') !== (rr.len || '').replace(/\s/g, '')) {
+      findings.push({ severity: 'break', kind: 'gtp-grouped-row-format', msg: `${ref} ${gName}：组内 ${rr.name} 框架变更 ${lr.format}/${lr.len || ''} → ${rr.format}/${rr.len || ''}`, loc });
+    }
+    const lc = gtpPresClass(lr.presence);
+    const rc = gtpPresClass(rr.presence);
+    if (lc !== rc) {
+      if (lc === 'M') findings.push({ severity: 'info', kind: 'gtp-grouped-row-presence', msg: `${ref} ${gName}：组内 ${rr.name} 必配→非必配（${(lr.presence || '').trim()}→${(rr.presence || '').trim()}）`, loc });
+      else if (rc === 'M') findings.push({ severity: 'warn', kind: 'gtp-grouped-row-presence', msg: `${ref} ${gName}：组内 ${rr.name} 非必配→必配（${(lr.presence || '').trim()}→${(rr.presence || '').trim()}，新版本要求）`, loc });
+      else findings.push({ severity: 'info', kind: 'gtp-grouped-row-presence', msg: `${ref} ${gName}：组内 ${rr.name} presence 档位变化（${(lr.presence || '').trim()}→${(rr.presence || '').trim()}）`, loc });
+    }
+  }
+  for (const [k, lr] of lmap) {
+    if (!rmap.has(k)) findings.push({ severity: 'info', kind: 'gtp-grouped-row-del', msg: `${ref} ${gName}：组内删除子行 ${lr.name}（IEI ${lr.iei}）`, loc: { ref, iei: String(lr.iei), ...(lr.ref ? { rowRef: lr.ref } : {}) } });
   }
 }
 
@@ -7854,6 +8046,7 @@ function diffGtpSchema(left, right) {
     } else if (ll && !rl) {
       findings.push({ severity: 'info', kind: 'gtp-ie-nolayout', msg: `${ref} ${li.name}：新版本无位布局（建库覆盖差异，非规范变更）`, loc: { ref } });
     }
+    diffGtpGrouped(ref, ri.name, li.grouped, ri.grouped, findings);
   }
   for (const [ref, li] of Object.entries(lies)) {
     if (!ries[ref]) findings.push({ severity: 'info', kind: 'gtp-ie-del', msg: `删除 IE 节 ${ref} ${li.name}`, loc: { ref } });
@@ -11618,7 +11811,7 @@ if (args.schema && args.out) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pduSessionInfo, parsePduSessionInfo, GTPU_EXT_TYPES, PSC_FIELDS, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
