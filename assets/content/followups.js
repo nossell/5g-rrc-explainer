@@ -807,6 +807,31 @@
         a: '§19：上行（FR1+FR2）对 PUSCH/PUCCH/PRACH/MSG3 八式=TB repetition 聚合（两计数口径上限都 **32**）/TB processing 跨时隙/DMRS bundling（可与 inter-slot 跳频同用）/PUCCH repetition factor 动态/MSG3 repetition（RSRP 低于阈值经独立 RACH 资源）/MSG1 repetition（按重复数广播分开 RSRP 阈值）/波形 DFT-S-OFDM↔CP-OFDM（DCI 0_1/0_2+PHR 双口径）/频域谱整形（MPR/PAR）；下行仅 **FR1+TN** 两式=CSS 的 PDCCH repetition+SIB1 PDSCH 两连续时隙。回退禁区=**MSG1-based SI request** 与 **CFRA→CBRA 已发生**；CFRA→同重复数 CBRA 可以（M66 课 d1-d4/f5）。',
         ref: '38.300#19' }
     ] },
+
+    'm67:q0': { levels: [
+      { q: '38.300 §13 的密钥树怎么长？两条 SMC 各管什么、键何时产出？',
+        a: '§13.1：主认证产出锚钥 **KSEAF**，**KAMF** 由 ME 和 SEAF 派生；NAS 分支=**KNASint/KNASenc** 由 ME 和 AMF 从 KAMF 派生、**成功跑完 NAS SMC 后**才产出；AS 分支=**KgNB** 由 ME 和 AMF 从 KAMF 派生，gNB 侧再从 KgNB 展开四键；中间键 **NH**（前向安全，只 UE 和 AMF 能算）与 **KgNB\***。AS SMC=算法协商+RRC 安全激活：AMF 发**完整 UE 5G security capabilities**、gNB 按配置优先级选算法、**六条时序先验后开**（gNB 下行加密在发出 SMC 后、其余在收到并校验后），MAC-I 失败接收侧 PDCP 丢弃（M67 课 b1/b3/f1/f2）。',
+        ref: '38.300#13.1' },
+      { q: '水平/垂直密钥推导与 NCC 怎么记？回 IDLE 时哪些键删、哪些留？',
+        a: '§13.1/§13.3：每个 KgNB 与 NH 都关联 **NCC**——初始 KgNB 关联 **NCC=0 的 virtual NH**、初始 NH 值 NCC=1；切换时 KgNB* 从**当前激活 KgNB** 派生=**horizontal（NCC 不增）**、从 **NH 参数**派生=**vertical（NCC 增）**，落地后四键重派；NH/KgNB* 须**绑定目标 PCI 与 ARFCN-DL**（目标 PCell 的 CD-SSB 绝对频率）再投入使用。回 IDLE：gNB 与 UE **删 NH/KgNB/KRRCint/KRRCenc/KUPint/KUPenc 及相关 NCC**，**AMF 与 UE 保留 KAMF/KNASint/KNASenc**——重入连接态不必重新主认证；intra-gNB-CU 切换未指示新算法则**沿用原算法**（M67 课 b2/b4/f3）。',
+        ref: '38.300#13.3' }
+    ] },
+    'm67:q2': { levels: [
+      { q: 'NR 能力的分层结构与 Feature Set 组合矩阵怎么读？过滤三闸是什么？',
+        a: '§14：能力按 **per UE、duplex mode、frequency range、band、band combination** 分层（SDAP/PDCP/RLC 恒 per-UE）；**category 只为营销、不上报网络**，峰值速率=各载波求和。**FS** 按 band 内连续小区块定义，feature sets per band 通告备选；**feature set combination** 二维矩阵——每 band 的 FS 数=band 条目数且各 band 相同、BC 一一对应（图 14-1）；intra-band 连续 CA 逐载波 feature set per component carrier、顺序无关。过滤三闸=**限带请求**/UE 按 **fallback behaviour 跳子集**（38.306/38.331）/**eRedCap 可无视过滤**但须镜像 filter+显式指示（M67 课 c1/c2）。',
+        ref: '38.300#14' },
+      { q: '能力 ID 与 AMF 存储怎么分工？为什么 UTRA-FDD 能力要现取不存？',
+        a: '§14：UE 可在 **NAS 信令**里给一或多个 RAT 提供代表无线能力的 **ID**——厂商分配=**pre-provisioned 预置集**、PLMN 分配在 **NAS 信令里完成**；**AMF 存储 gNB 上传的 UE Radio Capability**（23.501），换 gNB 不换账本。**RAT 请求面三分**：NR/EUTRA/UTRA-FDD；UTRAN 能力即 **INTER RAT HANDOVER INFO**，内含 **START-CS/START-PS/predefined configurations 动态 IE**——为防 **START 失步与密钥重放**，**切换 UTRA-FDD 前总是现取、且不上传 AMF**（动态值不留底，NR/EUTRA 才由 AMF 存储）（M67 课 c3/c4/f4/f5）。',
+        ref: '38.300#14' }
+    ] },
+    'm67:q4': { levels: [
+      { q: '三十二枚 RNTI 怎么分组记？「认人」与「报事」的分界是什么？',
+        a: '§8.1：二分刀法=清单里带 **unique UE identification** 的才认人——调度类认人五枚（**C-RNTI/CG-SDT-CS-RNTI/CS-RNTI/MCS-C-RNTI/SP-CSI-RNTI**）+功控三 TPC；报事类只标事件——**P-RNTI/SI-RNTI/INT-RNTI/CI-RNTI/SFI-RNTI**。随机接入四枚（**RA-RNTI/MSGB-RNTI/Temporary C-RNTI/竞争决断随机值**，后两枚临时）；状态与业务专属：**I-RNTI**（NG-RAN 级寻址 INACTIVE 上下文）、省电 **PS-RNTI/PEI-RNTI**、IAB **AI-RNTI**、**NCR-RNTI**、MBS 四枚（**Multicast MCCH-RNTI** 特供 INACTIVE 态组播）、网络节能 **cellDTRX-RNTI**（M67 课 d1/d2/f6）。',
+        ref: '38.300#8.1' },
+      { q: '网络侧十枚身份怎么拼装？侧链 Layer-2 ID 的拆分为什么不对称？',
+        a: '§8.2/§8.3：网络身份全走「PLMN+局部号」——**NCGI**=PLMN identity+NCI（SIB1 按广播顺序取首 PLMN）、**gNB ID 装在 NCI 里**、**Global gNB ID**=PLMN identity+gNB ID、**TAI**=PLMN+TAC、切片 **S-NSSAI/NSAG**（TA 内唯一）、**NID**（SNPN）、CAG、**Local NG-RAN Node ID 在 I-RNTI 里引用**；8.3=CN 给 **IPv4/IPv6 双传输地址**由 NG-RAN 节点任选。§8.4：**Layer-2 ID 全长 24 bits 非对称拆分**——Source 低 8 位进物理层/高 16 位进 MAC 头，Destination 低 16 位进物理层/高 8 位进 MAC 头；**PC5 Link Identifier** 终生认链路；SL-PRS Source ID **12 或 24 bits**（M67 课 d3/d4）。',
+        ref: '38.300#8.4' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

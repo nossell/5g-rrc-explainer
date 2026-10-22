@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.39.0";
+const APP_VERSION = "1.41.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -9482,6 +9482,15 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
       typeTables.push({ section: curH3.num, title: curH3.title, rows: it.rows.map((r) => r.map((c) => c.text)) });
       continue;
     }
+    // 29.281：§5.2.1（节下三表全收——帧格式表/bits 表/扩展头类型值表，建库按列头挑）+
+    // §6.1 消息类型值表（GTP-U 列）+ §8.1 IE 类型值表。位表不收：§5.2.2.x/§8.x 布局表
+    // 双 gutter 列+数字格 span2 加宽，24 族 parser 两处不兼容；parseGtpIeTable 对 §8.7/8.8
+    // 是伪命中（条件散文行 'present only if explicitly specified' 误当字段）——证据入 deviations，
+    // 布局建模列专项。
+    if (spec === '29281' && curH3 && /^(5\.2\.1|6\.1|8\.1)$/.test(curH3.num || '')) {
+      typeTables.push({ section: curH3.num, title: curH3.title, rows: it.rows.map((r) => r.map((c) => c.text)) });
+      continue;
+    }
     const ttRe = spec === '24008' || spec === '44018' ? /^10\.4[a-z]?\b/
       : spec === '24011' ? /^8\.[12]\b/
       : spec === '23040' ? null
@@ -9620,9 +9629,10 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
         continue;
       }
     }
-    // 29.060 §7.x 消息内容表（3 列：IE | Presence | Reference）。节号自带字母段
-    // （'7.5A.1'——splitHeading 会拆烂），独立重解；消息名取标题余部与 §7.1 名列对齐
-    if (spec === '29060') {
+    // 29.060 §7.x / 29.281 §7.x 消息内容表（3 列：IE | Presence | Reference——29.281 的
+    // Reference 列实测为空，IE 对应节由建库按名反查 §8.1 类型表）。节号自带字母段
+    // （'7.5A.1'——splitHeading 会拆烂），独立重解；消息名取标题余部与 §7.1/§6.1 名列对齐
+    if (spec === '29060' || spec === '29281') {
       const gm = parseGtpv1MsgRows(it.rows);
       if (gm) {
         const hm2 = it.heading ? /^\s*((?:\d+[a-zA-Z]?\.)+(?:\d+[a-zA-Z]?)*(?:\.\d+)*[a-zA-Z]?)\s+(.+)$/.exec(it.heading.text) : null;
@@ -10183,7 +10193,9 @@ function buildSchema(structured, opts = {}) {
   if (structured.spec === '29274') return buildSchema29274(structured);
   if (structured.spec === '29244') return buildSchema29244(structured);
   if (structured.spec === '29060') return buildSchema29060(structured);
+  if (structured.spec === '29281') return buildSchema29281(structured);
   if (structured.spec === '44018') return buildSchema44018(structured, opts.fillBits, opts.fillValueTables, opts.fillCsn1);
+  if (structured.spec === '44060') return buildSchema44060(structured);
   if (structured.spec === '24080') return buildSchema24080(structured);
   if (structured.spec === '24011') return buildSchema24011(structured);
   if (structured.spec === '23040') return buildSchema23040(structured);
@@ -10279,6 +10291,23 @@ function mergeCsn1IntoIes(ies, csn1, sections) {
     ies[sec] = { name: (ies[sec] && ies[sec].name) || (s ? s.title : sec), layouts: (ies[sec] && ies[sec].layouts) || [], csn1: d };
   }
   return ies;
+}
+
+// ---- 44.060（RLC/MAC，CSN.1 文法规范）建库（批次 AI3）-----------------------------------
+// 44.060 无 24 族表格（探案 j00：633 表 = 208 张 CSN.1 文法 + 425 值语义/说明表，bitTable/
+// msgTable 零命中）——本 schema = CSN.1 描述符库（buildCsn1Descriptors 池化闭包，44.018
+// Rest Octets 同一基建），为 44.018 的外部结构引用（'PCID GROUP IE' 等悬空 ref）提供并池源。
+// 消息级（§11 消息名→文法 root）不另建 messages：44.060 消息即文法，ies 节即完整覆盖。
+function buildSchema44060(structured) {
+  const problems = [];
+  const csn1 = buildCsn1Descriptors(structured.csn1, structured.sections);
+  const ies = mergeCsn1IntoIes({}, csn1, structured.sections);
+  if (!Object.keys(ies).length) problems.push('CSN.1 文法表未捕获（含 ::= 的表格为零）');
+  const defCount = Object.values(ies).reduce((a, e) => a + Object.keys((e.csn1 && e.csn1.defs) || {}).length, 0);
+  // 比例守卫：真实 44060 文法表 188 张/defs 446——表多而 defs 异常少 = 节归属系统性失配；
+  // 合成/小型库（表 < 10）不误报。
+  if ((structured.csn1 || []).length >= 10 && defCount < 100) problems.push(`文法定义过少（${defCount}）——节归属可能系统性失配`);
+  return { schema: { spec: '44060', version: structured.version, msgTypes: {}, ies, messages: {} }, problems };
 }
 
 // ---- 24.008（GSM/UMTS 传承 NAS）建库 -----------------------------------------------
@@ -10779,6 +10808,111 @@ function buildSchema29060(structured) {
     out[m.name].push(inst);
   }
   return { schema: { spec: '29060', version: structured.version, msgTypes, ies, messages: out }, problems };
+}
+
+// ---- 29.281（GTP-U）建库（批次 AI2：类型值表轻量锚定）-----------------------------------
+// GTP-U 头/扩展头链的线缆级模型在 gtpu.js（tshark 对拍过）；本 schema 的价值 = 三个类型
+// 值表锚定（§5.2.1 扩展头类型 / §6.1 消息类型 GTP-U 列 / §8.1 IE 类型）+ §7.x 消息内容表，
+// 并在建库时与 gtpu.js 的 GTPU_EXT_TYPES 常量表对拍（硬编码 ← → 规范表格互证）。
+// 位表不采（分类循环 29281 注释与 deviations 的形态证据）；ies 只有类型表条目（layouts 空）。
+
+// §5.2.1 扩展头类型表行：['0000 0001', 'Reserved - Control Plane only.'] → {value:1, name, reserved}
+function parse29281ExtRows(rows) {
+  const out = [];
+  if (!rows || !rows.length) return out;
+  for (const r of rows) {
+    const bits = (r[0] || '').replace(/\s+/g, '');
+    if (!/^[01]{8}$/.test(bits)) continue; // 表头/NOTE 行/杂项
+    const name = (r[1] || '').replace(/\.\s*See NOTE \d+[^.]*\.?/i, '').replace(/\s+/g, ' ').trim().replace(/\.$/, '');
+    out.push({ value: parseInt(bits, 2), name, reserved: /^reserved/i.test(name) });
+  }
+  return out;
+}
+
+// 扩展头类型对拍（纯参数化——测试用合成数据，真实对拍在建库内走 GTPU_EXT_TYPES）：
+// 常量表每个键必须在表的非 reserved 行中；名字对拍用首 token 宽松口径（表名带 NOTE 尾注、
+// 常量名带 '(legacy)' 加工后缀——先例：AB 批对 29.281 j20 的逐项人工核对结论）。
+function compareExtTypes(extTypes, constTable) {
+  const byValue = new Map(extTypes.filter((e) => !e.reserved).map((e) => [e.value, e]));
+  const missing = [], nameMismatch = [];
+  for (const [k, name] of Object.entries(constTable)) {
+    const v = +k;
+    const e = byValue.get(v);
+    if (!e) { missing.push(v); continue; }
+    const a = name.replace(/\s*\(legacy\)\s*$/i, '').toLowerCase();
+    const b = e.name.toLowerCase();
+    if (!b.startsWith(a.slice(0, 12))) nameMismatch.push({ value: v, schema: e.name, constant: name });
+  }
+  return { missing, nameMismatch };
+}
+
+function buildSchema29281(structured) {
+  const problems = [];
+  const tt = (t) => (structured.typeTables || []).filter((x) => x.section === t);
+  // §5.2.1 三表中挑扩展头类型表（两列、首列二进制串；帧格式表/bits 表列头不含二进制行）
+  const extTypes = tt('5.2.1').flatMap((t) => parse29281ExtRows(t.rows));
+  if (!extTypes.length) problems.push('§5.2.1 扩展头类型值表未捕获');
+  // §6.1 消息类型表：[Decimal|Message|Reference|GTP-C|GTP-U|GTP']——GTP-U 列 'X' 的单值行。
+  // 大小写有语义：适用='X'（大写），GTP' 列惯用小写 'x'——严格匹配防串列误收。
+  const msgTypes = {};
+  for (const t of tt('6.1')) {
+    for (const r of t.rows.slice(1)) {
+      if (!/^\d+$/.test((r[0] || '').trim())) continue; // 范围行（reserved）与表头
+      if ((r[4] || '').trim() !== 'X') continue;
+      const name = (r[1] || '').trim();
+      msgTypes[GTP_KEY(name)] = { type: +r[0].trim(), name };
+    }
+  }
+  if (!Object.keys(msgTypes).length) problems.push('§6.1 消息类型值表（GTP-U 列）未捕获');
+  // §8.1 IE 类型表：[IE Type Value|Format|Information Element|Reference]
+  const ieTypes = { entries: [], byName: new Map() };
+  for (const t of tt('8.1')) {
+    for (const r of t.rows.slice(1)) {
+      if (!/^\d+$/.test((r[0] || '').trim())) continue;
+      const name = (r[2] || '').replace(/\.\s*See NOTE \d+[^.]*\.?/i, '').replace(/\s+/g, ' ').trim();
+      const e = { value: +r[0].trim(), format: (r[1] || '').trim(), name, ref: (r[3] || '').trim() || null };
+      ieTypes.entries.push(e);
+      ieTypes.byName.set(GTP_KEY(name), e);
+    }
+  }
+  if (!ieTypes.entries.length) problems.push('§8.1 IE 类型值表未捕获');
+  // ies：类型表条目（ref 缺失的收在 entries 不进 ies——防悬空键）
+  const ies = {};
+  for (const e of ieTypes.entries) {
+    if (!e.ref) continue;
+    ies[e.ref] = { name: e.name, layouts: [], ieType: e.value, format: e.format };
+  }
+  // 消息实例（§7.x）：行按名反查 §8.1（29.281 消息表 Reference 列实测为空）。
+  // 'General' 小节表（§7.3.2.1——消息概览段）非消息内容表，跳过（29244 同款口径）。
+  const out = {};
+  for (const m of structured.msgs || []) {
+    if (m.kind !== 'message' || !/^7\./.test(m.section || '')) continue;
+    if (/^general$/i.test(m.name || '')) continue;
+    const rows = (m.rows || []).map((r) => {
+      const e = ieTypes.byName.get(GTP_KEY(r.name || '')) || null;
+      return {
+        iei: e ? String(e.value) : null,
+        name: r.name,
+        presence: r.presence || 'O',
+        cond: null,
+        format: e ? e.format : null,
+        len: null,
+        ins: null,
+        ref: e ? e.ref : null,
+        def: e ? e.ref : null,
+      };
+    });
+    const t = msgTypes[GTP_KEY(m.name || '')];
+    if (!t) problems.push(`${m.section || '?'} ${m.name || '?'}: 无消息类型值`);
+    const inst = { section: m.section, tableId: null, direction: null, pd: null, msgType: t ? t.type : null, rows };
+    if (!out[m.name]) out[m.name] = [];
+    out[m.name].push(inst);
+  }
+  // 常量表对拍：gtpu.js GTPU_EXT_TYPES ↔ §5.2.1 类型表（建库即核，任何重建自动复验）
+  const cmp = compareExtTypes(extTypes, GTPU_EXT_TYPES);
+  if (cmp.missing.length) problems.push(`GTPU_EXT_TYPES 对拍：常量表 ${cmp.missing.map((v) => '0x' + v.toString(16)).join(',')} 不在 §5.2.1 类型表`);
+  for (const nm of cmp.nameMismatch) problems.push(`GTPU_EXT_TYPES 对拍：0x${nm.value.toString(16)} 名不符（表 '${nm.schema}' vs 常量 '${nm.constant}'）`);
+  return { schema: { spec: '29281', version: structured.version, extTypes, msgTypes, ies, messages: out }, problems };
 }
 
 function buildSchema29274(structured) {
@@ -11430,8 +11564,12 @@ function ipv4(rng) { return [rndByte(rng), rndByte(rng), rndByte(rng), rndByte(r
 function ipv6(rng) { return Array.from({ length: 16 }, () => rndByte(rng)); }
 
 // GTP 族（29274/29060）按 IE 规范名匹配（行名可能是别名，如 SGSN Identifier for MT SMS）。
+// v1.40.0 勘正（批次 AH）：schema 的 ies 节名带节号尾注（'Node Identifier (8.107)'），
+// 精确等值分支（NODE IDENTIFIER/NODE NUMBER/LOAD METRIC/IMSI/MEI/TWAN/F-TEID 等）自
+// AC 批落库起从未命中（死代码——真正生效的只有 TFT/TAD 与 FQ-CSID 两个无锚正则分支）；
+// 匹配前先剥节号尾注，全部分支激活。PFCP（semanticPfcpValue）同病同修。
 function semanticGtpValue(name, rng) {
-  const n = String(name || '').trim().toUpperCase();
+  const n = String(name || '').trim().replace(/\s*\(\d+(?:\.\d+)*\)\s*$/, '').toUpperCase();
   if (/^(INTERNATIONAL MOBILE SUBSCRIBER IDENTITY \(IMSI\)|IMSI|ALTERNATIVE IMSI|C-MSISDN|MSISDN)$/.test(n)) {
     return Uint8Array.from(bcdDigits(rng, 5 + Math.floor(rng() * 11))); // 5..15 位 BCD
   }
@@ -11489,7 +11627,7 @@ function semanticGtpValue(name, rng) {
 
 // PFCP：标志位与变长地址部分一致（V4/V6 恒有且仅有所选地址族）。
 function semanticPfcpValue(name, rng) {
-  const n = String(name || '').trim().toUpperCase();
+  const n = String(name || '').trim().replace(/\s*\(\d+(?:\.\d+)*\)\s*$/, '').toUpperCase(); // v1.40.0：剥节号尾注（同 semanticGtpValue 死代码勘正）
   if (n === 'NODE ID') {
     // 8.2.38：Type 0=IPv4（4B）/ 1=IPv6（16B）
     return rng() < 0.7
@@ -11928,7 +12066,7 @@ function gtpuKvLine(obj, skip) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, semanticGtpValue, sampleSchema, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, semanticGtpValue, sampleSchema, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
