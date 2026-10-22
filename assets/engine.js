@@ -19,8 +19,10 @@
   var clauseIndex = null;
   function isClauseRef(s) {
     /* 允许任意段字母后缀（如 5.3.3.1a / 5.7.3b / 5.5a.1.3——语料条款树中真实存在；
-       v19：字母后缀从仅末段放宽到每一段——38.331 §5.5a/§5.7.3b 系子条款字母在中段） */
-    return typeof s === 'string' && (/^\d+(\.\d+[A-Za-z]?)+$/.test(s) || /^\d{2}\.\d{3}(-\d+)?#\d+(\.\d+[A-Za-z]?)+$/.test(s));
+       v19：字母后缀从仅末段放宽到每一段——38.331 §5.5a/§5.7.3b 系子条款字母在中段）；
+       v36：重复段放宽为 *——单段条款号（38.300 §11/§19 整节一叶）为语料真实叶，
+       格式只做形状门，存在性仍由条款树比对（clauseMissing）兜底 */
+    return typeof s === 'string' && (/^\d+(\.\d+[A-Za-z]?)*$/.test(s) || /^\d{2}\.\d{3}(-\d+)?#\d+(\.\d+[A-Za-z]?)*$/.test(s));
   }
   function clauseMissing(ref) {
     if (clauseIndex == null) return false;

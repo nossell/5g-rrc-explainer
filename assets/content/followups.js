@@ -782,6 +782,31 @@
         a: '§17.1：victim/aggressor 按**半静态集合**编组，每小区**最多一 victim+一 aggressor set ID**（gNB 可兼两角）；victim 集合**同发同一 RIM-RS**；纯无线框架 aggressor 回 RIM-RS、**收不到即波导止**；回程框架**点到点、对核心网透明**；终止=victim 停发。§17.2：CLI 测量两型=**SRS-RSRP**（aggressor 的 SRS 资源）与 **CLI-RSSI**（RSSI 总功率）；上报 **L1/L3 互斥**——L3 带三层滤波、事件+周期，L1 按量分：SRS-RSRP **只非周期**、CLI-RSSI 周期/非周期皆可；gNB-to-gNB CLI 靠 victim gNB 报告+邻站评估，兜底 **UL resource muting**（偶/奇子载波二选一）（M65 课 d1-d4/f4/f5）。',
         ref: '38.300#17.2' }
     ] },
+
+    'm66:q0': { levels: [
+      { q: 'MO-SDT 的三道发起门与 MT-SDT 的触发链各是什么？双入口资源怎么配？',
+        a: '§18.0：MO 三门=**UL 数据≤配置量**（对全部 SDT 承载合并计）+**DL RSRP 高于阈值**+**有效 SDT 资源**（38.321 §5.27.1）；MT=网络在 **paging message** 带指示、UE 复验 RSRP 后以 **MT-SDT resume cause** 发 **RRCResumeRequest/RRCResumeRequest1**。双入口=**RACH**（经系统信息）与 **Type 1 CG**（经 RRCRelease 专用信令）；资源在 **initial BWP**、NUL/SUL 可兼；CG 仅在原 PCell 有效、关联一或多 SSB；**CFRA 不支持**、MT 走 RACH 只能用非 SDT 资源（M66 课 a1/b1/f1/f2）。',
+        ref: '38.300#18.0' },
+      { q: 'SDT 的成功出口与失败判据各有哪些？CG-SDT 的 TA 怎么守？',
+        a: '§18.0：成功=导向 IDLE/留 INACTIVE（RRCRelease 或 RRCReject）/升 CONNECTED（RRCResume/RRCSetup），带 **resumeIndication** 则续 RRC Resume；失败六判据=重选/失败检测 timer 到期/PRACH preamble 阈值/RLC 重传阈值/完整性失败/CG 上 TA 或 configuredGrantTimer 到期无响应——**一律回 IDLE**。CG-SDT 需**有效 UL TA**：专用 TA timer+高排名 SSB 的 RSRP；TA 到期**释放资源但保留配置**；另有 next CG occasion 最大时长门（MO 按 LC/MT 按 UE）（M66 课 b2/f6）。',
+        ref: '38.300#18.0' }
+    ] },
+    'm66:q2': { levels: [
+      { q: '带与不带上下文迁移的两张流程图差在哪？收尾消息各是什么？',
+        a: '§18.2：全上下文经 **Xn-AP Retrieve UE Context** 迁到新站，UL 直送 UPF，新站发 **NGAP Path Switch Request**、防丢经 **Xn-U ADDRESS INDICATION**，收尾 **RRCRelease（suspend）**+**UE CONTEXT RELEASE**；升连接态扳机=非 SDT 到达/DL SDT 太大/BSR 超阈值/UP policy 不一致。§18.3：只传**含 SDT RLC context 的 partial UE context**，UE context 留原站，DRB 走 **GTP-U 隧道**转发，收尾=新站发 **RETRIEVE UE CONTEXT CONFIRM**（正常结束/无线链路问题/BSR 大量）+原站回 **RETRIEVE UE CONTEXT FAILURE** 内封装 RRCRelease。§18.1：clock quality UE 必须**全迁移**（M66 课 b3/b4）。',
+        ref: '38.300#18.2' },
+      { q: 'MT-SDT 怎么把 DL 数据送到停在 INACTIVE 的 UE？',
+        a: '§18.4：DL 数据到 **Last Serving gNB**（或长 eDRX 的 RAN Paging），经 **XnAP RAN PAGING** 把 **MT-SDT information** 散给 RNA 内邻站，各站自行决定是否触发 **MT-SDT Paging**——经 **Uu Paging** 够到 UE 的即 Receiving gNB；UE 以 **MT-SDT resume cause** 发 RRCResumeRequest，后续并入 18.2-1/18.3-1（首包换 DL）；步骤 2-6 间来非 SDT 数据则原站应迁移上下文并转发（M66 课 b4）。',
+        ref: '38.300#18.4' }
+    ] },
+    'm66:q4': { levels: [
+      { q: 'LP-WUS 的空口形态与按态 codepoint 数是什么？唤醒不成怎么办？',
+        a: '§11：LP-WUS 全态可配，基于 **OOK** 叠加 **overlaid OFDM sequence(s)**，至多 **5 information bits**/**32 codepoints**；**IDLE/INACTIVE 盯 2 个 codepoint**、**CONNECTED 最多 8 个**；一个 OFDM 符号内 OOK 符号数 1/2/4。IDLE/INACTIVE 侧 **wake-up delay** 三候选，gNB 在 reference PF of PO 与 LP-WUS occasion 间配 offset——**都不小于上报值才监控**，否则放弃唤醒改盯 **PEI/paging**；LR 与 MR 不同时收；LP-SS 只在非连接态保 LR 同步（M66 课 c2/c3/f4）。',
+        ref: '38.300#11' },
+      { q: '§19 的上行八式与下行两式怎么分？MSG1 repetition 回退卡在哪？',
+        a: '§19：上行（FR1+FR2）对 PUSCH/PUCCH/PRACH/MSG3 八式=TB repetition 聚合（两计数口径上限都 **32**）/TB processing 跨时隙/DMRS bundling（可与 inter-slot 跳频同用）/PUCCH repetition factor 动态/MSG3 repetition（RSRP 低于阈值经独立 RACH 资源）/MSG1 repetition（按重复数广播分开 RSRP 阈值）/波形 DFT-S-OFDM↔CP-OFDM（DCI 0_1/0_2+PHR 双口径）/频域谱整形（MPR/PAR）；下行仅 **FR1+TN** 两式=CSS 的 PDCCH repetition+SIB1 PDSCH 两连续时隙。回退禁区=**MSG1-based SI request** 与 **CFRA→CBRA 已发生**；CFRA→同重复数 CBRA 可以（M66 课 d1-d4/f5）。',
+        ref: '38.300#19' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

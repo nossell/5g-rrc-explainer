@@ -189,6 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
+const APP_VERSION = "1.39.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -6706,21 +6707,27 @@ function gtpuBuild({ teid = 0, type = 0xff, seq = null, npdu = null, exts = [], 
   // 违例不阻断构造（should/shall 混合：链序 should、QFI shall——统一以 warning 留痕，
   // 调用方按需升格），警告以 out.warnings 属性附带。
   const buildWarnings = [];
-  const ti = (t) => exts.findIndex((e) => (e.type & 0xff) === t);
-  const iPsc = ti(0x85);
-  const iPsic = ti(0x04);
-  if (iPsic >= 0) {
-    if (iPsc >= 0) {
+  // v1.38.0 P3 勘正：守卫原用 findIndex 只看首个 0x85/0x04——多容器（malformed）漏检。
+  // 改为全量索引：计数超 1 直接告警，链序/QFI 逐对核查，消息去重。
+  const idxAll = (t) => exts.map((e, i) => ((e.type & 0xff) === t ? i : -1)).filter((i) => i >= 0);
+  const pscIdx = idxAll(0x85);
+  const psicIdx = idxAll(0x04);
+  if (pscIdx.length > 1) buildWarnings.push(`GTP-U 扩展头链（29.281 §5.2）：PDU Session Container（0x85）出现 ${pscIdx.length} 次——应至多一次`);
+  if (psicIdx.length > 1) buildWarnings.push(`GTP-U 扩展头链（29.281 §5.2）：PDU Set Information Container（0x04）出现 ${psicIdx.length} 次——应至多一次`);
+  for (const iPsc of pscIdx) {
+    for (const iPsic of psicIdx) {
       if (iPsic !== iPsc + 1) buildWarnings.push('GTP-U 扩展头链序（29.281 §5.2 NOTE 5）：PDU Set Information Container（0x04）应为第二扩展头、紧跟 PDU Session Container（0x85）之后');
       const c1 = exts[iPsc].content;
       const c2 = exts[iPsic].content;
       const q1 = c1 && c1.length >= 2 ? c1[1] & 0x3f : null; // PSC QFI：octet2 bits 5-0
       const q2 = c2 && c2.length >= 2 ? (c2[1] >> 2) & 0x3f : null; // PSIC QFI：octet2 bits 7-2
       if (q1 != null && q2 != null && q1 !== q2) buildWarnings.push(`GTP-U QFI 跨容器不一致（29.281 §5.2 NOTE 6，shall）：0x85 QFI ${q1} vs 0x04 QFI ${q2}——两容器同时出现时必须同值`);
-    } else if (iPsic !== 0) {
-      buildWarnings.push('GTP-U 扩展头链序（29.281 §5.2 NOTE 5）：无 PDU Session Container 时 PDU Set Information Container（0x04）应为第一扩展头');
     }
   }
+  for (const iPsic of psicIdx) {
+    if (!pscIdx.length && iPsic !== 0) buildWarnings.push('GTP-U 扩展头链序（29.281 §5.2 NOTE 5）：无 PDU Session Container 时 PDU Set Information Container（0x04）应为第一扩展头');
+  }
+  const uniqWarnings = [...new Set(buildWarnings)];
   const chain = [];
   for (let i = 0; i < exts.length; i++) {
     const e = exts[i];
@@ -6741,7 +6748,7 @@ function gtpuBuild({ teid = 0, type = 0xff, seq = null, npdu = null, exts = [], 
   const out = [flags, type & 0xff, ...gtpuWr16(length), ...gtpuWr32(teid >>> 0)];
   if (withOpt) out.push(...gtpuWr16(seq || 0), (npdu || 0) & 0xff, chain.length ? (exts[0].type & 0xff) : 0);
   const buf = Uint8Array.from([...out, ...chain, ...pl]);
-  if (buildWarnings.length) buf.warnings = buildWarnings;
+  if (uniqWarnings.length) buf.warnings = uniqWarnings;
   return buf;
 }
 
@@ -6782,13 +6789,14 @@ const PSC_SETTABLE = {
 
 // 未知键检测：返回 [{ key, near }]，near=最近似正名（大小写/分隔归一相等 > 前缀互含），
 // 无近似为 null。dir 侧集合外的键一律报出——含把对方方向键误传本方向（P3-2 场景）。
-// v1.34.0 起同时覆盖 --pset（PSET_SETTABLE）。
+// v1.34.0 起同时覆盖 --pset（PSET_SETTABLE）。v1.38.0 P3：dir 键不再豁免——方向由
+// --psc-dl/--psc-ul flag（或 UI 面板选择）决定，混入 k=v 即报出，防静默覆盖翻转方向。
 function pscUnknownKeys(dir, obj) {
   const known = PSC_SETTABLE[dir] || PSET_SETTABLE[dir] || [];
   const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
   const out = [];
   for (const k of Object.keys(obj || {})) {
-    if (k === 'dir' || known.includes(k)) continue;
+    if (known.includes(k)) continue;
     const nk = norm(k);
     const near = known.find((x) => norm(x) === nk)
       || known.find((x) => norm(x).startsWith(nk) && nk.length >= 3)
@@ -6798,8 +6806,8 @@ function pscUnknownKeys(dir, obj) {
   return out;
 }
 
-const PSC_U8 = (v, name, max) => {
-  if (!Number.isInteger(v) || v < 0 || v > max) throw new Error(`PSC ${name} 越界（${v}，0..${max}）`);
+const PSC_U8 = (v, name, max, tag = 'PSC') => {
+  if (!Number.isInteger(v) || v < 0 || v > max) throw new Error(`${tag} ${name} 越界（${v}，0..${max}）`);
   return v;
 };
 function pscWr64(v, name) {
@@ -6809,8 +6817,8 @@ function pscWr64(v, name) {
   for (let i = 7; i >= 0; i--) out.push(Number((b >> BigInt(i * 8)) & 0xffn));
   return out;
 }
-const pscWrN = (v, name, bytes, max) => {
-  const n = PSC_U8(v, name, max);
+const pscWrN = (v, name, bytes, max, tag = 'PSC') => {
+  const n = PSC_U8(v, name, max, tag);
   const out = [];
   for (let i = bytes - 1; i >= 0; i--) out.push((n >> (i * 8)) & 0xff);
   return out;
@@ -6878,6 +6886,8 @@ function pduSessionInfo(f = {}) {
   if (f.padding == null) {
     const need = (2 + body.length + fext.length) % 4;
     pad = Uint8Array.from(need ? new Array(4 - need).fill(0) : []);
+  } else if ((2 + body.length + fext.length + pad.length) % 4 !== 0) {
+    warnings.push(`PSC 显式 padding 后帧长 ${2 + body.length + fext.length + pad.length}（+2 扩展头字节）非 4 的倍数（§5.5.3.5）`);
   }
   const out = new Uint8Array(body.length + fext.length + pad.length);
   out.set(Uint8Array.from(body), 0);
@@ -6993,10 +7003,10 @@ const PSET_SETTABLE = {
 //（§6.5.3.9：0=发送方无法定义重要度）。帧长（含 padding/future ext）= n*4-2 octets。
 function pduSetInfo(f = {}) {
   const warnings = [];
-  const qfi = f.qfi != null ? PSC_U8(f.qfi, 'QFI', 63) : 0;
-  const pssn = f.pssn != null ? PSC_U8(f.pssn, 'PSSN', 0x3ff) : 0;
-  const psi = f.psi != null ? PSC_U8(f.psi, 'PSI', 15) : 0;
-  const psn = f.psn != null ? PSC_U8(f.psn, 'PSN', 255) : 0;
+  const qfi = f.qfi != null ? PSC_U8(f.qfi, 'QFI', 63, 'PSET') : 0;
+  const pssn = f.pssn != null ? PSC_U8(f.pssn, 'PSSN', 0x3ff, 'PSET') : 0;
+  const psi = f.psi != null ? PSC_U8(f.psi, 'PSI', 15, 'PSET') : 0;
+  const psn = f.psn != null ? PSC_U8(f.psn, 'PSN', 255, 'PSET') : 0;
   const edb = f.edb ? 1 : 0;
   const epdu = f.epdu ? 1 : 0;
   const pssi = f.pssize != null ? 1 : 0;
@@ -7007,12 +7017,14 @@ function pduSetInfo(f = {}) {
     psi & 0x0f, // octet4：spare bits7-4 + PSI bits3-0
     psn & 0xff, // octet5：PSN
   ];
-  if (pssi) body.push(...pscWrN(f.pssize, 'PSSize', 3, 0xffffff));
+  if (pssi) body.push(...pscWrN(f.pssize, 'PSSize', 3, 0xffffff, 'PSET'));
   const fext = f.futureExt instanceof Uint8Array ? f.futureExt : Uint8Array.from(f.futureExt || []);
   let pad = f.padding instanceof Uint8Array ? f.padding : Uint8Array.from(f.padding || []);
   if (f.padding == null) {
     const need = (2 + body.length + fext.length) % 4;
     pad = Uint8Array.from(need ? new Array(4 - need).fill(0) : []);
+  } else if ((2 + body.length + fext.length + pad.length) % 4 !== 0) {
+    warnings.push(`PSET 显式 padding 后帧长 ${2 + body.length + fext.length + pad.length}（+2 扩展头字节）非 4 的倍数（§6.5.3.13）`);
   }
   const out = new Uint8Array(body.length + fext.length + pad.length);
   out.set(Uint8Array.from(body), 0);
@@ -7471,12 +7483,39 @@ function layoutSample(octets, rng, framed = false) {
   }
   const fields = {};
   const bytes = [];
-  for (const row of rows) {
+  // 批次 AC（v1.35.0）：内嵌长度字段一致性——布局中部的「Length of X」/「X Length」
+  // 单八位组行（MM Context APN、Node Identifier、SCEF ID、Remote User ID、Classmark 2
+  // 等）原先按随机值采样，与后随内容字节数不符 → 独立实现方按长度越界读、判 malformed。
+  // 现记录长度字节位偏移，行扫描完成后回填实际后随行的采样字节数（open 行按本回合
+  // 采到的重复数折算）。只回填不改变行序与其它字段值。
+  const lenPatches = [];
+  const rowRanges = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const lenShape = isInnerLenRow(row);
     const n = row.compressed ? 1 : row.count || 1;
-    const reps = row.open ? 1 + Math.floor(rng() * 3) : n;
+    // 长度形态行恒采 1 个重复（长度字段自身不重复——8.123 Remote User ID 等全 open
+    // 布局里 Length 行与内容行同为 '5-n*'，重复无意义）
+    const reps = lenShape ? 1 : row.open ? 1 + Math.floor(rng() * 3) : n;
+    const start = bytes.length;
     for (let k = 0; k < reps; k++) bytes.push(...packRow(row, fields, rng, k, reps));
+    rowRanges[i] = [start, bytes.length];
+    if (lenShape && rows[i + 1]) lenPatches.push({ at: start, next: i + 1, name: row.fields[0].name });
+  }
+  for (const p of lenPatches) {
+    const L = rowRanges[p.next][1] - rowRanges[p.next][0];
+    bytes[p.at] = L & 0xff;
+    fields[p.name] = L;
   }
   return { bytes: Uint8Array.from(bytes), fields };
+}
+
+// 布局中部的长度指示行：单字段、整 8 bit、名形如 'Length of X' / 'X Length'。
+// （framed 剥离只针对行首外框 Length；此处补内嵌长度行——open 标记不豁免，见上。）
+function isInnerLenRow(row) {
+  return !row.half && !row.compressed && (row.count || 1) === 1
+    && row.fields.length === 1 && row.fields[0].bits === 8
+    && /^(length of .+|.+ length)$/i.test(String(row.fields[0].name || '').trim());
 }
 
 function isIeiRow(row) {
@@ -11399,6 +11438,24 @@ function semanticGtpValue(name, rng) {
   if (/^(MOBILE EQUIPMENT IDENTITY \(MEI\)|MEI|IMEISV)$/.test(n)) {
     return Uint8Array.from(bcdDigits(rng, 15)); // IMEI 15 位（奇数位末半字节 F）
   }
+  if (/(BEARER TFT|TRAFFIC FLOW TEMPLATE|TRAFFIC AGGREGATE DESCRIPTION)/.test(n)) {
+    // 29.274 8.19/8.20 → 24.008 §10.5.6.21 编码；组件集与操作码为 tshark 4.6.8 探针
+    // 实证接受面（批次 AC）：create（N=1）+ 9 种组件 / create N=0 / 删全部。op code 占
+    // octet3 bits8-6（表 10.5.161）：0x21=001 Create N=1、0x20=001 Create N=0、
+    // 0x40=010 Delete existing（N=0 删全部）；No TFT operation=110、Replace=100。
+    // E=1 参数列表、N≥2 过滤器、IPv6 组件与 0x11 删除式在探针中被判 malformed——不采。
+    const op = [0x21, 0x20, 0x40][Math.floor(rng() * 3)];
+    if (op !== 0x21) return Uint8Array.from([op]); // Create N=0 / Delete existing 全部
+    const comps = [[0x20, 8], [0x30, 1], [0x40, 2], [0x50, 1], [0x60, 2], [0x70, 4], [0x80, 4], [0x90, 2], [0xa0, 3]];
+    const [t, len] = comps[Math.floor(rng() * comps.length)];
+    return Uint8Array.from([0x21, 0x10, 1 + len, t, ...Array.from({ length: len }, () => rndByte(rng))]);
+  }
+  if (/FULLY QUALIFIED.*(PDN CONNECTION SET|CSID)/.test(n)) {
+    // 29.274 8.62：octet1 高 4 位 Node-ID Type + 低 4 位 Number of CSIDs，每个 CSID 恒
+    // 2 字节。Type=0（IPv4，探针实证）+ nr=1 → 4B 节点 IPv4 + 1×2B CSID（v1.38.0 P2 勘正：
+    // 原 6B 体 = 3×CSID，与 octet1 低 4 位 nr=1 矛盾——tshark 只查 type↔地址长度才未判违）。
+    return Uint8Array.from([0x01, ...ipv4(rng), rndByte(rng), rndByte(rng)]);
+  }
   if (/^(TWAN IDENTIFIER|WLAN LOCATION INFORMATION)$/.test(n)) {
     // 8.100：部标志全 0；SSID Length 与实际 SSID 字节数一致。注意本 schema 的 SSID 行
     // 只建模 1 字节（变长部分未摄取），取 1 字节使 tshark 与本构建解析结构一致。
@@ -11810,8 +11867,68 @@ if (args.schema && args.out) {
 }
 }
 
+// ==== src/ui/uifns.js ====
+// uifns — UI 层零 DOM 纯函数（v1.39.0 批次 AG 从 app.js 抽出可测化）。
+// 约定：build.js 将本文件列入 ENGINE_FILES（剥 import/export 后与 app.js 同 IIFE
+// 作用域拼接——app.js 直调无需 import）；Node 侧测试直接 import 本模块。
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleSchema };
+// v1.37 补引号转义——data-loc 属性此前从首个引号截断，diff 点击定位自 v1.24 起潜伏失效。
+// 行为钉（test/ui_fns.test.js）：只转义 & < "，不转义 > 与 '（双引号属性上下文足够）。
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+}
+
+// ---- GTP-U 隧道帧卡片助手（29.281 + 38.415 §5.5/§6，批次 AE UI 面）----
+function gtpuHexToBytes(h) {
+  // v1.39.0 勘正：先剥 0x/0X 前缀再清洗——原先 '0' 被当 hex 保留（'0x34ff'→'034ff'
+  // 5 字符奇数）误报「长度应为偶数」，0x 前缀输入在 UI 面板一直不可用（测试化抓获）。
+  const a = String(h).trim().replace(/^0x/i, '').replace(/[^0-9a-f]/gi, '');
+  // v1.38.0 P3：奇数位原先 >>1 静默丢尾字符——显式报错（空白等非法字符已清洗）
+  if (a.length % 2) throw new Error('hex 长度应为偶数（清洗后 ' + a.length + ' 个十六进制字符）');
+  const out = new Uint8Array(a.length >> 1);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(a.substr(i * 2, 2), 16);
+  return out;
+}
+function gtpuBytesToHex(u8) { return Array.from(u8).map((b) => b.toString(16).padStart(2, '0')).join(''); }
+function gtpuKvParse(str) {
+  const f = {};
+  for (const kv of String(str).split(',')) {
+    if (!kv.trim()) continue;
+    const eq = kv.indexOf('=');
+    if (eq < 0) throw new Error('键值对应为 k=v：' + kv);
+    const k = kv.slice(0, eq).trim();
+    // v1.38.0 P3：dir 混入 k=v 会覆盖面板方向选择（静默翻转 dl/ul）——显式拒绝
+    if (k === 'dir') throw new Error('方向由 DL/UL 面板选择决定，k=v 中不可设 dir：' + kv);
+    let v = kv.slice(eq + 1).trim();
+    if (k === 'padding') { f.padding = gtpuHexToBytes(v); continue; }
+    if (/^dl(SendTs|SendTsRep|RecvTs)$|^ulSendTs$/.test(k)) v = BigInt(v);
+    else if (/^\d+$/.test(v)) v = Number(v);
+    else if (v === 'true') v = 1;
+    else if (v === 'false') v = 0;
+    f[k] = v;
+  }
+  return f;
+}
+function gtpuPayloadOf(str) {
+  if (!str) return Uint8Array.from([]);
+  if (/^\d{1,3}(\.\d{1,3}){3},\d{1,3}(\.\d{1,3}){3}$/.test(str)) {
+    const parts = str.split(',').map((x) => x.split('.').map(Number));
+    // v1.38.0 P3：999 原被 &0xff 静默折回 231——与 CLI ip4() 同口径显式校验
+    if (parts.flat().some((n) => n < 0 || n > 255)) throw new Error('IPv4 八位组应为 0-255：' + str);
+    return ipv4Frame({ src: parts[0], dst: parts[1] });
+  }
+  return gtpuHexToBytes(str);
+}
+// 解析树行回填 k=v 行（skip 键剔除；padding 空数组省略；bigint/字节串格式化）。
+function gtpuKvLine(obj, skip) {
+  return Object.entries(obj)
+    .filter((kv) => !skip.includes(kv[0]) && !(kv[0] === 'padding' && (!obj.padding || !obj.padding.length)))
+    .map((kv) => kv[0] + '=' + (typeof kv[1] === 'bigint' ? kv[1].toString() : (kv[1] && kv[1].length != null && kv[1].buffer ? gtpuBytesToHex(kv[1]) : kv[1])))
+    .join(' ');
+}
+
+
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, semanticGtpValue, sampleSchema, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
@@ -11963,7 +12080,7 @@ function hashStr(s) { let h = 2166136261; for (const c of s) { h ^= c.charCodeAt
 
 /* ============ 工具 ============ */
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+// esc 与 GTP-U 面板纯函数在 src/ui/uifns.js（v1.39.0 抽出可测化）——build.js 同作用域拼接直调
 function fmtVal(v) {
   if (v === null) return 'NULL';
   if (typeof v === 'boolean') return v ? 'true' : 'false';
@@ -12012,7 +12129,7 @@ function renderShell() {
 <header class="topbar">
   <div class="logo">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1" y="1" width="7" height="7" rx="1.5" fill="#0f62fe"/><rect x="10" y="1" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="1" y="10" width="7" height="7" rx="1.5" fill="rgba(255,255,255,0.18)"/><rect x="10" y="10" width="7" height="7" rx="1.5" fill="#0f62fe"/></svg>
-    RRC&nbsp;Workbench <span class="dim">v1.22.0</span>
+    RRC&nbsp;Workbench <span class="dim">v${APP_VERSION}</span>
   </div>
   <nav class="tabs">
     <button class="tab on" data-page="encode">帧生成器</button>
@@ -12023,7 +12140,7 @@ function renderShell() {
     <button class="tab" data-page="library">规范库</button>
     <button class="tab" data-page="about">关于</button>
   </nav>
-  <span class="ver">v1.22.0 · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
+  <span class="ver">v${APP_VERSION} · UPER/APER / NAS TLV / ASN.1 / Semantic Diff</span>
 </header>
 <main>
   <section class="page on" id="page-encode"></section>
@@ -12034,7 +12151,7 @@ function renderShell() {
   <section class="page" id="page-library"></section>
   <section class="page" id="page-about"></section>
 </main>
-<div class="foot">RRC Workbench v1.22.0 · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
+<div class="foot">RRC Workbench v${APP_VERSION} · 单文件本地运行 · UPER/APER 经 pycrate 0.8.1 交叉校准 · NAS（24.007 TLV）经 pycrate 线缆级对拍 + 全版本自洽门禁 · 官方 docx 可在「Spec 摄入」页自助建库（本机保存库自动持久化） · 详尽文档见 docs/使用手册.md</div>`;
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => goto(t.dataset.page)));
 }
 function goto(id) {
@@ -12252,7 +12369,7 @@ function fieldRow(f, container, path, ctx) {
         container[f.name] = sampleValue(r0.type, mulberry32(3), ctx);
       }
       const sel = document.createElement('select');
-      sel.innerHTML = rows.map(r2 => `<option value="${r2.key}"${r2.key === container[resolved.keyField] ? ' selected' : ''}>id=${r2.key}${r2.typeName ? ' · ' + esc(r2.typeName) : ''}</option>`).join('');
+      sel.innerHTML = rows.map(r2 => `<option value="${esc(r2.key)}"${r2.key === container[resolved.keyField] ? ' selected' : ''}>id=${esc(r2.key)}${r2.typeName ? ' · ' + esc(r2.typeName) : ''}</option>`).join('');
       sel.addEventListener('change', () => {
         const row = rows.find(r2 => String(r2.key) === sel.value);
         container[resolved.keyField] = row.key;
@@ -13360,6 +13477,28 @@ function renderNasPage() {
         <div style="margin-top:8px"><button class="btn" id="nasDec">解码</button></div>
         <div id="nasDecOut" style="margin-top:10px"></div>
       </div></div>
+      <div class="card"><div class="card-h">GTP-U 隧道帧（29.281 头/扩展头链 + 38.415 PSC/PSET 字段级）</div><div class="card-b">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input id="gtpuTeid" placeholder="TEID hex 8位" value="11223344" maxlength="8" style="width:112px;font:12px var(--mono)">
+          <input id="gtpuSeq" type="number" min="0" max="65535" placeholder="seq（空=不带）" style="width:118px">
+          <input id="gtpuPayload" placeholder="载荷：IPv4 a.b.c.d,e.f.g.h 或 hex" style="flex:1;min-width:200px;font:12px var(--mono)">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <input id="gtpuPscDl" placeholder="PSC DL k=v（0x85，可选）" style="flex:1;min-width:230px;font:12px var(--mono)" title="可用键：qfi/rqi/ppi/qmp/dlSendTs/dlSeq/dlMbsSeq/bssize/ttnb/padding">
+          <input id="gtpuPscUl" placeholder="PSC UL k=v（0x85，可选）" style="flex:1;min-width:230px;font:12px var(--mono)" title="可用键：qfi/qmp/dlSendTsRep/dlRecvTs/ulSendTs/dlDelay/ulDelay/ulSeq/n3n9Delay/d1Ind/ulCong/dlCong/ulBitrate/dlBitrate/padding">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+          <input id="gtpuPset" placeholder="PSET k=v（0x04，可选）" style="flex:1;min-width:230px;font:12px var(--mono)" title="可用键：qfi/pssn/psi/psn/pssize/edb/epdu/padding">
+          <button class="btn primary" id="gtpuGo">构造</button>
+        </div>
+        <div style="font:400 11px/1.6 var(--sans);color:var(--ink3);margin-top:6px">扩展头链序守卫（29.281 §5.2 NOTE 5/6）：PSC 在前、PDU Set Information Container 随后；QFI 跨容器须同值——违例 ⚠ 留痕不阻断。未知键告警同 CLI。</div>
+        <div id="gtpuBuildOut" style="margin-top:10px"></div>
+        <div style="display:flex;gap:8px;margin-top:12px;align-items:flex-end">
+          <textarea id="gtpuHexIn" rows="2" placeholder="粘贴 GTP-U 帧 hex → 解析（头/扩展头链/0x85 PSC/0x04 PSET 字段级反解）" style="min-height:0;height:56px;flex:1;font:12px var(--mono)"></textarea>
+          <button class="btn" id="gtpuDec">解析</button>
+        </div>
+        <div id="gtpuDecOut" style="margin-top:10px"></div>
+      </div></div>
       <div class="card"><div class="card-h">版本 Diff（同名消息/行级语义；GTP 两族含 IE 定义与布局行级）
         <button class="btn sm" id="nasDiffChain" style="margin-left:auto" title="同规范全部已载版本按序链式比对（A→B→C…）">链式</button>
         <button class="btn sm" id="nasDiffJson" title="导出 findings 结构化 JSON（含 provenance）">导出 .json</button>
@@ -13436,6 +13575,8 @@ function renderNasPage() {
   $('nasDiffGo').addEventListener('click', nasDoDiff);
   $('nasWsBtn').addEventListener('click', () => $('nasWsFile').click());
   $('nasWsFile').addEventListener('change', nasWsImport);
+  $('gtpuGo').addEventListener('click', gtpuBuildUi);
+  $('gtpuDec').addEventListener('click', gtpuDecUi);
   $('nasSecDec').addEventListener('click', nasSecDecode);
   $('nasSecEnc').addEventListener('click', nasSecEncode);
   $('nasSecDerive').addEventListener('click', nasSecDerive);
@@ -13520,7 +13661,7 @@ function nasSecVerify(fillMode = false) {
       <span style="font:500 13px var(--sans);color:${ok ? '#198038' : '#da1e28'}">${ok ? '✓ MAC 一致——帧完整性与密钥匹配' : '✗ MAC 不一致（密钥/COUNT/方向/BEARER 不匹配或帧被改）'}</span><br>
       <span style="color:var(--ink3)">输入：alg=${nasState.secKeys.algInt} COUNT=0x${count24.toString(16).padStart(6, '0')} dir=${dir} bearer=${bearer} 覆盖 ${payload.length + 1} 字节（序号+载荷）</span></p>`;
   } catch (e) {
-    host.innerHTML = `<p style="font:400 12px var(--sans);color:#da1e28">${e.message}</p>`;
+    host.innerHTML = `<p style="font:400 12px var(--sans);color:#da1e28">${esc(e.message)}</p>`;
   }
 }
 
@@ -13543,7 +13684,7 @@ function nasSecDecipher() {
     $('nasHexIn').value = hx(plainFrame);
     host.innerHTML = `<p style="font:400 12px var(--sans)">已解密 ${plain.length} 字节并重组为 SHT=1 明文帧（MAC 已按明文载荷重算：${hx(macPlain)}，原 MAC 覆盖的是密文）写入解码输入——点「解安全帧」看内层消息。<br><span style="font:11px var(--mono);color:var(--ink3)">明文 hex：${plainHex.slice(0, 64)}${plainHex.length > 64 ? '…' : ''}</span></p>`;
   } catch (e) {
-    host.innerHTML = `<p style="font:400 12px var(--sans);color:#da1e28">${e.message}</p>`;
+    host.innerHTML = `<p style="font:400 12px var(--sans);color:#da1e28">${esc(e.message)}</p>`;
   }
 }
 
@@ -13571,15 +13712,15 @@ function nasRefreshSelectors() {
   if (!nasState.spec || !specs.includes(nasState.spec)) nasState.spec = specs[0] || '24501';
   const vers = Object.keys(nasState.schemas).filter((k) => k.startsWith(nasState.spec + ' ')).map((k) => k.split(' ')[1]).sort();
   if (!nasState.ver || !vers.includes(nasState.ver)) nasState.ver = vers[vers.length - 1] || null;
-  $('nasSpec').innerHTML = specs.map((s) => `<option ${s === nasState.spec ? 'selected' : ''}>${s}</option>`).join('');
-  $('nasVer').innerHTML = vers.map((v) => `<option ${v === nasState.ver ? 'selected' : ''}>${v}</option>`).join('');
+  $('nasSpec').innerHTML = specs.map((s) => `<option ${s === nasState.spec ? 'selected' : ''}>${esc(s)}</option>`).join('');
+  $('nasVer').innerHTML = vers.map((v) => `<option ${v === nasState.ver ? 'selected' : ''}>${esc(v)}</option>`).join('');
   const msgs = nasMsgList();
   if (!nasState.msg || !msgs.includes(nasState.msg)) nasState.msg = msgs[0] || null;
-  $('nasMsg').innerHTML = msgs.map((m) => `<option ${m === nasState.msg ? 'selected' : ''}>${m}</option>`).join('');
+  $('nasMsg').innerHTML = msgs.map((m) => `<option ${m === nasState.msg ? 'selected' : ''}>${esc(m)}</option>`).join('');
   const s = nasCur();
   const insts = s && nasState.msg ? s.messages[nasState.msg] : [];
   if (nasState.instIdx >= insts.length) nasState.instIdx = 0;
-  $('nasInst').innerHTML = insts.map((x, i) => `<option value="${i}" ${i === nasState.instIdx ? 'selected' : ''}>#${i}${x.direction ? ' ' + x.direction : ''}</option>`).join('');
+  $('nasInst').innerHTML = insts.map((x, i) => `<option value="${i}" ${i === nasState.instIdx ? 'selected' : ''}>#${i}${x.direction ? ' ' + esc(x.direction) : ''}</option>`).join('');
   $('nasMsgNote').textContent = s
     ? `${nasKey(nasState.spec, nasState.ver)}：${Object.keys(s.messages).length} 消息 / ${Object.keys(s.msgTypes || {}).length} 消息类型值 / ${Object.keys(s.ies || {}).length} IE 节`
     : '尚未导入 schema——用 tools/nasdef.mjs 从官方 docx 表格生成（见手册 §7）。';
@@ -13587,8 +13728,8 @@ function nasRefreshSelectors() {
   // SHT 帧形态）、SS 消息不加密——这两族隐藏安全卡
   const secCard = $('nasSecCard');
   if (secCard) secCard.style.display = ['44018', '24080', '24011', '23040', '29274', '29060', '29244'].includes(nasState.spec) ? 'none' : '';
-  $('nasDiffL').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${k}</option>`).join('');
-  $('nasDiffR').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${k}</option>`).join('');
+  $('nasDiffL').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${esc(k)}</option>`).join('');
+  $('nasDiffR').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${esc(k)}</option>`).join('');
   nasSecRefreshAlgos();
   nasRenderForm();
 }
@@ -13635,11 +13776,11 @@ function nasRenderForm() {
       }
     }
     const badge = optional
-      ? `<label style="display:flex;align-items:center;gap:4px;font:400 11px var(--sans);color:var(--t3);white-space:nowrap"><input type="checkbox" data-ri="${ri}" data-kind="on" ${nasState.form[ri] && nasState.form[ri].on ? 'checked' : ''}>${r.presence}</label>`
-      : `<span style="font:400 11px var(--mono);color:var(--t4);white-space:nowrap">${r.presence}</span>`;
+      ? `<label style="display:flex;align-items:center;gap:4px;font:400 11px var(--sans);color:var(--t3);white-space:nowrap"><input type="checkbox" data-ri="${ri}" data-kind="on" ${nasState.form[ri] && nasState.form[ri].on ? 'checked' : ''}>${esc(r.presence)}</label>`
+      : `<span style="font:400 11px var(--mono);color:var(--t4);white-space:nowrap">${esc(r.presence)}</span>`;
     return `<div data-ref="${esc(r.ref || r.def || '')}" data-iei="${esc(r.iei || '')}" style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--bd-faint)">
-      <span style="font:400 11px var(--mono);color:var(--t4);width:44px;flex-shrink:0">${r.iei || '·'}</span>
-      <span style="font:400 12px var(--sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${name}">${name}<span class="dim" style="font:10px var(--mono)"> ${fmt}</span></span>
+      <span style="font:400 11px var(--mono);color:var(--t4);width:44px;flex-shrink:0">${esc(r.iei || '·')}</span>
+      <span style="font:400 12px var(--sans);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(name)}">${esc(name)}<span class="dim" style="font:10px var(--mono)"> ${esc(fmt)}</span></span>
       ${input}${badge}</div>`;
   });
   host.innerHTML = rows.join('');
@@ -13771,7 +13912,7 @@ function nasValueHtml(r, value) {
       const d = csn1Decode(defs, defs.get(c.root), bytes, { areaBytes: bytes.length });
       const lines = csn1TraceLines(d.trace, d.warnings, d.external);
       if (lines.length) {
-        fieldRows = `<table style="margin:2px 0 2px 14px;font:11px var(--mono);border-collapse:collapse">${lines.map(([dep, k, v]) => `<tr><td style="padding:1px 8px 1px 0;color:var(--t3)">${'&nbsp;'.repeat(dep * 2)}${k}</td><td>${v}</td></tr>`).join('')}</table>`;
+        fieldRows = `<table style="margin:2px 0 2px 14px;font:11px var(--mono);border-collapse:collapse">${lines.map(([dep, k, v]) => `<tr><td style="padding:1px 8px 1px 0;color:var(--t3)">${'&nbsp;'.repeat(dep * 2)}${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</table>`;
       }
     } catch {}
   }
@@ -13783,29 +13924,29 @@ function nasValueHtml(r, value) {
         const { fields, warnings } = layoutUnpack(lay.octets, value, framed);
         const ks = Object.keys(fields);
         if (ks.length) {
-          fieldRows = `<table style="margin:2px 0 2px 14px;font:11px var(--mono);border-collapse:collapse">${ks.map((k) => `<tr><td style="padding:1px 8px 1px 0;color:var(--t3)">${k}</td><td>${fields[k]}（0x${fields[k].toString(16)}）</td></tr>`).join('')}${warnings.map((w) => `<tr><td colspan="2" style="color:#f1c21b">${w}</td></tr>`).join('')}</table>`;
+          fieldRows = `<table style="margin:2px 0 2px 14px;font:11px var(--mono);border-collapse:collapse">${ks.map((k) => `<tr><td style="padding:1px 8px 1px 0;color:var(--t3)">${esc(k)}</td><td>${fields[k]}（0x${fields[k].toString(16)}）</td></tr>`).join('')}${warnings.map((w) => `<tr><td colspan="2" style="color:#f1c21b">${esc(w)}</td></tr>`).join('')}</table>`;
         }
       } catch {}
     }
   }
   if (!sem.length && !fieldRows) return raw;
-  return raw + (sem.map(([k, v]) => `<div style="font:400 11px var(--sans);color:#198038">${k}: ${v}</div>`).join('')) + fieldRows;
+  return raw + (sem.map(([k, v]) => `<div style="font:400 11px var(--sans);color:#198038">${esc(k)}: ${esc(v)}</div>`).join('')) + fieldRows;
 }
 
 // 29274 解码行渲染：分组 IE 子树（p.children 递归缩进）+ piggyback 内嵌消息段
 function nasGtpcPartRows(p, depth, indent0 = 0) {
   const pad = 14 * (depth + indent0);
   const head = depth
-    ? `<tr><td style="padding:2px 3px;color:var(--t4)">↳</td><td style="padding:2px 3px;padding-left:${14 + pad}px">└ ${p.row.name} <span style="color:var(--t4)">（Type ${p.row.iei}/实例 ${p.ins ?? '—'}）</span></td><td style="padding:2px 3px">${nasValueHtml(p.row, p.value)}</td></tr>`
-    : `<tr><td style="padding:3px;color:var(--t4)">${p.rowIdx}</td><td style="padding:3px;padding-left:${pad}px">${p.row.name}</td><td style="padding:3px">${nasValueHtml(p.row, p.value)}</td></tr>`;
+    ? `<tr><td style="padding:2px 3px;color:var(--t4)">↳</td><td style="padding:2px 3px;padding-left:${14 + pad}px">└ ${esc(p.row.name)} <span style="color:var(--t4)">（Type ${esc(p.row.iei)}/实例 ${p.ins ?? '—'}）</span></td><td style="padding:2px 3px">${nasValueHtml(p.row, p.value)}</td></tr>`
+    : `<tr><td style="padding:3px;color:var(--t4)">${p.rowIdx}</td><td style="padding:3px;padding-left:${pad}px">${esc(p.row.name)}</td><td style="padding:3px">${nasValueHtml(p.row, p.value)}</td></tr>`;
   return head + (p.children || []).map((c) => nasGtpcPartRows(c, depth + 1, indent0)).join('');
 }
 
 function nasGtpcPiggyRows(piggy) {
   return (piggy || []).map((pg) =>
-    `<tr><td colspan="3" style="padding:7px 3px 2px;font:600 11.5px var(--sans);color:var(--t3)">▸ 内嵌消息（piggybacked）：${pg.name}（帧 ${pg.hex.length / 2} 字节，重编码字节保真回嵌）</td></tr>` +
+    `<tr><td colspan="3" style="padding:7px 3px 2px;font:600 11.5px var(--sans);color:var(--t3)">▸ 内嵌消息（piggybacked）：${esc(pg.name)}（帧 ${pg.hex.length / 2} 字节，重编码字节保真回嵌）</td></tr>` +
     pg.parts.map((p) => nasGtpcPartRows(p, 0, 1)).join('') +
-    ((pg.warnings || []).length ? `<tr><td colspan="3" style="padding:2px 3px;font:400 11px var(--sans);color:#f1c21b">${pg.warnings.map((s) => `⚠ ${s}`).join('<br>')}</td></tr>` : '')
+    ((pg.warnings || []).length ? `<tr><td colspan="3" style="padding:2px 3px;font:400 11px var(--sans);color:#f1c21b">${pg.warnings.map((s) => `⚠ ${esc(s)}`).join('<br>')}</td></tr>` : '')
   ).join('');
 }
 
@@ -13822,14 +13963,14 @@ function nasDecodeFrom(hex) {
       <tr style="color:var(--t4)"><th style="text-align:left;padding:3px">行</th><th style="text-align:left;padding:3px">IE</th><th style="text-align:left;padding:3px">值</th></tr>
       ${parts.map((p) => nasGtpcPartRows(p, 0)).join('')}
       ${(piggy || []).length ? nasGtpcPiggyRows(piggy) : ''}
-      ${(warnings || []).length ? `<tr><td colspan="3" style="padding:3px;font:400 11px var(--sans);color:#f1c21b">${warnings.map((s) => `⚠ ${s}`).join('<br>')}</td></tr>` : ''}
-      ${smsSem.length ? `<tr><td colspan="3" style="padding:3px;font:400 11px var(--sans);color:#198038">${smsSem.map((s) => `📩 ${s}`).join('<br>')}</td></tr>` : ''}
-      ${l2pl.length ? `<tr><td colspan="3" style="padding:3px;font:400 11px var(--sans);color:var(--t3)">${l2pl.map((s) => `📏 ${s}`).join('<br>')}</td></tr>` : ''}
+      ${(warnings || []).length ? `<tr><td colspan="3" style="padding:3px;font:400 11px var(--sans);color:#f1c21b">${warnings.map((s) => `⚠ ${esc(s)}`).join('<br>')}</td></tr>` : ''}
+      ${smsSem.length ? `<tr><td colspan="3" style="padding:3px;font:400 11px var(--sans);color:#198038">${smsSem.map((s) => `📩 ${esc(s)}`).join('<br>')}</td></tr>` : ''}
+      ${l2pl.length ? `<tr><td colspan="3" style="padding:3px;font:400 11px var(--sans);color:var(--t3)">${l2pl.map((s) => `📏 ${esc(s)}`).join('<br>')}</td></tr>` : ''}
     </table>`;
   } catch (e) {
     nasState.decoded = null;
     nasState._decodedCtx = null;
-    $('nasDecOut').innerHTML = `<p style="font:400 12px var(--sans);color:#da1e28">${e.message}</p>`;
+    $('nasDecOut').innerHTML = `<p style="font:400 12px var(--sans);color:#da1e28">${esc(e.message)}</p>`;
   }
 }
 
@@ -14068,7 +14209,7 @@ function nasDoDiff() {
   nasState._chain = null;
   const color = { break: '#da1e28', warn: '#f1c21b', info: 'var(--t3)', ok: '#198038' };
   $('nasDiffOut').innerHTML = `
-    <p style="font:400 12px var(--sans);color:var(--t3);margin-bottom:8px">${lk} → ${rk}：break ${counts.break} · warn ${counts.warn} · info ${counts.info} · ok ${counts.ok}　<span class="dim">（点击带定位的条目跳到消息表）</span></p>
+    <p style="font:400 12px var(--sans);color:var(--t3);margin-bottom:8px">${esc(lk)} → ${esc(rk)}：break ${counts.break} · warn ${counts.warn} · info ${counts.info} · ok ${counts.ok}　<span class="dim">（点击带定位的条目跳到消息表）</span></p>
     <div style="max-height:420px;overflow:auto">
     ${findings.map((f) => `<div class="diff-finding" data-loc="${esc(JSON.stringify(f.loc || {}))}" style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--bd-faint);${f.loc && (f.loc.msg || f.loc.ref) ? 'cursor:pointer' : ''}">
       <span style="color:${color[f.severity]};font:600 10px var(--mono);width:40px;flex-shrink:0">${f.severity.toUpperCase()}</span>
@@ -14101,7 +14242,7 @@ function nasDoDiffChain() {
   const color = { break: '#da1e28', warn: '#f1c21b', info: 'var(--t3)', ok: '#198038' };
   const cells = (c) => ['break', 'warn', 'info', 'ok'].map((k) => `<td style="text-align:right;color:${c[k] ? color[k] : 'var(--t3)'}">${c[k]}</td>`).join('');
   $('nasDiffOut').innerHTML = `
-    <p style="font:400 12px var(--sans);color:var(--t3);margin-bottom:8px">链式 ${spec}：${entries.map((e) => esc(e.label)).join(' → ')}（${entries.length} 版本 / ${chain.segments.length} 段）</p>
+    <p style="font:400 12px var(--sans);color:var(--t3);margin-bottom:8px">链式 ${esc(spec)}：${entries.map((e) => esc(e.label)).join(' → ')}（${entries.length} 版本 / ${chain.segments.length} 段）</p>
     <table style="width:100%;border-collapse:collapse;font:12px var(--sans)">
       <thead><tr style="color:var(--t3)"><th style="text-align:left">段</th><th style="text-align:right">break</th><th style="text-align:right">warn</th><th style="text-align:right">info</th><th style="text-align:right">ok</th></tr></thead>
       <tbody>${chain.segments.map((s) => `<tr style="border-top:1px solid var(--bd-faint)"><td>${esc(s.from)} → ${esc(s.to)}</td>${cells(s.counts)}</tr>`).join('')}</tbody>
@@ -14109,7 +14250,7 @@ function nasDoDiffChain() {
     </table>
     <div style="max-height:320px;overflow:auto;margin-top:8px">
       ${chain.segments.map((s) => `<details style="margin:4px 0"><summary style="cursor:pointer;font:400 12px var(--sans)">${esc(s.from)} → ${esc(s.to)}：break ${s.counts.break} · warn ${s.counts.warn} · info ${s.counts.info} · ok ${s.counts.ok}</summary>
-        ${s.findings.map((f) => `<div class="diff-finding" data-loc="${esc(JSON.stringify(f.loc || {}))}" style="display:flex;gap:8px;padding:3px 0 3px 12px;${f.loc && (f.loc.msg || f.loc.ref) ? 'cursor:pointer' : ''}">
+        ${s.findings.map((f) => `<div class="diff-finding" data-loc="${esc(JSON.stringify(f.loc || {}))}" data-rk="${esc(spec + ' ' + s.to)}" style="display:flex;gap:8px;padding:3px 0 3px 12px;${f.loc && (f.loc.msg || f.loc.ref) ? 'cursor:pointer' : ''}">
           <span style="color:${color[f.severity]};font:600 10px var(--mono);width:40px;flex-shrink:0">${f.severity.toUpperCase()}</span>
           <span style="font:400 12px/1.5 var(--sans)">${esc(f.msg)}</span></div>`).join('') || '<p class="muted" style="padding-left:12px">无差异。</p>'}
       </details>`).join('')}
@@ -14123,9 +14264,10 @@ function nasDiffLocate(ev) {
   if (!el) return;
   let loc;
   try { loc = JSON.parse(el.dataset.loc || '{}'); } catch { return; }
-  const d = nasState._diff;
-  if (!d) return;
-  const schema = nasState.schemas[d.rk];
+  // v1.38.0 P3：链式 diff 原先 _diff 为 null 即整条早退——点击死交互。
+  // 链式 finding 自带 data-rk（段右版本），普通 diff 用 _diff.rk。
+  const rk = el.dataset.rk || (nasState._diff && nasState._diff.rk);
+  const schema = rk && nasState.schemas[rk];
   if (!schema) return;
   let msg = loc.msg && schema.messages[loc.msg] ? loc.msg : null;
   if (!msg && loc.ref) {
@@ -14151,6 +14293,86 @@ function nasDiffLocate(ev) {
     hit.scrollIntoView({ block: 'center' });
   } else {
     host.scrollIntoView({ block: 'start' });
+  }
+}
+
+// ---- GTP-U 隧道帧构造/解析（29.281 + 38.415 §5.5/§6，批次 AE UI 面）----
+// hex/kvparse/payload 纯函数在 src/ui/uifns.js（v1.39.0 可测化抽离）
+function gtpuWarnHtml(warns) {
+  return warns.length
+    ? warns.map((w) => '<div class="finding warn" style="cursor:default;padding:5px 10px;margin-bottom:4px"><span class="dot warn"></span><p style="margin:0;font:400 11.5px/1.5 var(--sans)">' + esc(String(w)) + '</p></div>').join('')
+    : '';
+}
+function gtpuBuildUi() {
+  const out = $('gtpuBuildOut');
+  try {
+    const teid = parseInt(String($('gtpuTeid').value).replace(/^0x/i, ''), 16) || 0;
+    const seqv = $('gtpuSeq').value.trim();
+    const payload = gtpuPayloadOf($('gtpuPayload').value.trim());
+    const exts = [];
+    const warns = [];
+    for (const pair of [['gtpuPscDl', 'dl'], ['gtpuPscUl', 'ul'], ['gtpuPset', 'pset']]) {
+      const kv = $(pair[0]).value.trim();
+      if (!kv) continue;
+      const f = gtpuKvParse(kv);
+      if (pair[1] === 'pset') {
+        for (const uk of pscUnknownKeys('pset', f)) warns.push('PSET 未知键 ' + uk.key + '（已忽略）' + (uk.near ? '——最近似正名 ' + uk.near : ''));
+        const c = pduSetInfo(f);
+        if (c.warnings) warns.push(...c.warnings);
+        exts.push({ type: 0x04, content: c });
+      } else {
+        for (const uk of pscUnknownKeys(pair[1], f)) warns.push('PSC ' + pair[1].toUpperCase() + ' 未知键 ' + uk.key + '（已忽略）' + (uk.near ? '——最近似正名 ' + uk.near : ''));
+        f.dir = pair[1];
+        const c = pduSessionInfo(f);
+        if (c.warnings) warns.push(...c.warnings);
+        exts.push({ type: 0x85, content: c });
+      }
+    }
+    const bytes = gtpuBuild({ teid, seq: seqv === '' ? null : Number(seqv), exts, payload });
+    if (bytes.warnings) warns.push(...bytes.warnings);
+    const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+    out.innerHTML = '<div class="hexout"><div class="hexstr">' + hex + '</div>'
+      + '<button class="btn sm" id="gtpuCopy">复制</button></div>'
+      + '<div style="font:400 11px var(--mono);color:var(--ink3);margin-top:4px">' + bytes.length + ' 字节 · 扩展头 '
+      + (exts.length ? exts.map((e) => '0x' + e.type.toString(16).padStart(2, '0')).join(' → ') + ' → 0x00' : '无') + '</div>'
+      + gtpuWarnHtml(warns);
+    $('gtpuCopy').addEventListener('click', function () { fallbackCopy(hex, function () {}); });
+  } catch (e) {
+    out.innerHTML = '<div class="finding warn" style="cursor:default"><span class="dot warn"></span><p style="margin:0">' + esc(e.message) + '</p></div>';
+  }
+}
+function gtpuDecUi() {
+  const out = $('gtpuDecOut');
+  try {
+    const bytes = gtpuHexToBytes($('gtpuHexIn').value);
+    const r = gtpuParse(bytes);
+    const rows = [];
+    rows.push('<div class="tnode"><span class="k">GTP-U</span> <span class="v">v' + r.hdr.ver + ' PT=' + r.hdr.pt + ' E=' + r.hdr.e + ' S=' + r.hdr.s + ' PN=' + r.hdr.pn + '</span> <span class="ty">type 0x' + r.hdr.type.toString(16) + ' len ' + r.hdr.length + ' teid 0x' + r.hdr.teid.toString(16).padStart(8, '0') + '</span></div>');
+    if (r.hdr.seq != null) rows.push('<div class="tnode"><span class="k">seq</span> <span class="v">' + r.hdr.seq + '</span> <span class="k">npdu</span> <span class="v">' + r.hdr.npdu + '</span> <span class="k">nextExt</span> <span class="v">0x' + r.hdr.nextExt.toString(16).padStart(2, '0') + '</span></div>');
+    for (const e of r.exts) {
+      rows.push('<div class="tnode"><span class="k">ext 0x' + e.type.toString(16).padStart(2, '0') + '</span> <span class="v">' + esc(GTPU_EXT_TYPES[e.type] || 'Unknown') + '</span> <span class="ty">len ' + e.length + ' content ' + gtpuBytesToHex(e.content) + ' next 0x' + e.next.toString(16).padStart(2, '0') + '</span></div>');
+      if (e.type === 0x85) {
+        try {
+          const psc = parsePduSessionInfo(e.content);
+          rows.push('<div class="tkids"><div class="tnode"><span class="k">PSC ' + psc.dir.toUpperCase() + '</span> <span class="v">' + esc(gtpuKvLine(psc, ['pduType', 'dir', 'warnings', 'futureRaw'])) + '</span></div>'
+            + (psc.futureRaw ? '<div class="tnode"><span class="k">futureRaw</span> <span class="v">' + gtpuBytesToHex(psc.futureRaw) + '</span></div>' : '')
+            + (psc.warnings || []).map((w) => '<div class="tnode"><span class="ty">⚠ ' + esc(w) + '</span></div>').join('') + '</div>');
+        } catch (err) { rows.push('<div class="tkids"><div class="tnode"><span class="ty">PSC 反解失败: ' + esc(err.message) + '</span></div></div>'); }
+      }
+      if (e.type === 0x04) {
+        try {
+          const ps = parsePduSetInfo(e.content);
+          rows.push('<div class="tkids"><div class="tnode"><span class="k">PSET</span> <span class="v">' + esc(gtpuKvLine(ps, ['pduType', 'warnings', 'futureRaw'])) + '</span></div>'
+            + (ps.futureRaw ? '<div class="tnode"><span class="k">futureRaw</span> <span class="v">' + gtpuBytesToHex(ps.futureRaw) + '</span></div>' : '')
+            + (ps.warnings || []).map((w) => '<div class="tnode"><span class="ty">⚠ ' + esc(w) + '</span></div>').join('') + '</div>');
+        } catch (err) { rows.push('<div class="tkids"><div class="tnode"><span class="ty">PSET 反解失败: ' + esc(err.message) + '</span></div></div>'); }
+      }
+    }
+    rows.push('<div class="tnode"><span class="k">payload</span> <span class="v">' + r.payload.length + 'B</span> <span class="ty">' + gtpuBytesToHex(r.payload).slice(0, 64) + (r.payload.length > 32 ? '…' : '') + '</span></div>');
+    for (const w of r.warnings || []) rows.push('<div class="tnode"><span class="ty">⚠ ' + esc(w) + '</span></div>');
+    out.innerHTML = '<div class="tree">' + rows.join('') + '</div>';
+  } catch (e) {
+    out.innerHTML = '<div class="finding warn" style="cursor:default"><span class="dot warn"></span><p style="margin:0">' + esc(e.message) + '</p></div>';
   }
 }
 
@@ -14250,7 +14472,7 @@ function nasSecDecode() {
   try {
     const d = decSec(schema, OCT(hexIn), nasState.spec);
     nasState.secFrame = d;
-    const rowsHtml = d.inner ? d.inner.parts.map((p) => `<tr><td style="padding:2px 6px 2px 0;color:var(--t4)">${p.row.name}</td><td>${
+    const rowsHtml = d.inner ? d.inner.parts.map((p) => `<tr><td style="padding:2px 6px 2px 0;color:var(--t4)">${esc(p.row.name)}</td><td>${
       p.value == null ? '—' : typeof p.value === 'number' ? `0x${p.value.toString(16)}` : Array.from(p.value).map((b) => b.toString(16).padStart(2, '0')).join('')
     }</td></tr>`).join('') : '';
     host.innerHTML = `
@@ -14259,7 +14481,7 @@ function nasSecDecode() {
         ${d.inner ? `<table style="margin-top:6px;font:11.5px var(--mono);border-collapse:collapse"><tr style="color:var(--t4)"><th style="text-align:left;padding:2px 6px 2px 0">IE</th><th style="text-align:left;padding:2px">值</th></tr>${rowsHtml}</table>` : (d.payload.length ? `<div style="margin-top:4px">载荷 hex：<span style="font:11.5px var(--mono)">${Array.from(d.payload).map((b) => b.toString(16).padStart(2, '0')).join('')}</span></div>` : '')}
       </div>`;
   } catch (e) {
-    host.innerHTML = `<p style="font:400 12px var(--sans);color:#da1e28">${e.message}</p>`;
+    host.innerHTML = `<p style="font:400 12px var(--sans);color:#da1e28">${esc(e.message)}</p>`;
   }
 }
 
@@ -14273,7 +14495,7 @@ function nasSecEncode() {
       const d = decSec(nasCur() || { messages: {} }, OCT(plainHex), nasState.spec);
       if (!d.readable) { host.innerHTML = '<p style="font:400 12px var(--sans);color:#da1e28">当前输出是加密载荷的安全帧——先「解密载荷→写回解码」拿到明文再封装。</p>'; return; }
       plainHex = Array.from(d.payload, (b) => b.toString(16).padStart(2, '0')).join('');
-    } catch (e) { host.innerHTML = `<p style="font:400 12px var(--sans);color:#da1e28">${e.message}</p>`; return; }
+    } catch (e) { host.innerHTML = `<p style="font:400 12px var(--sans);color:#da1e28">${esc(e.message)}</p>`; return; }
   }
   if (!plainHex) { inlineMsg('nasSecOut', '先在左侧编码出明文 NAS 消息（或随机采样）。'); return; }
   const sht = parseInt($('nasSecSht').value, 10);
@@ -14296,7 +14518,7 @@ function nasSecEncode() {
       ? `<p style="font:400 12px var(--sans);color:#198038">已按 EEA${nasState.secKeys.algEnc} 加密 ${payload.length} 字节封装 SHT=${sht} 帧（MAC 覆盖密文：<span style="font:11.5px var(--mono)">${hx(mac)}</span>）写入编码输出/解码输入——「校验左侧帧 MAC」或「解密载荷→写回解码」可回验。</p>`
       : `<p style="font:400 12px var(--sans);color:#198038">已封装 SHT=${sht} 帧（载荷 ${payload.length} 字节明文，MAC ${nasState.secKeys ? '自动计算' : '透明域手填'}：<span style="font:11.5px var(--mono)">${hx(mac)}</span>）——「解安全帧」可回验。</p>`;
   } catch (e) {
-    host.innerHTML = `<p style="font:400 12px var(--sans);color:#da1e28">${e.message}</p>`;
+    host.innerHTML = `<p style="font:400 12px var(--sans);color:#da1e28">${esc(e.message)}</p>`;
   }
 }
 
