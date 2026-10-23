@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.44.0";
+const APP_VERSION = "1.45.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -11693,7 +11693,7 @@ function ipv6(rng) { return Array.from({ length: 16 }, () => rndByte(rng)); }
 // 变化），非「激活」。名字链缺口（29274 ies 名 'Metric' ≠ 组行名 'Load Metric'）已在
 // v1.43.0 AK P3-13 修复：语义分支未命中时兜底查行名（见 gtpcSampleValue/pfcpSampleValue）。
 // PFCP（semanticPfcpValue）同口径防御。
-function semanticGtpValue(name, rng) {
+function semanticGtpValue(name, rng, spec) {
   const n = String(name || '').trim().replace(/\s*\(\d+(?:\.\d+)*\)\s*$/, '').toUpperCase();
   if (/^(INTERNATIONAL MOBILE SUBSCRIBER IDENTITY \(IMSI\)|IMSI|ALTERNATIVE IMSI|C-MSISDN|MSISDN)$/.test(n)) {
     return Uint8Array.from(bcdDigits(rng, 5 + Math.floor(rng() * 11))); // 5..15 位 BCD
@@ -11725,8 +11725,22 @@ function semanticGtpValue(name, rng) {
     return Uint8Array.from([0x00, 0x01, 0x41 + Math.floor(rng() * 26)]);
   }
   if (n === 'NODE IDENTIFIER') {
-    // 8.107：Length of Node Name 与 Node Name 字节数一致（本布局建模 1 字节名称）
+    // 8.107（29274）/ 7.7.119（29060）：两侧 tshark 解剖器相反——AM 批（v1.45.0）探针：
+    // GTPv2 侧期待四段 nameLen+name+realmLen+realm（值 [01 6b] 两段在 Context Response
+    // 判违停 gtpv2.node_name，[01 6b 00]/[01 6b 01 6f]/name3+realm4 全净）——29274 五版
+    // 29 帧 lastIe=176 病根（schema 布局摄取只有 len/name 两行，realm 段由本分支补足）；
+    // GTPv1 侧实读 realmLen+realm（探针 C1：值 [01 6b] 解为 Node name 空/Node realm 'k'
+    // 干净）——保持 2B 现状。spec 区分两侧同名异构。
+    if (spec === '29274') return Uint8Array.from([0x01, 0x61 + Math.floor(rng() * 26), 0x01, 0x61 + Math.floor(rng() * 26)]);
     return Uint8Array.from([0x01, 0x61 + Math.floor(rng() * 26)]);
+  }
+  if (/^USER LOCATION INFORMATION/.test(n) && spec === '29274') {
+    // 8.21（GTPv2 侧）：oct5 八个存在标志与后续条件字段体必须自洽——位布局随机 flags
+    // （实测帧 0x83=ExtMacro+SAI+CGI）而体字节缺席，tshark 按标志读 e212.* 越界（AM 探针：
+    // [83] 判违、RAI+3B 越界判违；空 flags 干净，RAI+6B / CGI+7B 亦净——采最小一致内容
+    // 空 flags=空 ULI 合法形态）。同名 29.060 §7.7.51 ULI 结构相反（纯 RAI 六字节体、
+    // 无 flags 字节，现状布局采样即合法）——spec 限定防误伤 29060。
+    return Uint8Array.from([0x00]);
   }
   if (n === 'NODE NUMBER') {
     // 8.106：Length of Node Number 与内容字节数一致（节点号为数字串）
@@ -11740,11 +11754,15 @@ function semanticGtpValue(name, rng) {
     // 8.108：oct9..14 计数域（TAI/RAI/MeNB/HeNB/ECGI/SAI/CGI）与变长列表必须自洽——
     // 位布局随机计数（实测帧 NoTAI=12/RAI=5/ECGI=16）而列表字节缺席，tshark 逐条越界
     // 异常（29274 五版 21 帧 malformed 主因；AL 批探针同时证伪「Action 0x07 超枚举」
-    // 假设：0..7 全被解剖、0 标 Unknown 也接受，tshark 实读 2 bit，bit3 留 0）。
-    // 最小一致内容：oct5 = INAPRA(bit4)|Action(命名值 1..3) + PRI 3 字节随机标识 +
-    // 计数全 0（空列表=合法形态）。TAI 条目 5 字节已实证（1×4B/1×6B 判违、15×5B 干净）；
-    // RAI 计数>1 有未解怪癖（1×6B 干净/2×6B 判违）——列表建模暂不启用。
-    const oct5 = (Math.floor(rng() * 2) << 4) | (1 + Math.floor(rng() * 3));
+    // 假设：0..7 全被解剖、0 标 Unknown 也接受）。
+    // 最小一致内容：oct5 = Spare(bits8:5 全 0)|INAPRA(bit4)|Action(命名值 1..3，占 bits3:1)
+    // + PRI 3 字节随机标识 + 计数全 0（空列表=合法形态）。AM-1 勘正（v1.45.0，AL 评审
+    // P2-AL1）：原 <<4 把 INAPRA 写进 Spare 区（bit5=0x10），规范/schema 摄取/tshark
+    // 三源一致 bit4=0x08；同批 P3-AL1 勘正「实读 2 bit」表述——tshark action mask=0x03，
+    // 对定义值 0..3 与规范 3 位（0x07）解码等价（0x07→Modify(3) 逐值实证），仅 v≥4
+    // 越界值分歧，Action 仍按规范 3 位写 1..3。TAI 条目 5 字节已实证（1×4B/1×6B 判违、
+    // 15×5B 干净）；RAI 计数>1 有未解怪癖（1×6B 干净/2×6B 判违）——列表建模暂不启用。
+    const oct5 = (Math.floor(rng() * 2) << 3) | (1 + Math.floor(rng() * 3));
     return Uint8Array.from([oct5, rndByte(rng), rndByte(rng), rndByte(rng), 0, 0, 0, 0, 0, 0]);
   }
   if (/^FULLY QUALIFIED TEID \(F-TEID\)$/.test(n)) {
@@ -11945,8 +11963,8 @@ function gtpcSampleValue(r, schema, rng, depth = 0) {
     // 'Metric' vs 组行名 'Load Metric'，精确分支按条目名永不命中 → 布局随机 0..255 全域，
     // >100 会被独立实现方判非法；行名回退后命中 LOAD METRIC 0..100 约束。全族探针实测
     // 新增命中仅 3 处：29274 Load Metric×1 + 29060 行名 'MSISDN'×2，29244 为 0）。
-    const sem = semanticGtpValue(ie.name, rng)
-      || (r.name && r.name !== ie.name ? semanticGtpValue(r.name, rng) : null);
+    const sem = semanticGtpValue(ie.name, rng, schema.spec)
+      || (r.name && r.name !== ie.name ? semanticGtpValue(r.name, rng, schema.spec) : null);
     if (sem) return sem;
     if (ie.layouts && ie.layouts[0] && ie.layouts[0].octets.length) {
       const { bytes } = layoutSample(ie.layouts[0].octets, rng, false);
@@ -12079,7 +12097,7 @@ function gtpv1SampleValue(r, schema, rng) {
   if (ref) {
     const ie = schema.ies[ref];
     if (ie) {
-      const sem = semanticGtpValue(ie.name, rng);
+      const sem = semanticGtpValue(ie.name, rng, schema.spec);
       // 定长行（TV）须与声明长度一致，否则回退布局采样（布局本身已按位表产出合法值）
       if (sem && (r.format === 'TLV' || fixed == null || sem.length === fixed)) return sem;
     }
