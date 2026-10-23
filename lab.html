@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.43.0";
+const APP_VERSION = "1.44.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -11735,6 +11735,17 @@ function semanticGtpValue(name, rng) {
   if (n === 'LOAD METRIC') {
     // 29.274 §8.xxx：Load Metric 取值 0..100（百分比）——随机全域会被独立实现方判非法。
     return Uint8Array.from([Math.floor(rng() * 101)]);
+  }
+  if (n === 'PRESENCE REPORTING AREA ACTION') {
+    // 8.108：oct9..14 计数域（TAI/RAI/MeNB/HeNB/ECGI/SAI/CGI）与变长列表必须自洽——
+    // 位布局随机计数（实测帧 NoTAI=12/RAI=5/ECGI=16）而列表字节缺席，tshark 逐条越界
+    // 异常（29274 五版 21 帧 malformed 主因；AL 批探针同时证伪「Action 0x07 超枚举」
+    // 假设：0..7 全被解剖、0 标 Unknown 也接受，tshark 实读 2 bit，bit3 留 0）。
+    // 最小一致内容：oct5 = INAPRA(bit4)|Action(命名值 1..3) + PRI 3 字节随机标识 +
+    // 计数全 0（空列表=合法形态）。TAI 条目 5 字节已实证（1×4B/1×6B 判违、15×5B 干净）；
+    // RAI 计数>1 有未解怪癖（1×6B 干净/2×6B 判违）——列表建模暂不启用。
+    const oct5 = (Math.floor(rng() * 2) << 4) | (1 + Math.floor(rng() * 3));
+    return Uint8Array.from([oct5, rndByte(rng), rndByte(rng), rndByte(rng), 0, 0, 0, 0, 0, 0]);
   }
   if (/^FULLY QUALIFIED TEID \(F-TEID\)$/.test(n)) {
     // 8.22：V4/V6 双 0（不带地址，仅 TEID）+ Interface Type 低 6 位；TEID 4 字节。

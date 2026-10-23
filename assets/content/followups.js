@@ -905,6 +905,30 @@
         a: '三份共用 **sd-RSRP-ThreshDiscConfigMH** 与 **sd-hystMaxRelayMH**，输入统一是 **Candidate Child 的 Model B 消息 SD-RSRP**：**① Last 且无 child PC5** → 发送 Discovery Response；**② Intermediate 且无 parent PC5** → 发送 Discovery Solicitation（向上找 parent）；**③ Intermediate 且有 parent PC5** → 发送 Discovery Response。进入=高出阈值加迟滞，离开=低于阈值减迟滞。衔接：First/Intermediate 连 parent 前要先以 Remote 身份过 .15.2 门限（M70 课 d1/d2/d3/f6）。',
         ref: '38.331#5.8.19.2' }
     ] },
+    'm71:q0': { levels: [
+      { q: '发现与定位这两节，和 M70 的分工怎么一句话说清？',
+        a: '**M70 管判据、本课管流程**。§5.8.14–.19 的门限与选择重选回答「够不够格、选谁」；§5.8.13/.18 回答「消息怎么发、池从哪来」：发现=**监控**（.13.2 在哪个池听）+**传输**（.13.3 何时可发、用哪个池），定位=**测量**（.18.2 收 SCI 与 SL-PRS）+**传输**（.18.3 发 SL-PRS）。.13.3 的十一条角色条件正是对 M70 各门限的调用点，同一事实不在两课重复展开（M71 课 h0/a1）。',
+        ref: '38.331#5.8.13.1' },
+      { q: '三套配置源和覆盖态怎么对应？定位为什么多一张 SIB23？',
+        a: '**CONNECTED 用 RRC 专用**（sl-ConfigDedicatedNR：sl-DiscConfig、sl-DiscTxPoolSelected、角色 *Config 族）；**覆盖内空闲用 SIB12**（sl-DiscConfigCommon、公共池、*ConfigCommon 族）；**覆盖外用预配置**（SL-PreconfigurationNR / SidelinkPreconfigNR，9.3，池与 *Preconfig 族）。**SIB23 是定位专属**：sl-PosFreqInfoList 与 sl-PosConfigCommonNR 提供 SL-PRS 频率与池，配 sl-PRS-RxPool/sl-PRS-TxPoolSelectedNormal/sl-PRS-TxPoolExceptional 与 sl-PosAllowedResourceSelectionConfig——发现侧不查 SIB23（M71 课 a2/a3）。',
+        ref: '38.331#5.8.18.2' }
+    ] },
+    'm71:q2': { levels: [
+      { q: '监控池的三级与每级内部的优先级怎么记？',
+        a: '**三级源**：handover 的 RRCReconfiguration（with reconfigurationWithSync）→ 所选小区的 SIB12 → 覆盖外预配置（SL-PreconfigurationNR，9.3）。**每级内部同一序**：发现专用池 **sl-DiscRxPool 优先**，通用池 **sl-RxPool 兜底**。**NOTE 的豁免**：若两池同时在 SIB12 或同时被预配置，用哪个由 UE 实现决定——所以硬优先级只在「只配了其中一个」时成立。**覆盖外不是停摆**：切到预配置池继续监控（M71 课 b1/b2/b3/f1/f2）。',
+        ref: '38.331#5.8.13.2' },
+      { q: '传输侧十一条角色条件为什么是 OR，非中继发现又怎么选池？',
+        a: '十一条 3> 级条件以「or」连接——**任一成立即可发**；每条内部是 AND：角色 + **sl-DiscConfig 在 RRCReconfiguration** + 对应门限（5.8.14.2/.15.2/.16.2/.16.3/.17.2/.19.2）。角色条件都不成立时，若做**非中继发现**：**调度配置**下三定时器（T310/T311、T301、T304）→ 例外池 **mode 2 随机选择**，否则 **mode 1**（sl-DiscTxPoolScheduling/sl-TxPoolScheduling）；**自选配置**下 sensing 不可用→例外池，否则 **sl-DiscTxPoolSelected → sl-TxPoolSelectedNormal**（M71 课 c1/c3/f3/f4）。',
+        ref: '38.331#5.8.13.3' }
+    ] },
+    'm71:q4': { levels: [
+      { q: 'SIB12 分支与覆盖外分支跟专用配置有什么差异？',
+        a: '**SIB12 分支**：十一条角色条件换 *Common 族照走，但 **Intermediate Model A 多一条前提**——has an established PC5 link with the selected parent U2N Relay UE（专用分支没有）；非中继发现三档：sl-DiscTxPoolSelected（sensing 可用或允许随机选择）→ sl-TxPoolSelectedNormal → 例外池（含「发起 RRC 建立/恢复起、到 RRCReconfiguration/RRCRelease/RRCReject 止」的窗口）。**覆盖外分支**：换 *Preconfig 族，**首条 L3 U2N Relay UE 无条件**（不查门限），Intermediate Model A 仍要求已与 parent 建 PC5；非中继发现直接 mode 2 资源选择（M71 课 c2/c4/f5）。',
+        ref: '38.331#5.8.13.3' },
+      { q: '定位传输为什么用 scheme 1/scheme 2，sensing 为什么只写 full？',
+        a: '**术语**：发现侧写 **mode 1/mode 2**，定位侧写 **scheme 1/scheme 2**——同一层概念两套写法，原文按节各写各的。**scheme 1 只出现一处**：配了 sl-ScheduledConfig 且三定时器例外都不成立时（有调度配置的正常路径）；例外成立则 **scheme 2 随机选择**（sl-PRS-TxPoolExceptional/sl-TxPoolExceptional）。**sensing**：定位只写 **full sensing**（按 sl-PosAllowedResourceSelectionConfig），发现侧才是 **full/partial**——别照搬。另有原文细节：.18.3 内嵌 NOTE: Void；SIB23 分支一处写作 sl-PosTxPoolSelectedNormal（少一个 R）（M71 课 d2/d3/d4/f6）。',
+        ref: '38.331#5.8.18.3' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

@@ -626,7 +626,7 @@
         '每步大白话讲解 + 面试考法标注 + 结课自测',
         '买一次，浏览器本地永久离线可用'
       ];
-      var price = gate.price || '完整版 71 模块（M0–M70）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
+      var price = gate.price || '完整版 72 模块（M0–M71）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
       root.innerHTML = '';
       var w = el('div', 'gate-wrap');
       var c = el('div', 'gate');
@@ -639,7 +639,7 @@
         '<div class="g-actions">' +
         '<button class="btn primary" data-act="unlock">完整版解锁码</button>' +
         '<a class="btn" href="index.html">返回目录</a></div>' +
-        '<p class="g-note">免费层（Free Edition）：本站开放 M0–M3 四课与全部工具页；M4–M70 共 67 个模块属完整版，获取方式见仓库 README。</p>';
+        '<p class="g-note">免费层（Free Edition）：本站开放 M0–M3 四课与全部工具页；M4–M71 共 68 个模块属完整版，获取方式见仓库 README。</p>';
       w.appendChild(c); root.appendChild(w);
       c.querySelector('[data-act="unlock"]').onclick = function () {
         store.setLicense({ demo: true });
@@ -658,7 +658,7 @@
     { key: 'nas', no: '04', short: 'NAS 与核心网', name: 'NAS 与核心网 · 信封的外层', desc: '注册与会话这一层的全套：5G NAS、5GC 会话流程、隧道与转发面信令（GTP-C/PFCP）、网络切片专课（S-NSSAI 的旅程）、EPS 侧 EMM/ESM 专章，加上 SBA 服务化架构（NRF/发现/token）、PDU 会话信令专课与 Service Request 专课。', mods: ['mn', 'mg', 'mb', 'me', 'mr', 'mo', 'mm', 'mns'] },
     { key: 'low', no: '05', short: '空口底层', name: '空口底层 · 信令脚下的地基', desc: '信令之前的那一秒：MAC 怎么敲门、物理层怎么把比特搬上无线帧、QoS 流怎么绑进承载（5QI/SDAP 专课）——学完上层再下井，豁然开朗。', mods: ['mc', 'mf', 'mq'] },
     { key: 'cross', no: '06', short: '安全与对照', name: '安全与两代对照 · 横切视角收官', desc: '密钥树怎么一级级长出来（33.501 骨架课+密钥层级深潜课）、4G/5G 同一流程并排看，外加把 PHY→MAC→RLC→PDCP→RRC→NAS 六层串成一条尸检链的跨层排障毕业课——横穿所有层的收官课组。', mods: ['ms', 'ml', 'mj', 'mau'] },
-    { key: 'apps', no: '07', short: '业务与垂直', name: '业务与垂直 · 信令的应用现场', desc: '信令学完去哪用：IMS 语音（SIP 注册到挂断+字段级解剖）、定位（LPP/NRPPa）、五大垂直特性速览（NTN/RedCap/Sidelink/MBS/IAB）、NTN 与 RedCap 纵深课——卫星直连把定时与位置变成账本（SIB19/epochTime/T430/卫星切换预告），轻量终端全线瘦身（专用 barring/放宽测量/省电偏好上报）、Sidelink 纵深课——UE↔UE 直连的 PC5 侧 RRC（兴趣上报/SLSS 同步/PC5-RRC 重配/RLF 兜底）、MBS 纵深课——广播与多播的 RRC 侧（MCCH 桌牌/MBS Interest Indication/G-RNTI 停监控/resume 兜底）、IAB 纵深课——给基站装上无线尾巴（donor 与 MT/DU 双角色/SIB1 门槛与集成四阶段/回程 RLF 换父恢复/授权与移动 IAB）、Sidelink 中继纵深课——UE 当路由器的架构账（SRAP 逐跳终结/local ID 映射与发现选择/U2N 控制面建连与代收/三类路径切换与 U2U 十步建链）、多路径中继纵深课——直连与中继同开的双路径架构（三类承载/两条间接路 SL 与 N3C/四条路径管理流程/路径失败上报与 SI 双路）、环境物联网课——零电池标签与 gNB-reader 的完整账（R2D/D2R 两套物理信道与 MAC 机器/CBRA 与 CFA 两种访问/Inventory·Command·Release 三条 NG-C 流程/本版本三「不」边界）、Sidelink 增强架构课——PC5 直连的增强与演进而（三模式与四栈/Mode 1·2 发牌与省电账/SL DRX 与 Uu 控制/IUC·SL-U·SL CA 演进三件）、MBS 架构课——广播与多播的完整账（两族服务与三层架构/L2 裁剪与 MRB 菜单/MTCH·DTCH·MCCH 三信道与 RNTI/Shared·Individual 交付与 PDCP COUNT 同步/无损切换与 INACTIVE 不断线/广播 MCCH 四原则与 CFR 地皮/两条腿与 DRX 两态两账/不支持清单总装）、NTN 架构课——卫星直连的完整账（两载荷三小区/Mapped Cell ID 五用两不用/Common TA 与两偏移/预补偿守门/位置与国界/CHO 三触发与卫星重同步/switchover TNL 台子/覆盖与容量增强/ISA 与半双工/NG Removal）、切片与专网课——网络身份的完整账（S-NSSAI 与 NSAG 的切片资源账/Allowed 三张名单与 AMF 三条选路/NG 与 Xn 两种切换门槛/SNPN 的 PLMN ID+NID 与 onboarding/PNI-NPN 的 CAG 门禁与寻呼）、URLLC 与 TSN 课——低时延与确定性（LCP 限制与包复制的多腿/10⁻⁵ CQI 与 MCS-C-RNTI/两条冗余路径/PUCCH 小区切换与共享频谱 CG 重传/10 ns 时间参考与 PDC/TSCAI 与 survival time/SIB9 时钟质量/L4S 的 CE 标记与 TSN 传输网边界）、公共告警与空天收边课——公共告警、轻量终端与空中接口收边（PWS 广播与寻呼触发/IMS 紧急与 eCall 回退/灾难漫游 AI 3/RedCap 与 eRedCap 门禁与省电/空中终端高度航路 A2X/ATG GNSS 预补偿/AI-ML 原则与数据采集/2Rx XR 门禁）、空口演进课——Multi-USIM、空口 AI/ML 与 SBFD（双卡寻呼避撞/切网通知与调度间隙/能力临时限制/AI-ML 波束与 CSI 预测/适用性上报与监测/SBFD 子带与随机接入）、Sidelink 无线承载管理课——SLRB 三族全账（DRB 释放九触发与 PDCP→SDAP→RLC 释放层级/增改四件套与 NOTE 1 同 RLC mode 选型/SRB 三触发与 allowed carrier 预指示/附加 RLC 承载四释放条件与 received-transmitted 镜像语法/SL-TxProfile 二值与两腿载波不重叠）（38.331 §5.8.9.1a）、Sidelink 中继控制与承载面课——UE 当路由器时的五件账：PC5 Relay RLC 信道按 per-hop QoS 派生与生死（派生/释放/增改铺底）、远端需求单（SIB/posSIB/寻呼/SFN-DFN/connectionForMP）与中继四路服务、Uu 消息转移四触发与两侧接收、Notification 三角色发起与三套指示字段、U2U QoS split 请求-响应闭环（38.331 §5.8.9.7–.11）、Sidelink 中继操作课——Relay 与 Remote 四角色×门限/选择重选/近邻三机制轴（U2N 双门限带与单门限/选择重选触发与候选 AS 判据/U2U 两套消息门限与近邻通告/两条发现路径动作/多跳 Last 与 Intermediate 三份门限）（38.331 §5.8.14–.19）——应用现场的二十一门课。', mods: ['mv', 'md', 'mk', 'mw', 'm49', 'm50', 'm51', 'm52', 'm55', 'm56', 'm57', 'm58', 'm59', 'm60', 'm61', 'm62', 'm63', 'm64', 'm68', 'm69', 'm70'] },
+    { key: 'apps', no: '07', short: '业务与垂直', name: '业务与垂直 · 信令的应用现场', desc: '信令学完去哪用：IMS 语音（SIP 注册到挂断+字段级解剖）、定位（LPP/NRPPa）、五大垂直特性速览（NTN/RedCap/Sidelink/MBS/IAB）、NTN 与 RedCap 纵深课——卫星直连把定时与位置变成账本（SIB19/epochTime/T430/卫星切换预告），轻量终端全线瘦身（专用 barring/放宽测量/省电偏好上报）、Sidelink 纵深课——UE↔UE 直连的 PC5 侧 RRC（兴趣上报/SLSS 同步/PC5-RRC 重配/RLF 兜底）、MBS 纵深课——广播与多播的 RRC 侧（MCCH 桌牌/MBS Interest Indication/G-RNTI 停监控/resume 兜底）、IAB 纵深课——给基站装上无线尾巴（donor 与 MT/DU 双角色/SIB1 门槛与集成四阶段/回程 RLF 换父恢复/授权与移动 IAB）、Sidelink 中继纵深课——UE 当路由器的架构账（SRAP 逐跳终结/local ID 映射与发现选择/U2N 控制面建连与代收/三类路径切换与 U2U 十步建链）、多路径中继纵深课——直连与中继同开的双路径架构（三类承载/两条间接路 SL 与 N3C/四条路径管理流程/路径失败上报与 SI 双路）、环境物联网课——零电池标签与 gNB-reader 的完整账（R2D/D2R 两套物理信道与 MAC 机器/CBRA 与 CFA 两种访问/Inventory·Command·Release 三条 NG-C 流程/本版本三「不」边界）、Sidelink 增强架构课——PC5 直连的增强与演进而（三模式与四栈/Mode 1·2 发牌与省电账/SL DRX 与 Uu 控制/IUC·SL-U·SL CA 演进三件）、MBS 架构课——广播与多播的完整账（两族服务与三层架构/L2 裁剪与 MRB 菜单/MTCH·DTCH·MCCH 三信道与 RNTI/Shared·Individual 交付与 PDCP COUNT 同步/无损切换与 INACTIVE 不断线/广播 MCCH 四原则与 CFR 地皮/两条腿与 DRX 两态两账/不支持清单总装）、NTN 架构课——卫星直连的完整账（两载荷三小区/Mapped Cell ID 五用两不用/Common TA 与两偏移/预补偿守门/位置与国界/CHO 三触发与卫星重同步/switchover TNL 台子/覆盖与容量增强/ISA 与半双工/NG Removal）、切片与专网课——网络身份的完整账（S-NSSAI 与 NSAG 的切片资源账/Allowed 三张名单与 AMF 三条选路/NG 与 Xn 两种切换门槛/SNPN 的 PLMN ID+NID 与 onboarding/PNI-NPN 的 CAG 门禁与寻呼）、URLLC 与 TSN 课——低时延与确定性（LCP 限制与包复制的多腿/10⁻⁵ CQI 与 MCS-C-RNTI/两条冗余路径/PUCCH 小区切换与共享频谱 CG 重传/10 ns 时间参考与 PDC/TSCAI 与 survival time/SIB9 时钟质量/L4S 的 CE 标记与 TSN 传输网边界）、公共告警与空天收边课——公共告警、轻量终端与空中接口收边（PWS 广播与寻呼触发/IMS 紧急与 eCall 回退/灾难漫游 AI 3/RedCap 与 eRedCap 门禁与省电/空中终端高度航路 A2X/ATG GNSS 预补偿/AI-ML 原则与数据采集/2Rx XR 门禁）、空口演进课——Multi-USIM、空口 AI/ML 与 SBFD（双卡寻呼避撞/切网通知与调度间隙/能力临时限制/AI-ML 波束与 CSI 预测/适用性上报与监测/SBFD 子带与随机接入）、Sidelink 无线承载管理课——SLRB 三族全账（DRB 释放九触发与 PDCP→SDAP→RLC 释放层级/增改四件套与 NOTE 1 同 RLC mode 选型/SRB 三触发与 allowed carrier 预指示/附加 RLC 承载四释放条件与 received-transmitted 镜像语法/SL-TxProfile 二值与两腿载波不重叠）（38.331 §5.8.9.1a）、Sidelink 中继控制与承载面课——UE 当路由器时的五件账：PC5 Relay RLC 信道按 per-hop QoS 派生与生死（派生/释放/增改铺底）、远端需求单（SIB/posSIB/寻呼/SFN-DFN/connectionForMP）与中继四路服务、Uu 消息转移四触发与两侧接收、Notification 三角色发起与三套指示字段、U2U QoS split 请求-响应闭环（38.331 §5.8.9.7–.11）、Sidelink 中继操作课——Relay 与 Remote 四角色×门限/选择重选/近邻三机制轴（U2N 双门限带与单门限/选择重选触发与候选 AS 判据/U2U 两套消息门限与近邻通告/两条发现路径动作/多跳 Last 与 Intermediate 三份门限）（38.331 §5.8.14–.19）、Sidelink 发现与定位课——发现与定位的资源池账（监控触发两且与三级池/传输十一条角色条件×三源/非中继发现的定时器例外与 sensing/SL-PRS 测量与传输与 SIB23）（38.331 §5.8.13/.18）——应用现场的二十二门课。', mods: ['mv', 'md', 'mk', 'mw', 'm49', 'm50', 'm51', 'm52', 'm55', 'm56', 'm57', 'm58', 'm59', 'm60', 'm61', 'm62', 'm63', 'm64', 'm68', 'm69', 'm70', 'm71'] },
     { key: 'jobs', no: '08', short: '测试与终端', name: '测试与终端 · 岗位直通', desc: '与求职岗位最短路径的课程：一致性测试线（怎么给手机发合格证）、卡与终端（USIM 与一条短信的旅程），外加毕业课——全站知识地图与 JD 面试总攻（八域纵览/学习路径/三岗课单/综合检验）——全站收官。', mods: ['mt', 'mu', 'm53'] }
   ];
   var Hub = {
@@ -799,7 +799,7 @@
       function renderLic() {
         lic = store.license();
         licCard.innerHTML =
-          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0–M3 与全部工具页；完整版（M4–M70）获取方式见 README。</div></div>' +
+          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0–M3 与全部工具页；完整版（M4–M71）获取方式见 README。</div></div>' +
           '<div style="display:flex;gap:8px;align-items:center">' +
           '<span class="license-state' + (lic.demo ? ' on' : '') + '">' + (lic.demo ? '完整版用户' : '免费层') + '</span>' +
           '<button class="btn sm" data-act="export-progress" title="生成 Markdown 学习进度单（完成态/测验分/下一步建议）">导出学习进度</button>' +
@@ -863,7 +863,7 @@
       headRow.appendChild(expandBtn);
       root.appendChild(headRow);
       root.appendChild(viewbar);
-      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程、M1 连接建立、M2 系统消息与 M3 寻呼与 DRX + 全部工具页；M4–M70 属完整版。'));
+      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程、M1 连接建立、M2 系统消息与 M3 寻呼与 DRX + 全部工具页；M4–M71 属完整版。'));
       root.appendChild(tools);
       root.appendChild(pathView); pathView.style.display = 'none';
 
