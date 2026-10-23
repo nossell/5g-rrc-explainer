@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.45.0";
+const APP_VERSION = "1.48.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -11340,8 +11340,33 @@ function buildSchema44018(structured, fillBits, fillValueTables, fillCsn1) {
     if (!out[m.name]) out[m.name] = [];
     out[m.name].push(inst);
   }
+  // AP 批（v1.48.0）：跨规范悬空 ref 显性化——消息行 ref/def 指向本库不存在节，且非
+  // 10.2/10.4 头部委托（PD/Message Type 由 24.008 委托管线 + pd/msgType 字段处理，预期
+  // 悬空）。v5 计划「fill-44060 并池 16 名」前提经三池对拍（44.060 ies 152 节 / csn1
+  // 197 表 / bits 空）证不成立：0/21 可补——44.060 ingest 未捕获 §11 位图定义（深修列
+  // 长期池首位）；显性记账防再误估，44.118 'RADIO BEARER RECONFIGURATION 3GPP TS'
+  // （规范 typo/引用错乱）随清单入档。
+  const skipHdr = /^(10\.2|10\.4[a-z]?)$/;
+  const dangling = new Map();
+  for (const insts of Object.values(out)) {
+    for (const inst of insts) {
+      for (const r of inst.rows) {
+        const v = String(r.ref || r.def || '').trim();
+        if (v && !skipHdr.test(v) && !ies[v]) {
+          const key = `${v}|${r.name || ''}`;
+          dangling.set(key, (dangling.get(key) || 0) + 1);
+        }
+      }
+    }
+  }
+  const danglingRefs = [...dangling.entries()]
+    .map(([k, n]) => { const i = k.indexOf('|'); return { sec: k.slice(0, i), name: k.slice(i + 1), rows: n }; })
+    .sort((a, b) => a.sec.localeCompare(b.sec));
+  if (danglingRefs.length) {
+    problems.push(`跨规范悬空 ref ${danglingRefs.length} 名 ×${danglingRefs.reduce((s, d) => s + d.rows, 0)} 行（44.060 产物池无对应定义源——0 可补，立档；清单见 build.danglingRefs）`);
+  }
   return {
-    schema: { spec: '44018', version: structured.version, msgTypes, ies, messages: out },
+    schema: { spec: '44018', version: structured.version, msgTypes, ies, messages: out, danglingRefs },
     problems,
   };
 }
@@ -11728,20 +11753,79 @@ function semanticGtpValue(name, rng, spec) {
     // 8.107（29274）/ 7.7.119（29060）：两侧 tshark 解剖器相反——AM 批（v1.45.0）探针：
     // GTPv2 侧期待四段 nameLen+name+realmLen+realm（值 [01 6b] 两段在 Context Response
     // 判违停 gtpv2.node_name，[01 6b 00]/[01 6b 01 6f]/name3+realm4 全净）——29274 五版
-    // 29 帧 lastIe=176 病根（schema 布局摄取只有 len/name 两行，realm 段由本分支补足）；
-    // GTPv1 侧实读 realmLen+realm（探针 C1：值 [01 6b] 解为 Node name 空/Node realm 'k'
-    // 干净）——保持 2B 现状。spec 区分两侧同名异构。
+    // 29 帧 lastIe=176 病根（schema 布局摄取只有 len/name 两行，realm 段由本分支补足）。
+    // GTPv1 侧（AN 批 v1.46.0 勘正）：IE219 实为 Private Extension（3B 头 type+len2 无
+    // instance——AM 探针 C 组按 4B 头构造读错位 1 字节、结论作废）；重探（3B 头）裁决
+    // 值 [00 00]（ie_id=0 + ext_len=0 空扩展）干净、[01 xx] 系停 gtp.node_name——
+    // GTPv1 侧值 = ie_id + 四段 node 结构（[01 61 01 62] 亦净），取最小形态 [00 00]。
     if (spec === '29274') return Uint8Array.from([0x01, 0x61 + Math.floor(rng() * 26), 0x01, 0x61 + Math.floor(rng() * 26)]);
-    return Uint8Array.from([0x01, 0x61 + Math.floor(rng() * 26)]);
+    return Uint8Array.from([0x00, 0x00]);
   }
+  if (n === 'END USER ADDRESS' && spec === '29060') {
+    // 7.7.27：PDP Type Organization(高半字节 spare=1111 + org=0001 IETF) + PDP Type Number
+    // (0x21=IPv4) + PDP Address 4B——AN 探针：[f1 21] 2B 无地址判违、[f1 21+IPv4] 6B 干净。
+    return Uint8Array.from([0xf1, 0x21, ...ipv4(rng)]);
+  }
+  if (n === 'MBMS SERVICE AREA' && spec === '29060') {
+    // 7.7.60：Length of MBMS Service Area list(1B) + 每项 2B——位布局随机长度而列表缺席
+    // → 越界（AN triage length-prefix 类 ×4/版）；空列表 [00] 合法（探针 E2：MBMS 本身
+    // 不再被拒，帧残余病火移 End User Address——多因叠加，本批同修）。
+    return Uint8Array.from([0x00]);
+  }
+  if (n === 'RAN TRANSPARENT CONTAINER' && spec === '29060') {
+    // 7.7.43：值首字节为容器长度前缀——AN 探针：[00]（空容器）干净、[00 00] 判违
+    // （length-prefix 与剩余字节不配）。精确等值匹配防误吃 'UTRAN TRANSPARENT CONTAINER'。
+    return Uint8Array.from([0x00]);
+  }
+  if (n === 'PRIVATE EXTENSION' && spec === '29060') {
+    // 7.7.46（iei 255 消息尾行）：Extension Code(1) + Extension Length(1) + Value——
+    // 随机值使 tshark 副解构越界（MBMS Session Start 系停 gtp.ext_length ×4/版）；
+    // 空扩展 [00 00] 最小形态（与 node 219 的 D5 探针结论同构）。限 29060：29274 侧
+    // §8.69 尾行随机值当前未致病（剩余 30 帧无 255 类），不动保零漂移。
+    return Uint8Array.from([0x00, 0x00]);
+  }
+  if (n === 'SGSN NUMBER' && spec === '29060') {
+    // 7.7.47：BCD 数字串（随机半字节 invalid-bcd——Forward Relocation Response 停
+    // e212.assoc.imsi）。
+    return Uint8Array.from(bcdDigits(rng, 5 + Math.floor(rng() * 11)));
+  }
+  // 7.7.38 UTRAN transparent container（×2/版）：值内嵌 RRC 消息（tshark 按 UPER 解剖，
+  // lastField=per.*）——须合成真实 RRC PDU，AN 批立档不建模（归后续批次评估）。
   if (/^USER LOCATION INFORMATION/.test(n) && spec === '29274') {
     // 8.21（GTPv2 侧）：oct5 八个存在标志与后续条件字段体必须自洽——位布局随机 flags
     // （实测帧 0x83=ExtMacro+SAI+CGI）而体字节缺席，tshark 按标志读 e212.* 越界（AM 探针：
-    // [83] 判违、RAI+3B 越界判违；空 flags 干净，RAI+6B / CGI+7B 亦净——采最小一致内容
+    // [83] 判违、RAI+3B 越界判违；空 flags 干净，RAI+6B、CGI+7B 亦净——采最小一致内容
     // 空 flags=空 ULI 合法形态）。同名 29.060 §7.7.51 ULI 结构相反（纯 RAI 六字节体、
     // 无 flags 字节，现状布局采样即合法）——spec 限定防误伤 29060。
     return Uint8Array.from([0x00]);
   }
+  // ---- AO 批（v1.47.0）：29274 容器尾定点（探针 Q1/R1/T1/T3 变体裁决）----
+  // 立档不建模：§8.132 Secondary RAT Usage Data Report——tshark 解剖器在双时间戳后
+  // **无条件**解析内嵌 ASN.1 PER usage report 段（探针 P1 的 12B 形态在帧尾短读语境
+  // 干净、正式帧中 PER 段读到后续 IE 字节即判违——end_timestamp NULL / usage_data_dl
+  // 巨值实证），与 §8.38 MM Context、§8.90 SRVCC Classmark 链同列 PER/深容器案。
+  if (n === 'EXTENDED TRACE INFORMATION' && spec === '29274') {
+    // 8.136：PLMN digits(3B)+Trace ID(3B)+Triggering Events/Trace Depth/List of Interfaces
+    // 三个长度前缀段——位布局随机长度前缀（实测 trig_event_len=192）而段体缺席越界。
+    // 探针 Q1：三段全零长度串（12B）干净。
+    return Uint8Array.from([0x21, 0x63, 0x54, 0x12, 0x34, 0x56, 0, 0, 0, 0, 0, 0]);
+  }
+  if (n === 'MONITORING EVENT EXTENSION INFORMATION' && spec === '29274') {
+    // 8.137：flags+SCEF Reference ID(4B)+SCEF ID Length+SCEF ID(+SRIE=1 时的 report 段)。
+    // 布局随机 SCEF ID Length（实测 59）而 ID 体缺席越界；探针 R1：flags=0+SCEF ID
+    // len=1+1 字节（7B）干净（无 report 段）。
+    return Uint8Array.from([0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x61]);
+  }
+  if (/^PACKET TMSI/.test(n) && spec === '29274') {
+    // 8.41：P-TMSI 定长 4B（布局 open 行随机 2B——探针 T2 2B 判违、T1 4B 干净）。
+    return Uint8Array.from([rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'P-TMSI SIGNATURE' && spec === '29274') {
+    // 8.42：P-TMSI Signature 定长 3B（探针 T3）。
+    return Uint8Array.from([rndByte(rng), rndByte(rng), rndByte(rng)]);
+  }
+  // 立档不建模：§8.38 MM Context（超复杂 bitmask 容器 ×8）与 §8.90 Additional MM
+  // context for SRVCC（内嵌 Classmark 2/3 链 + gsm_a 副解构，探针 S1/S2 均 MAL——×4）。
   if (n === 'NODE NUMBER') {
     // 8.106：Length of Node Number 与内容字节数一致（节点号为数字串）
     return Uint8Array.from([0x01, 0x30 + Math.floor(rng() * 10)]);
@@ -11801,6 +11885,24 @@ function semanticPfcpValue(name, rng) {
     const v4 = rng() < 0.75;
     const flags = v4 ? 0x02 : 0x01; // 其余标志（S/D/CHV/IP6PL/MPL/PPE）全 0
     return Uint8Array.from([flags, ...(v4 ? ipv4(rng) : ipv6(rng))]);
+  }
+  // ---- AN 批（v1.46.0）：29244 组内子 IE「标志位与条件字段体自洽」族 + FQ-CSID/池标识 ----
+  // 与 8.21 ULI 同病族：布局只摄取 flags 行（条件地址/列表行未摄取），随机置位 → tshark
+  // 按标志读地址/列表越界。探针口径（k10 病帧 lastField 实证：remote_gtp_u_peer.flags.v6、
+  // packet_rate_status.flags.ul、mapped_n6…flags.v4、mac_address.flags.sour 各族停点）。
+  if (n === 'REMOTE GTP-U PEER' || n === 'MAPPED N6 IP ADDRESS' || n === 'MAC ADDRESS' || n === 'PACKET RATE STATUS') {
+    // flags 全 0 = 无条件地址/无 DL/UL 计数体/空包速率状态——最小一致内容。
+    return Uint8Array.from([0x00]);
+  }
+  if (/FULLY QUALIFIED.*(PDN CONNECTION SET|CSID)/.test(n)) {
+    // 8.2.43：Node-ID Type(4b)=0 IPv4 + Number of CSIDs(4b)=1 + 4B 地址 + 1×2B CSID
+    // （与 GTP 侧 FQ-CSID 同构；布局随机 num 与体长不配 → csid/num_csid 越界）。
+    return Uint8Array.from([0x01, ...ipv4(rng), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'UE IP ADDRESS POOL IDENTITY') {
+    // 8.2.128：Pool Id Length(2B) 与实际标识字节数一致（布局随机 2B 长度前缀 →
+    // ue_ip_address_pool_length 巨值越界）；取 len=1 + 1 字节标识。
+    return Uint8Array.from([0x00, 0x01, 0x61 + Math.floor(rng() * 26)]);
   }
   return null;
 }
@@ -12094,6 +12196,14 @@ function samplePfcpSchema(schema, N, seed, msgRe) {
 function gtpv1SampleValue(r, schema, rng) {
   const ref = r.def || (r.ref && schema.ies[r.ref] ? r.ref : null);
   const fixed = r.len != null && /^\d+$/.test(r.len) ? parseInt(r.len, 10) : null;
+  // AN 批（v1.46.0）：无 ref/def 的行走行名语义兜底——消息尾行 'Private Extension'（iei
+  // 255，§7.7.46）无 ref，原直接落 1-6B 随机 → tshark 副解构越界（MBMS Session Start 系
+  // 停 gtp.ext_length ×4/版）。仅无 ref 路径启用（有 ref 行维持 ie.name 优先，流影响面
+  // 限于无 ref 行名匹配集）。
+  if (!ref && r.name) {
+    const sem0 = semanticGtpValue(r.name, rng, schema.spec);
+    if (sem0 && (r.format === 'TLV' || fixed == null || sem0.length === fixed)) return sem0;
+  }
   if (ref) {
     const ie = schema.ies[ref];
     if (ie) {

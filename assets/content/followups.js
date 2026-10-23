@@ -929,6 +929,30 @@
         a: '**术语**：发现侧写 **mode 1/mode 2**，定位侧写 **scheme 1/scheme 2**——同一层概念两套写法，原文按节各写各的。**scheme 1 只出现一处**：配了 sl-ScheduledConfig 且三定时器例外都不成立时（有调度配置的正常路径）；例外成立则 **scheme 2 随机选择**（sl-PRS-TxPoolExceptional/sl-TxPoolExceptional）。**sensing**：定位只写 **full sensing**（按 sl-PosAllowedResourceSelectionConfig），发现侧才是 **full/partial**——别照搬。另有原文细节：.18.3 内嵌 NOTE: Void；SIB23 分支一处写作 sl-PosTxPoolSelectedNormal（少一个 R）（M71 课 d2/d3/d4/f6）。',
         ref: '38.331#5.8.18.3' }
     ] },
+    'm72:q0': { levels: [
+      { q: 'M72 与 M70/M71 在测量面上的分工怎么一句话说清？',
+        a: '**M70 判据、M71 用结果、M72 管测量账本**。§5.8.10 收测量配置/执行/触发/上报的完整流程：四件套（对象/报告配置/身份/量配置）由本端经 RRCReconfigurationSidelink 下发给对端，对端测 DMRS/SL-PRS、按 5.5.3.2 做 L3 过滤后按事件（S1/S2）或周期触发 MeasurementReportSidelink。M70 的门限评估吃的就是这里的过滤后结果，M71 的池选择同样读测量结果（M72 课 h0/a1）。',
+        ref: '38.331#5.8.10.1' },
+      { q: '四件套各管什么？身份为什么随报告回传？',
+        a: '**对象定「测哪」**（待测参考信号所在的 NR 侧链频率）、**报告配置定「怎么报」**（判据=周期或单事件；RS 类型本版 DMRS 与 SL-PRS 都支持；格式仅 RSRP）、**身份定「哪对哪」**（把一个对象与一条报告配置链起来，多对多）、**量配置定「怎么滤」**（L3 过滤系数，分量配置）。身份随报告回传 serving as a reference to the network——网络按它对账；PC5-RRC 两端各维护对象/报告配置/身份三张表 VarMeasConfigSL（M72 课 a2）。',
+        ref: '38.331#5.8.10.1' }
+    ] },
+    'm72:q2': { levels: [
+      { q: '配置面的三条纪律是什么？',
+        a: '**删除级联**：删对象/删报告配置→连带删全部关联身份→逐身份清报告条目、停周期定时器（.2.4/.2.6）；remove list 带不在册 id 不算错（.2.2/.2.4/.2.6 三处 NOTE 同口径——幂等盲发）。**增改镜像**：对象增改**先清报告后重配**、报告配置增改**先重配后清报告**（.2.5/.2.7 顺序相反各守一半）。**量配置全局复位**：改过滤系数对在册**每个**身份清报告停表——所有已过滤结果作废（.2.8）（M72 课 b1/b2/b3/b4/f1/f2/f3）。',
+        ref: '38.331#5.8.10.2.8' },
+      { q: '事件三态与 S1/S2 的镜像关系怎么记？',
+        a: '**首频进入**=进入条件在 sl-TimeToTrigger 内持续成立且尚无报告条目→建条目+计数归零+频入 sl-FrequencyTriggeredList+发起上报；**后续频**=同样归零+入表+发起（不重建条目）；**离开**=移出触发表，sl-ReportOnLeave=true 再报一次，表空则删条目停表（.4.1）。**镜像**：S1 进=S2 出（Ms – Hys > Thresh）、S1 出=S2 进（Ms + Hys < Thresh）——两事件共用一对不等式只是进出互换；Ms 不含偏移、RSRP 时用 dBm、Thresh 与 Ms 同单位（.4.2/.4.3）（M72 课 c2/c3/f4）。',
+        ref: '38.331#5.8.10.4.2' }
+    ] },
+    'm72:q4': { levels: [
+      { q: '周期型上报发满后为什么要「自毁」？',
+        a: '发满 sl-ReportAmount 且 sl-ReportType=sl-Periodical 时，UE 删该身份的报告条目，**并把该 sl-MeasId 从 sl-MeasIdList 里删掉**（.5.1）——身份都不留。事件型发满只停发不删身份（等离开条件重置节奏）。记法：量按 rs-Type 装包（sl-ResultDMRS/sl-Result-SL-PRS）、计数+1、不足按 sl-ReportInterval 续表、周期发满连身份一起清（M72 课 c4/f5）。',
+        ref: '38.331#5.8.10.5.1' },
+      { q: '拾遗五件各收什么？载波增删的「收发不对称」指什么？',
+        a: '**载波增删**（5.8.9.1b 二段式）、**能力转移**（5.8.9.2：enquiry 必带 frequencyBandListFilterSidelink，仅端到端 L2 U2U relay 豁免；对端按 filter 顺序编译候选组合尽量多装并回填 appliedFreqBandListFilter）、**PC5 收尾**（5.8.9.3b：三触发→丢弃端到端 SRB/DRB/QoS/SRAP 配置→IDLE/INACTIVE/OOC 触发 RLC 信道派生、CONNECTED 发 SUI）、**V2X 同步**（5.8.5a：按 36.331 5.10.7 发 SLSS+MIB-SL-V2X）、**Zone**（5.8.11：y1*64+x1，Floor+Mod 64，WGS84 测地距离）。**不对称**：信令触发只动**接收**侧（增=四参数加收/释=释放收），配置/上层触发在 RRCReconfigurationCompleteSidelink **之后**才动**发送**侧（增=只按 sl-AbsoluteFrequencyPointA 加发+SRB/DRB 额外允许载波指示/释=释放发+收回指示）（M72 课 d1/d2/d3/d4/f6）。',
+        ref: '38.331#5.8.9.1b.2.2' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
