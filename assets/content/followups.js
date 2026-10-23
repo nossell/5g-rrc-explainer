@@ -857,6 +857,30 @@
         a: '§5.8.9.1a.4 三触发全由上层拉动：PC5-S 传输请求→按 **clause 9.1.1.4** 建三件套（if needed）；发现消息→**SRB4 专席**；PC5-RRC 建立指示→建立并 **consider the PC5-RRC connection is established**（建立即认链）。**allowed carrier 预指示**=「before the reception of initial RRCReconfigurationCompleteSidelink message which confirms SL CA carrier(s) addition」——in coverage（TS 38.304）走 sl-FreqInfoList、覆盖外走 sl-PreconfigFreqInfoList，抢在回执前喂低层。释放（.3）四路与建立镜像：PC5-RRC 释放或 RLF→三层拆+consider released；PC5-S/发现终止→放对应 SRB；e2e release/failure→放 PDCP+**解除与 egress PC5 Relay RLC channel 的关联并 reconfigure SRAP configuration**；端到端 SRB0/1/2/3 以 **SL-U2U-RLC** 为出口信道、映射交 SRAP（M68 课 c1/c2/c3/c4）。',
         ref: '38.331#5.8.9.1a.3' }
     ] },
+    'm69:q0': { levels: [
+      { q: '中继控制面五件账怎么记？三类角色和两层账本是什么？',
+        a: '§5.8.9.7–.11 五件账：**PC5 Relay RLC 信道管理**（.7 管道——per-hop QoS 派生/释放/增改）、**Remote UE information**（.8 需求单——SIB/posSIB/寻呼/SFN-DFN/connectionForMP）、**Uu message transfer**（.9 中继把 Uu 的 Paging/SI 搬给远端或 child）、**Notification Message**（.10 上游事件通知下游）、**UE information transfer**（.11 U2U 的 QoS split 协商）。三类角色=U2N Remote/U2N Relay（单跳 Last 或多跳 Intermediate）、U2U Remote/Relay。两层账本=e2e（端到端 DRB/QoS）与 per-hop（每跳 Relay RLC 信道与 split QoS）——五件账都是两层之间的搬运工（M69 课 h0/a1）。',
+        ref: '38.331#5.8.9.7.0' },
+      { q: '为什么说 .8 与 .11 都带「Remote 信息」字样但完全不同？',
+        a: '.8 是**单向需求单**：远端在 IDLE/INACTIVE 把「缺什么」告诉中继（SIB/posSIB 请求、寻呼信息、SFN-DFN offset、connectionForMP），中继自己服务或转 5.8.3/5.2.2，再经 .9 把结果送下。.11 是 **U2U 双向 QoS 握手**：Remote 交底 e2e QoS，Relay 做 split（PDB 每跳）回 first-hop split 值，两端各自 merge 成 per-SLRB profile 并派生本跳管道（.7.0）。一句话：.8 是「需求单」，.11 是「对账」（M69 课 a3/d4）。',
+        ref: '38.331#5.8.9.11.1' }
+    ] },
+    'm69:q2': { levels: [
+      { q: 'PC5 Relay RLC 信道的派生/释放/增改里，时序闸怎么复用？',
+        a: '与 M68 SLRB 同款两段闸：PC5 对端直发 RRCReconfigurationSidelink→**收到即执行**；sl-ConfigDedicatedNR 或 .7.0 派生结果触发→**等本端发出 RRCReconfigurationCompleteSidelink 之后**执行。释放/增改各三分支镜像。**清单分叉**：Uu 侧 sl-RLC-ChannelToReleaseList vs PC5 侧 sl-RLC-ChannelToReleaseListPC5；增改二分=已有信道 reconfigure vs 未配置 establish。**建立铺底**：U2N 建 SRAP+SL-RLC0 specified（IDLE/INACTIVE 再 SL-RLC1 default）；U2U 建 SRAP+SL-U2U-RLC（M69 课 b2/b3/b4/f2/f3）。',
+        ref: '38.331#5.8.9.7.1' },
+      { q: 'first hop 和 second hop 的派生谁负责？聚合单位是什么？',
+        a: '§5.8.9.7.0：**first hop** 由 source L2 U2U Remote UE 把带 split QoS 信息的 QoS flow 聚合成 **per-SLRB level QoS profile**（每个 e2e DRB 一条），再取 sl-RLC-BearerConfigList/PreConfigList 中与匹配 SL-RadioBearerConfig 关联的 SL-RLC-BearerConfig；**second hop** 由 L2 U2U Relay UE 对 second hop 同构处理。聚合单位是 per-SLRB 级 profile，不是逐 QoS flow 建信道；两跳各算各账（M69 课 b1/f1）。',
+        ref: '38.331#5.8.9.7.0' }
+    ] },
+    'm69:q4': { levels: [
+      { q: '远端需求单有哪些块？中继收到后怎么服务？',
+        a: '需求单七块：SIB 请求（sl-RequestedSIB-List）、posSIB（需中继声明 posSIB-ForwardingSupported）、SFN-DFN offset（需 sfn-DFN-OffsetSupported）、寻呼信息（IDLE：ng-5G-S-TMSI+上层 DRX；INACTIVE：再加 fullI-RNTI 且 DRX 取上层与 RRC 最小值）、进 CONNECTED 三项 release、CONNECTED 内 offset 重发与 connectionForMP、Intermediate 汇聚 child 请求。中继四路：**自听寻呼**（CONNECTED 有 paging CSS 或 IDLE/INACTIVE）、**SidelinkUEInformationNR 上报**（CONNECTED 无 CSS）、**SIB 采集→Uu 消息转移**、**connectionForMP→建连/恢复**（M69 课 c1/c2）。',
+        ref: '38.331#5.8.9.8.2' },
+      { q: 'Notification 的三套指示字段怎么分？U2U Remote 收到 PC5-RLF 后做什么？',
+        a: '.10.3 三套字段=**indicationType**（U2N/Intermediate 四值：Uu-RLF/HO/CellReselection/Uu-RRC-Failure）、**mh-indicationType**（Intermediate 专属：RelayReselection/CellSelection/Parent-PC5LinkRelease）、**sl-IndicationType**（PC5-RLF 侧链事件）；Intermediate 转手沿用 parent 的 indicationType，U2U PC5-RLF 通知必带 sl-DestinationIdentityRemoteUE。远端收（.10.4）：CONNECTED+MP→HO 挂起间接路径、其余 5.7.3c；非 MP 且 T301 未跑→5.3.7 重建；U2U Remote 收 PC5-RLF→视为 e2e 失败走 5.8.9.3a（M69 课 d2/d3/f5）。',
+        ref: '38.331#5.8.9.10.3' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
