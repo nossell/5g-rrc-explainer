@@ -10,7 +10,7 @@
 var CACHE = 'rrc-v37';
 var CORE = [
   'index.html', 'app.html', 'interview.html', 'dict.html', 'anim.html', 'timer-net.html',
-  'variables-map.html', 'log-detective.html', 'meas-sandbox.html', 'search.html', 'manual.html',
+  'variables-map.html', 'log-detective.html', 'meas-sandbox.html', 'search.html',
   'assets/site.css', 'assets/engine.js', 'assets/player.js', 'assets/interview.js',
   'assets/flowanim.js', 'assets/flowanim2.js', 'manifest.json', 'assets/icon-192.png', 'assets/icon-512.png'
 ];
