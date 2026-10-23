@@ -832,6 +832,31 @@
         a: '§8.2/§8.3：网络身份全走「PLMN+局部号」——**NCGI**=PLMN identity+NCI（SIB1 按广播顺序取首 PLMN）、**gNB ID 装在 NCI 里**、**Global gNB ID**=PLMN identity+gNB ID、**TAI**=PLMN+TAC、切片 **S-NSSAI/NSAG**（TA 内唯一）、**NID**（SNPN）、CAG、**Local NG-RAN Node ID 在 I-RNTI 里引用**；8.3=CN 给 **IPv4/IPv6 双传输地址**由 NG-RAN 节点任选。§8.4：**Layer-2 ID 全长 24 bits 非对称拆分**——Source 低 8 位进物理层/高 16 位进 MAC 头，Destination 低 16 位进物理层/高 8 位进 MAC 头；**PC5 Link Identifier** 终生认链路；SL-PRS Source ID **12 或 24 bits**（M67 课 d3/d4）。',
         ref: '38.300#8.4' }
     ] },
+
+    'm68:q0': { levels: [
+      { q: 'Sidelink 承载分哪三族？「条件-操作二段式」怎么读 §5.8.9.1a？',
+        a: '§5.8.9.1a 三族：**sidelink DRB** 承用户数据（sidelink QoS flow 映射其上，流断则拆）；**sidelink SRB** 承 PC5-RRC、PC5-S 与发现信令（**SRB4 专席**服务发现消息）；**additional sidelink RLC bearer** 给同一 DRB/SRB 加**第二条 RLC 腿**（PDCP duplication 或载波分离）。二段式刀法=每族拆 **conditions 叶（什么触发）+operations 叶（触发后做什么）**：DRB 释放（.1.1/.1.2）、DRB 增改（.2.1/.2.2）、附加承载释放（.5.1/.5.2）、附加承载增改（.6.1/.6.2）四套对子+SRB 释放（.3）/添加（.4）两单叶（M68 课 h0/a1）。',
+        ref: '38.331#5.8.9.1a.2.1' },
+      { q: '三源配置通道是什么？unicast 侧的时序闸怎么走？',
+        a: '四通道汇于同一批 UE 行为：RRC_CONNECTED 的 **sl-ConfigDedicatedNR**、广播 **SIB12**、脱网 **SidelinkPreconfigNR**、对端 PC5-RRC 直发 **RRCReconfigurationSidelink**——回执 **RRCReconfigurationCompleteSidelink** 是 unicast 的时序闸。三分支=「for groupcast and broadcast」**即时执行**；「triggered after the reception of the RRCReconfigurationSidelink message」**收到即执行**；sl-ConfigDedicatedNR/SIB12/SidelinkPreconfigNR/上层来源**等自己发出 Complete 之后**才执行——等的是 UE 自己的回执不是对端确认（M68 课 a2/f1）。',
+        ref: '38.331#5.8.9.1a.1.2' }
+    ] },
+    'm68:q2': { levels: [
+      { q: 'DRB 释放九触发怎么分组记？释放动作里 SDAP 的两步是什么？',
+        a: '§5.8.9.1a.1.1 九条按三组记：**配置面点名**（slrb-Uu-ConfigIndex 进 sl-RadioBearerToReleaseList、SL-RLC-BearerConfigIndex 进双列表、unicast 的 slrb-ConfigToReleaseList 与 **sl-ResetConfig**）；**数据面断流**（no sidelink QoS flow with data 两条——unicast 版要求两路流都无数据，是 AND 不是 OR）；**连接面生灭**（RLF 5.8.9.3/上层请求 5.8.9.5/e2e 失败 5.8.9.3a/e2e 上层请求 5.8.9.5a）。释放三层=「release the PDCP entity」→SDAP **先通知（37.324 clause 5.3.3）再回收无主实体（clause 5.1.2）**→按 sl-RLC-BearerConfigIndex 逐条放 RLC 与逻辑信道；per-hop 拆完要跟 **5.8.3 UE information procedure**、RLF 按 destination 三层一锅端（M68 课 b1/b2/b3/f2）。',
+        ref: '38.331#5.8.9.1a.1.1' },
+      { q: '附加承载什么时候加第二腿？SL-TxProfile 两个值怎么定？',
+        a: '§5.8.9.1a.6.1 七路=三清单来源×**SL-TxProfile** 状态机：sl-RLC-BearerToAddModList（RRCReconfigurationSidelink，锚 slrb-PC5-ConfigIndex）+sl-RLC-BearerToAddModListSizeExt（sl-ConfigDedicatedNR，锚 sl-ServedRadioBearer）+sl-RLC-BearerConfigListSizeExt（SIB12/Preconfig 三态，前提 DRB 已立未拆）——**backwardsIncompatible**=全部关联流兼容性不保、非单播直接加腿；**backwardsCompatible**=至少一流兼容且 **UE decides to use PDCP duplication**；unicast 资格=**both UEs support PDCP duplication**；SRB1/2/3 版=双端支持且 UE 决定。附加承载随 PC5-RRC 重配走时序闸、跟随宿主释放（M68 课 d1/d3/f5）。',
+        ref: '38.331#5.8.9.1a.6.1' }
+    ] },
+    'm68:q4': { levels: [
+      { q: '附加承载释放的 received/transmitted 镜像语法是什么？两腿载波有什么硬约束？',
+        a: '§5.8.9.1a.5.2 三分支按凭据视角分：groupcast/broadcast 与 unicast+sl-ConfigDedicatedNR 源→按**收到的** sl-RLC-BearerToReleaseListSizeExt；unicast 收 RRCReconfigurationSidelink→按**收到的** sl-RLC-BearerToReleaseList；SIB12/预配置/上层源→按 **transmitted sl-RLC-BearerToReleaseList** 对账——UE 把释放意图装进自己发出的 RRCReconfigurationSidelink，本端按 transmitted 拆自己侧、对端按 received 拆对端侧。两腿载波约束（.6.2）：RRC_CONNECTED 走 **sl-AllowedCarriers**（DRB）/**sl-AllowedCarrierFreqSet1 与 Set2**（SRB），脱网 UE 自挑但 **the allowed carriers for the two RLC bearers are not overlapping with each other**（M68 课 d2/d4/f4/f6）。',
+        ref: '38.331#5.8.9.1a.5.2' },
+      { q: 'SRB 怎么建怎么拆？e2e 中继面 SRB 有什么特殊动作？',
+        a: '§5.8.9.1a.4 三触发全由上层拉动：PC5-S 传输请求→按 **clause 9.1.1.4** 建三件套（if needed）；发现消息→**SRB4 专席**；PC5-RRC 建立指示→建立并 **consider the PC5-RRC connection is established**（建立即认链）。**allowed carrier 预指示**=「before the reception of initial RRCReconfigurationCompleteSidelink message which confirms SL CA carrier(s) addition」——in coverage（TS 38.304）走 sl-FreqInfoList、覆盖外走 sl-PreconfigFreqInfoList，抢在回执前喂低层。释放（.3）四路与建立镜像：PC5-RRC 释放或 RLF→三层拆+consider released；PC5-S/发现终止→放对应 SRB；e2e release/failure→放 PDCP+**解除与 egress PC5 Relay RLC channel 的关联并 reconfigure SRAP configuration**；端到端 SRB0/1/2/3 以 **SL-U2U-RLC** 为出口信道、映射交 SRAP（M68 课 c1/c2/c3/c4）。',
+        ref: '38.331#5.8.9.1a.3' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
