@@ -881,6 +881,30 @@
         a: '.10.3 三套字段=**indicationType**（U2N/Intermediate 四值：Uu-RLF/HO/CellReselection/Uu-RRC-Failure）、**mh-indicationType**（Intermediate 专属：RelayReselection/CellSelection/Parent-PC5LinkRelease）、**sl-IndicationType**（PC5-RLF 侧链事件）；Intermediate 转手沿用 parent 的 indicationType，U2U PC5-RLF 通知必带 sl-DestinationIdentityRemoteUE。远端收（.10.4）：CONNECTED+MP→HO 挂起间接路径、其余 5.7.3c；非 MP 且 T301 未跑→5.3.7 重建；U2U Remote 收 PC5-RLF→视为 e2e 失败走 5.8.9.3a（M69 课 d2/d3/f5）。',
         ref: '38.331#5.8.9.10.3' }
     ] },
+    'm70:q0': { levels: [
+      { q: 'Relay/Remote UE 操作这五节里，四顶帽子和三机制轴怎么记？',
+        a: '四顶帽子按两族分：**U2N Relay**（单跳 U2N Relay UE 或多跳 Last）看自己驻留小区的 **Uu RSRP**；**U2N Remote** 看自身覆盖差再挑 Relay；**U2U Relay** 看源端/邻居的 **PC5 链路**并判近邻；**U2U Remote** 看对端链路与中继响应；多跳的 **Intermediate** 对 parent 是 Remote、对 child 是 Relay。三机制轴=**门限条件**（entry/leave+迟滞）、**选择与重选**（触发清单+候选评估+合适判定）、**近邻条件**（Model A 通告名单）。一句话：Uu 门限管回传、PC5 门限管转发；Remote 门限管求助、Relay 门限管接单（M70 课 h0/a1/a2）。',
+        ref: '38.331#5.8.14.1' },
+      { q: '为什么 1.08× 的体量还判定「机制点补强」？',
+        a: '14 叶 19,497 chars 刚过 18KB 判定线（1.08×），但机制密度足：四角色×三机制轴，其中 **.15.3 选择重选 4,428**、**.17.3 条件 2,172**、**.17.4 动作 2,393** 三块算法主料占 9,000+，另有 **.16.3 近邻 829** 与 **.19.2 多跳门限 2,508** 两个特面。沿 v32 1.06×/v34 0.92× 先例按机制点补强判定，课头与台账如实注记（M70 课 a4/课头）。',
+        ref: '38.331#5.8.15.3' }
+    ] },
+    'm70:q2': { levels: [
+      { q: 'U2N 两侧门限的方向为什么相反？',
+        a: '**Relay 侧（.14.2）是双门限带**：RSRP 要低于 threshHighRelay 减 hystMaxRelay（太高说明自己直连更好）且高于 threshLowRelay 加 hystMinRelay（太低说明自己覆盖差），entry 是 AND、leave 任一越界即 OR。**Remote 侧（.15.2）是单门限**：RSRP 低于 threshHighRemote 减 hystMaxRemote **或根本没有服务小区**时 entry——覆盖越差越该找中继。所以同一个「迟滞」，Relay 用来收窄进入带、Remote 用来防止刚够格就来回切（M70 课 b1/b2/f1/f2）。',
+        ref: '38.331#5.8.14.2' },
+      { q: 'U2N 选择重选为什么要分成「触发」与「候选 AS 判据」两道门？',
+        a: '**触发门（.15.3 前半）**判「该不该找」：外门=无服务小区或驻留小区/PCell RSRP 低于 threshHighRemote；内环六条=无已选中继、已选中继 SL-RSRP 低于 sl-RSRP-Thresh（SL 不可用则看 SD）、上层停用、上层要求释放 PC5-RRC、PC5-RRC 侧链 RLF。**候选门（.15.3 后半）**判「谁能用」：对同一 Relay UE ID 做 L3 滤波（sl-FilterCoefficientRSRP 按 SIB12/ConfigDedicatedNR/预配置三选），候选 **SD-RSRP 超 sl-RSRP-Thresh 且高出 sl-HystMin** 才算过 AS 判据；suitable 还要加 23.304 上层判据（M70 课 b3/b4/f3）。',
+        ref: '38.331#5.8.15.3' }
+    ] },
+    'm70:q4': { levels: [
+      { q: 'U2U 的两套门限和两条动作路径分别怎么对？',
+        a: '**Relay 侧（.16.2）两套消息共用一个阈值 sd-RSRP-ThreshDiscConfig**：集成发现的 **DCR 看 SL-RSRP** 高过阈值才 entry、低于阈值减 sd-hystMaxRelay 则 leave；Model B 发现消息**看 SD-RSRP** 同法。**Remote 侧（.17.2）两套**：solicitation/DCR 看**对端 Remote** 的 SL/SD-RSRP 低于阈值（或对端不可达）即 entry；Response 看 **U2U Relay 的 SD-RSRP** 高于阈值。**动作（.17.4）两路径**：5.8.13 发现路径候选判据用 **SD-RSRP**，5.8.8 集成发现路径收到 DCR 后候选判据用 **SL-RSRP**——原文如此，别统一（M70 课 c1/c3/c4/f4/f5）。',
+        ref: '38.331#5.8.17.4' },
+      { q: '多跳三份门限怎么按角色和连接状态分？',
+        a: '三份共用 **sd-RSRP-ThreshDiscConfigMH** 与 **sd-hystMaxRelayMH**，输入统一是 **Candidate Child 的 Model B 消息 SD-RSRP**：**① Last 且无 child PC5** → 发送 Discovery Response；**② Intermediate 且无 parent PC5** → 发送 Discovery Solicitation（向上找 parent）；**③ Intermediate 且有 parent PC5** → 发送 Discovery Response。进入=高出阈值加迟滞，离开=低于阈值减迟滞。衔接：First/Intermediate 连 parent 前要先以 Remote 身份过 .15.2 门限（M70 课 d1/d2/d3/f6）。',
+        ref: '38.331#5.8.19.2' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

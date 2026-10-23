@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.41.0";
+const APP_VERSION = "1.43.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -5535,7 +5535,10 @@ class Csn1Parser {
     }
   }
   looksLikeDef() {
-    for (let o = 0; o < 12 && this.i + o < this.toks.length; o++) {
+    // v1.43.0 AK：窗口 12→40——长定义名（'<Cell Selection Indicator after release of all
+    // TCH and SDCCH value part> ::=' 44018 §10.5.2.1e、"<EGPRS … for 'PEO …'> ::=" 44060
+    // §11.2.5a 实测）在 12 词内扫不到 ::= 被静默跳过（零 defs 且零 note，下游零感知）。
+    for (let o = 0; o < 40 && this.i + o < this.toks.length; o++) {
       const t = this.toks[this.i + o];
       if (t.k === 'def') return true;
       if (['lt', 'gt', 'word', 'n01', 'colon', 'lp', 'rp'].includes(t.k)) continue;
@@ -5800,6 +5803,25 @@ class Csn1Parser {
     if (descParts.length === 1 && descParts[0].k === 'n01' && /^[01]+$/.test(descParts[0].v)) {
       return { t: 'valtag', name, values: [descParts[0].v] };
     }
+    // 字面判别前缀（v1.43.0 AK，44.060 §11.1/11.2 实测 92 格）：'< MESSAGE_TYPE : 1 bit (5) >'
+    // '< One Phase Access Request : 0 < MultislotClass : bit (5) > < Priority : bit (2) > … >'——
+    // 判别位串 + 类型描述，等价展开为 fixed 前缀项 + 余下描述（字段词组走 fieldFromWords
+    // 整体解析——parseItem 会把裸 'bit' 截成单项；内联角才逐项取全）。
+    if (descParts.length >= 2 && descParts[0].k === 'n01' && /^[01]+$/.test(descParts[0].v)) {
+      const restParts = descParts.slice(1);
+      let restBody;
+      if (restParts[0].k === 'lt') {
+        const sub = new Csn1Parser(restParts);
+        const items = [sub.parseItem()];
+        // 停机集不含 lt——内联角是合法项起点（'< X : 0 < A > < B > >' 实测，lt 作分隔会截断）
+        while (sub.peek() && !['rb', 'semi', 'def'].includes(sub.peek().k) && !sub.isBarToken()) items.push(sub.parseItem());
+        restBody = items.length === 1 ? items[0] : { t: 'seq', items };
+      } else {
+        restBody = this.fieldFromWords(name, restParts);
+        if (!restBody) throw new Error(`标签 ${name} 描述不可解析: ${flat.slice(0, 60)}`);
+      }
+      return { t: 'typed', name, body: { t: 'seq', items: [{ t: 'fixed', bits: descParts[0].v }, restBody] } };
+    }
     if (descParts[0].k === 'lb') {
       const vals = this.parseValueGroup(descParts);
       // 纯值组：全部 token 都是终端位串/L/H 与分隔（'<Multiband supported : { 101 | 110 }>' 实测）
@@ -5873,10 +5895,13 @@ class Csn1Parser {
   // 类型描述词组 → 字段节点
   fieldFromWords(name, toks) {
     const words = toks.map((p) => (p.k === 'eq' ? '==' : p.k === 'star2' ? '**' : p.k === 'star' ? '*' : p.k === 'lp' ? '(' : p.k === 'rp' ? ')' : p.v ?? p.k)).join(' ');
-    let m = /^(?:bit\s*string|bit)\s*\((.+)\)\s*$/i.exec(words);
+    // 'bit-string(4)' 连字符变体（24008 §10.5.5.11 sapi 实测，v1.43.0 AK 收编）
+    let m = /^(?:bit[-\s]*(?:string)?|bit)\s*\((.+)\)\s*$/i.exec(words);
     if (m) return { t: 'bits', name, n: this.exprOrNum(m[1]) };
-    m = /^bit\s*\(\s*(\d+)\s*\)\s*==\s*([01]+)\s*$/i.exec(words) || /^(?:bit\s*string|bit)\s*==\s*([01]+)\s*$/i.exec(words);
-    if (m) return { t: 'valtag', name, values: [m[2]] }; // 值约束位字段（'<modulus : bit (4) == 0000>' 实测）
+    // 值约束位字段（'<modulus : bit (4) == 0000>' 实测）；v1.43.0 AK 收编值内空格形态
+    // （'< MESSAGE_TYPE : bit (6) == 1 00001 >' 44.060 §11.2 顶层消息文法实测——剥空格归一）
+    m = /^bit\s*\(\s*(\d+)\s*\)\s*==\s*((?:[01]\s*)+)$/i.exec(words) || /^(?:bit\s*string|bit)\s*==\s*([01]+)\s*$/i.exec(words);
+    if (m) return { t: 'valtag', name, values: [m[2].replace(/\s+/g, '')] };
     m = /^bit\s*\(\s*(\d+)\s*\)\s*exclude\s*([01]+)\s*$/i.exec(words) || /^(?:bit\s*string|bit)\s*exclude\s*([01]+)\s*$/i.exec(words);
     if (m) return { t: 'bits', name, n: parseInt(m[1], 10) || m[2].length, exclude: m[2] }; // 值排除约束（SI9 modulus 实测）
     m = /^bit\s*(\d+)\s*\)\s*$/i.exec(words);
@@ -9425,6 +9450,7 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
   const typeTables = [];
   const valueTables = [];
   const csn1Tables = [];
+  const csn1Lost = []; // v1.43.0 AK P2-3：含 ::= 而无节锚的表（原先静默落空）
   const secProse = new Map();
   let other = 0;
   const sections = [];
@@ -9511,7 +9537,9 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
     // 节标题无 Heading 样式且定义名不匹配时）；③ 表 heading。
     if (it.rows.some((r) => r.some((c) => (c.text || '').includes('::=')))) {
       const cells = it.rows.flat().filter((c) => (c.text || '').includes('::=')).map((c) => c.text);
-      const hSec = it.heading ? (it.heading.text.match(/^\s*((?:\d+\.)+\d+[a-z]?)\s/) || [])[1] || null : null;
+      // v1.43.0 AK P2-3：段号允许中间带字母后缀（'11.2.5a.1 …'——原正则 \d+\. 不吃 '5a.'，
+      // 20 张 ::= 表静默丢弃；候选形态 (?:\d+[a-z]?\.)+ 全族零漂移证后落）
+      const hSec = it.heading ? (it.heading.text.match(/^\s*((?:\d+[a-z]?\.)+\d+[a-z]?)\s/) || [])[1] || null : null;
       const capSec = (it.paras || []).map((p) => /^Table\s+(\d+(?:\.\d+)+[a-z]?)\s*\.\s*\d+\s*:/i.exec(p)).find(Boolean);
       let sec = capSec ? capSec[1] : hSec;
       const dm = cells[0] ? /<\s*([^<>:]+?)\s*>\s*::=/.exec(cells[0]) : null;
@@ -9530,6 +9558,7 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
         });
         continue;
       }
+      csn1Lost.push((it.heading ? it.heading.text : '') || (it.paras || []).find((p) => /^Table/i.test(p)) || '(无题注)');
     }
     // 29.244 §8.2.x IE 位布局表（TLV 头 Type 1-2 / Length 3-4，hdrOctets=4）。
     // 非位表节（值语义表/散文）不落 bits——ies 条目由 §8.1.2 类型表补 name/ieType。
@@ -9705,7 +9734,14 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
     typeTables,
     valueTables,
     csn1: csn1Tables,
-    stats: { bitTables: bits.length, msgTables: msgs.length, otherTables: other, csn1Tables: csn1Tables.length },
+    stats: {
+      bitTables: bits.length,
+      msgTables: msgs.length,
+      otherTables: other,
+      csn1Tables: csn1Tables.length,
+      csn1Unattributed: csn1Lost.length,
+      csn1UnattributedSamples: csn1Lost.slice(0, 5),
+    },
   };
 }
 
@@ -10221,16 +10257,31 @@ function buildSchema(structured, opts = {}) {
 // 按 24.007 Annex B.1.3 预定义库记法合成 <spare half octet> ::= <spare bit>(4)（通用记法，非规范数据）。
 const csn1Key = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
 
-function buildCsn1Descriptors(csn1Tables, sections) {
+// report（可选，v1.43.0 AK P2-2/P3-11）：调用方传入即回填解析失败/同名异体冲突/root 质量计数——
+// 原先 notes 与失败格全部静默丢弃（评审 P2-2：「478/478 零失败」实为 452 格中 93 格零定义）。
+function buildCsn1Descriptors(csn1Tables, sections, report = null) {
   const pool = new Map(); // defKey → body
   const secDefs = new Map(); // 节号 → [defKey]
   for (const t of csn1Tables || []) {
     for (const cell of t.cells || []) {
+      if (report) report.cells++;
       let parsed;
-      try { parsed = parseGrammar(cell); } catch { continue; }
+      try { parsed = parseGrammar(cell); } catch (e) {
+        if (report) report.failed.push({ sec: t.section, note: '词法异常: ' + e.message });
+        continue;
+      }
+      if (report && (!parsed.defs.length || parsed.notes.length)) {
+        for (const n of parsed.notes) report.failed.push({ sec: t.section, note: n });
+        if (!parsed.defs.length && !parsed.notes.length) report.failed.push({ sec: t.section, note: '零定义且无 note（静默跳过）' });
+      }
       for (const d of parsed.defs) {
         const k = csn1Key(d.name);
-        if (!pool.has(k)) pool.set(k, d.body);
+        if (pool.has(k)) {
+          // v1.43.0 AK P3-11：同名异体冲突逐起记录（池策略先到先得，本批不动）
+          if (report && JSON.stringify(pool.get(k)) !== JSON.stringify(d.body)) {
+            report.conflicts.push([d.name, t.section]);
+          }
+        } else pool.set(k, d.body);
         const arr = secDefs.get(t.section) || [];
         if (!arr.includes(k)) arr.push(k);
         secDefs.set(t.section, arr);
@@ -10264,10 +10315,19 @@ function buildCsn1Descriptors(csn1Tables, sections) {
     walk(pool.get(rootKey));
     out[sec] = { root: rootKey, defs };
   };
-  // ① 有文法表的节（含 fill 并入节）：root = 节标题匹配的定义，否则节内首定义
+  // ① 有文法表的节（含 fill 并入节）：root = 节标题匹配的定义 → 标题+'message content(s)'
+  // 后缀容忍（44.060 §11.2 节题无 content 后缀而定义名有，v1.43.0 AK P3-11 探针实测可救
+  // 20 节）→ 节内首定义兜底
+  const ROOT_SUFFIXES = ['messagecontent', 'messagecontents'];
   for (const [sec, keys] of secDefs) {
     const tk = csn1Key(titleOf(sec));
-    ensure(sec, keys.includes(tk) ? tk : keys[0]);
+    let root = keys.includes(tk) ? tk : null;
+    if (!root && tk) {
+      const hit = ROOT_SUFFIXES.map((s) => tk + s).find((c) => keys.includes(c));
+      if (hit) { root = hit; if (report) report.rootSuffix++; }
+    }
+    if (!root) { root = keys[0]; if (report) report.rootFallback++; }
+    ensure(sec, root);
   }
   // ② 别名节（本节无文法表）：节标题匹配的定义全局检索
   for (const s of sections || []) {
@@ -10285,6 +10345,14 @@ function buildCsn1Descriptors(csn1Tables, sections) {
   for (const s of sections || []) {
     if (!out[s.num] && csn1Key(s.title || '') === 'sparehalfoctet') {
       out[s.num] = { root: 'spare half octet', defs: { 'spare half octet': { t: 'spare', n: 4 } } };
+    }
+  }
+  // ③′ root 质量审计（v1.43.0 AK P3-11）：extension 名 root / null 体 root 计数告警
+  if (report) {
+    for (const d of Object.values(out)) {
+      if (/extension/.test(d.root || '')) report.extRoots++;
+      const b = (d.defs && d.defs[d.root]) || null;
+      if (!b || b.t === 'null') report.nullRoots++;
     }
   }
   // ④ 并入 ies（位布局可共存——同名 IE 同时有 layouts 与 csn1 时解码优先 csn1）
@@ -10306,9 +10374,25 @@ function mergeCsn1IntoIes(ies, csn1, sections) {
 // 消息级（§11 消息名→文法 root）不另建 messages：44.060 消息即文法，ies 节即完整覆盖。
 function buildSchema44060(structured) {
   const problems = [];
-  const csn1 = buildCsn1Descriptors(structured.csn1, structured.sections);
+  // v1.43.0 AK P2-2/P3-11：解析失败 notes / 冲突 / root 质量全部汇总入 problems（可接受档——
+  // 覆盖缺口如实可见；fatal 分级仍由 classifyProblems 承接）
+  const report = { cells: 0, failed: [], conflicts: [], rootSuffix: 0, rootFallback: 0, extRoots: 0, nullRoots: 0 };
+  const csn1 = buildCsn1Descriptors(structured.csn1, structured.sections, report);
   const ies = mergeCsn1IntoIes({}, csn1, structured.sections);
   if (!Object.keys(ies).length) problems.push('CSN.1 文法表未捕获（含 ::= 的表格为零）');
+  if (report.failed.length) {
+    problems.push(`CSN.1 文法解析失败 ${report.failed.length} 项（${report.cells} 格中）——例: ${report.failed.slice(0, 3).map((f) => `${f.sec} ${String(f.note).slice(0, 80)}`).join(' / ')}`);
+  }
+  const st = structured.stats || {};
+  if (st.csn1Unattributed) {
+    problems.push(`CSN.1 未归属 ::= 表 ${st.csn1Unattributed} 张（无节锚落空）——例: ${(st.csn1UnattributedSamples || []).slice(0, 3).join(' / ').slice(0, 160)}`);
+  }
+  if (report.conflicts.length) {
+    problems.push(`CSN.1 同名异体定义冲突 ${report.conflicts.length} 起（池先到先得）——例: ${report.conflicts.slice(0, 3).map((c) => `${c[0]}(${c[1]})`).join(' / ')}`);
+  }
+  if (report.extRoots || report.nullRoots) {
+    problems.push(`CSN.1 root 质量：extension 名 root ${report.extRoots} 节、null 体 root ${report.nullRoots} 节`);
+  }
   const defCount = Object.values(ies).reduce((a, e) => a + Object.keys((e.csn1 && e.csn1.defs) || {}).length, 0);
   // 比例守卫：真实 44060 文法表 188 张/defs 446——表多而 defs 异常少 = 节归属系统性失配；
   // 合成/小型库（表 < 10）不误报。
@@ -11606,8 +11690,9 @@ function ipv6(rng) { return Array.from({ length: 16 }, () => rndByte(rng)); }
 // v1.42.0 P2-5 勘正叙事（v1.40.0 的「死代码」结论经 v5 独立评审证伪）：实测各族 schema 的
 // ies 节名零节号尾注、采样器传 ie.name，精确等值分支（NODE IDENTIFIER/NODE NUMBER/LOAD
 // METRIC/IMSI/MEI/TWAN/F-TEID 等）一直命中；匹配前剥尾注属防御性归一化（防未来摄入形态
-// 变化），非「激活」。名字链的真正缺口见 29274 'Load Metric'（ies 名 'Metric' ≠ 组行名，
-// AK 批专项）。PFCP（semanticPfcpValue）同口径防御。
+// 变化），非「激活」。名字链缺口（29274 ies 名 'Metric' ≠ 组行名 'Load Metric'）已在
+// v1.43.0 AK P3-13 修复：语义分支未命中时兜底查行名（见 gtpcSampleValue/pfcpSampleValue）。
+// PFCP（semanticPfcpValue）同口径防御。
 function semanticGtpValue(name, rng) {
   const n = String(name || '').trim().replace(/\s*\(\d+(?:\.\d+)*\)\s*$/, '').toUpperCase();
   if (/^(INTERNATIONAL MOBILE SUBSCRIBER IDENTITY \(IMSI\)|IMSI|ALTERNATIVE IMSI|C-MSISDN|MSISDN)$/.test(n)) {
@@ -11845,7 +11930,12 @@ function gtpcSampleValue(r, schema, rng, depth = 0) {
       }
       return Uint8Array.from(body);
     }
-    const sem = semanticGtpValue(ie.name, rng);
+    // v1.43.0 AK P3-13：语义规则兜底查行名——ies 条目名与行名可不同（29274 8.113 条目名
+    // 'Metric' vs 组行名 'Load Metric'，精确分支按条目名永不命中 → 布局随机 0..255 全域，
+    // >100 会被独立实现方判非法；行名回退后命中 LOAD METRIC 0..100 约束。全族探针实测
+    // 新增命中仅 3 处：29274 Load Metric×1 + 29060 行名 'MSISDN'×2，29244 为 0）。
+    const sem = semanticGtpValue(ie.name, rng)
+      || (r.name && r.name !== ie.name ? semanticGtpValue(r.name, rng) : null);
     if (sem) return sem;
     if (ie.layouts && ie.layouts[0] && ie.layouts[0].octets.length) {
       const { bytes } = layoutSample(ie.layouts[0].octets, rng, false);
@@ -11915,7 +12005,8 @@ function pfcpSampleValue(r, schema, rng, depth = 0) {
       }
       return Uint8Array.from(body);
     }
-    const sem = semanticPfcpValue(ie.name, rng);
+    const sem = semanticPfcpValue(ie.name, rng)
+      || (r.name && r.name !== ie.name ? semanticPfcpValue(r.name, rng) : null); // AK P3-13 行名兜底（同 gtpc 侧）
     if (sem) return sem;
     if (ie.layouts && ie.layouts[0] && ie.layouts[0].octets.length) {
       const { bytes } = layoutSample(ie.layouts[0].octets, rng, false);
