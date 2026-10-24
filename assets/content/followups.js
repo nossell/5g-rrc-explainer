@@ -977,6 +977,30 @@
         a: '38.331 管配置与上报——账本与 **L3 滤波工序（5.5.3.2）在 m42**、事件判据在 m3、SL 测量流程在 M72；38.215 管「**量本身怎么算**」——判据吃的每个数、报告装的每个量，户口都在这里（m42 原话「测量模型整图归 38.215/38.300」）。SL 量族 15 叶与 gNB 量族 10 叶留 M74 接力（M73 课 h0/a1/a4）。',
         ref: '38.215#4' }
     ] },
+    'm74:q0': { levels: [
+      { q: 'SL RSSI 为什么从第 2 个 OFDM 符号起测？',
+        a: '侧链时隙的第 1 个 OFDM 符号留给 **AGC（自动增益控制）**——接收端要先拿它把增益调稳，这段的功率读数不可信；SL RSSI 因此从**第 2 个 OFDM 符号起**、在**配置的 sub-channel**、配置给 PSCCH/PSSCH 的符号上测（§5.1.25 原文 starting from the 2nd OFDM symbol）。带 PSFCH 符号的 slot 还有双起始符号分支（sl-StartingSymbolFirst/Second 各管一类 slot）——反馈信道符号会挪动数据起点，RSSI 跟着挪（M74 课 b2/f1）。',
+        ref: '38.215#5.1.25' },
+      { q: 'CR 与 CBR 都是「资源池温度」，为什么要分成两个量？',
+        a: '账本不同：**CR=自己的账**——[n-a,n-1] 已用+[n,n+b] 已授权的 sub-channel 占比（窗 1000，发送端拥塞控制吃它）；**CBR=全池的账**——窗内 SL RSSI 超门限（sl-ThreshS-RSSI-CBR）的 sub-channel 比例（窗 100，资源池选择吃它）。一个管「我要发多少」、一个管「池子有多挤」——混用会把别人的忙闲记到自己头上（M74 课 b3/f2/f3）。',
+        ref: '38.215#5.1.26' }
+    ] },
+    'm74:q2': { levels: [
+      { q: 'gNB 量族的定义表为什么没有 Applicable for 列？',
+        a: 'Applicable for 写的是「哪些 **RRC 态**必须能测」——这是 **UE 的户口**；gNB 不处于 RRC 态，这个问题在 §5.2 不成立，结构表因此**只有 Definition 一列**（§5.2 容器句原文 The structure of the table defining a NG-RAN measurement quantity is shown below）。gNB 量也不出空口——自己量自己用（TADV→TA 命令、AoA→波束定位），换掉「户口」的是**参考点五档**：1-C 连接口/1-O 2-O 天线或 branch 合并/1-H TAB+卫星 38.108 两档（M74 课 a2/d2）。',
+        ref: '38.215#5.2' },
+      { q: 'TADV 与 gNB Rx–Tx 公式同形，差别在哪？',
+        a: '两枚都是 **TgNB-RX – TgNB-TX**（Rx 按首达径、Tx 取最靠近的 DL 子帧 #j）；差别只在被测上行信号——**gNB Rx–Tx 吃 SRS**（5.2.3，持续跟踪用），**TADV 吃 PRACH**（5.2.7，原文 The detected PRACH is used to determine the start of one subframe containing that PRACH——随机接入时刻的 TA 原始读数）。工程链：TADV→TA 命令→UE 上行提前；E-CID 上行定位也吃它（M74 课 d3）。',
+        ref: '38.215#5.2.7' }
+    ] },
+    'm74:q4': { levels: [
+      { q: 'UL SRS-TDCP 为什么不得脱离 TDCT 单独上报？',
+        a: '时域信道双子=**时刻轴+功率挂轴**：TDCT（5.2.9）给「什么时候」（时间粒度=38.211 4.1+timingReportingGranularityFactor、取功率最高的时刻、相对 UL RTOA 参考时间）；TDCP（5.2.10）给「多强」。§5.2.10 绑定句原文：UL SRS-TDCP measurements may not be reported without reporting of UL SRS-TDCT measurements——功率值没有时刻轴就无从对齐径与多径画像，配对上报是数据的完整性约束（M74 课 d4/f6）。',
+        ref: '38.215#5.2.10' },
+      { q: '这门课收编的 TDCP（5.1.45）为什么是 Uu 量却进 SL 课？',
+        a: 'v44 切面漏了它（三切面 20+15+17=52 对不上 55 叶）——Applicable 写 **RRC_CONNECTED** 而非 Sidelink，是 Uu 本土量；但它与 §5.2.10 UL SRS-TDCP 是**同一族量的 UE/gNB 两侧**（UE 用 CSI-RS（trs-info TRS）量时域相关、gNB 用 SRS 量时域功率），跨本成对放一起讲最省；收编后 §5.1 全叶账闭合：20+16+17+2=55（M74 课 c3/a3）。',
+        ref: '38.215#5.1.45' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
