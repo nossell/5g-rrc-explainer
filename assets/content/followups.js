@@ -953,6 +953,30 @@
         a: '**载波增删**（5.8.9.1b 二段式）、**能力转移**（5.8.9.2：enquiry 必带 frequencyBandListFilterSidelink，仅端到端 L2 U2U relay 豁免；对端按 filter 顺序编译候选组合尽量多装并回填 appliedFreqBandListFilter）、**PC5 收尾**（5.8.9.3b：三触发→丢弃端到端 SRB/DRB/QoS/SRAP 配置→IDLE/INACTIVE/OOC 触发 RLC 信道派生、CONNECTED 发 SUI）、**V2X 同步**（5.8.5a：按 36.331 5.10.7 发 SLSS+MIB-SL-V2X）、**Zone**（5.8.11：y1*64+x1，Floor+Mod 64，WGS84 测地距离）。**不对称**：信令触发只动**接收**侧（增=四参数加收/释=释放收），配置/上层触发在 RRCReconfigurationCompleteSidelink **之后**才动**发送**侧（增=只按 sl-AbsoluteFrequencyPointA 加发+SRB/DRB 额外允许载波指示/释=释放发+收回指示）（M72 课 d1/d2/d3/d4/f6）。',
         ref: '38.331#5.8.9.1b.2.2' }
     ] },
+    'm73:q0': { levels: [
+      { q: '为什么 SS-RSRP 的测量时机要锁在 SMTC 窗内？',
+        a: '**SMTC=SS/PBCH 块测量时间配置窗**——网络把「什么时候有 SSB 可测」的账（窗长+周期+偏移）告诉 UE；测量时间资源锁窗内是默认口径，例外只有两个：**WUR 唤醒接收机测量、L1-RSRP 用途**（38.214 上报配置指示时不受限）。锁窗的工程意义：异频测量要配 gap、邻区 SSB 周期各异——UE 只在窗内醒着测，省电与干扰两得；越窗采样混入非目标 RE，与门限（dBm）对不上账（M73 课 b1/f4）。',
+        ref: '38.215#5.1.1' },
+      { q: 'SS-RSRP 的加用规则为什么「跟着用途走」？',
+        a: '默认只测**承载 SSS 的 RE**；可加用 **PBCH DMRS**；高层指示时还可加 **CSI-RS**（按 38.213 功率缩放线性平均）——但**非 L1-RSRP 用途时不得加 CSI-RS**（§5.1.1 原文 not applicable）。另一条通用纪律：只在**同 SSB 索引+同 PCI** 的信号之间平均，高层指示子集时只测指示集——把不同小区/不同波束的 RE 混在一起平均是口径红账（M73 课 b1/a4）。',
+        ref: '38.215#5.1.1' }
+    ] },
+    'm73:q2': { levels: [
+      { q: 'LP-RSSI 为什么 ON 与 OFF 符号都观测？',
+        a: 'LP-SS 是 **OOK（开关键控）**信号——ON 符号有信号、OFF 符号只剩底噪；LP-RSSI 在 **OOK ON 与 OFF 符号上都观测**（§5.1.54，all sources 同款）——ON 段给信号+底噪、OFF 段给纯底噪，LP-RSRP÷LP-RSSI 才能同时看到「信号」与「全源背景」。别的 RSSI 只挑特定符号段，这枚连 OFF 段一起算，是全站独一份口径（M73 课 d4）。',
+        ref: '38.215#5.1.54' },
+      { q: 'LP 双量的户口为什么只有 IDLE/INACTIVE serving cell？',
+        a: 'LP-SS 服务于**低功耗唤醒链路**——UE 在 IDLE/INACTIVE 用唤醒接收机监听服务小区的 LP-SS，决定要不要醒过来收 PDCCH；CONNECTED 态不需要唤醒判决，量就没有户口（§5.1.53 Applicable 只写 IDLE/INACTIVE for serving cell）——与 SS-RSRP 的 WUR 分支同一条链路的电平账（M73 课 d4/b1）。',
+        ref: '38.215#5.1.53' }
+    ] },
+    'm73:q4': { levels: [
+      { q: 'SGCS 的分集口径为什么是「夹在 min/max 之间」？',
+        a: 'SGCS 是**相似度**（定义本体在 38.214 5.2.1.4.6，本规范只落口径）：各分支测出的相似度有高有低，§5.1.55 要求上报值 **no lower than the minimum and no higher than the maximum**——夹逼保真：上报值必须落在实测区间内。功率类量取「不低于任何分支」是保**分集增益下限**，SGCS 取区间是保**取值保真**——两套口径目的不同，别混（M73 课 d4）。',
+        ref: '38.215#5.1.55' },
+      { q: '这门课在全站测量链里的位置？',
+        a: '38.331 管配置与上报——账本与 **L3 滤波工序（5.5.3.2）在 m42**、事件判据在 m3、SL 测量流程在 M72；38.215 管「**量本身怎么算**」——判据吃的每个数、报告装的每个量，户口都在这里（m42 原话「测量模型整图归 38.215/38.300」）。SL 量族 15 叶与 gNB 量族 10 叶留 M74 接力（M73 课 h0/a1/a4）。',
+        ref: '38.215#4' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
