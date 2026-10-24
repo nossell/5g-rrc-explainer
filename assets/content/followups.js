@@ -1001,6 +1001,30 @@
         a: 'v44 切面漏了它（三切面 20+15+17=52 对不上 55 叶）——Applicable 写 **RRC_CONNECTED** 而非 Sidelink，是 Uu 本土量；但它与 §5.2.10 UL SRS-TDCP 是**同一族量的 UE/gNB 两侧**（UE 用 CSI-RS（trs-info TRS）量时域相关、gNB 用 SRS 量时域功率），跨本成对放一起讲最省；收编后 §5.1 全叶账闭合：20+16+17+2=55（M74 课 c3/a3）。',
         ref: '38.215#5.1.45' }
     ] },
+    'm75:q0': { levels: [
+      { q: 'L1-RSRP 和 RRM 报告里的 SS-RSRP 是同一个量吗？',
+        a: '同一个物理量、两条上报铁路。物理定义同源（38.215 §5.1.1 per-RE 线性平均、SMTC 锁窗、可加用 PBCH DMRS）；铁路不同——**L1 路走 CSI 报告上 MAC CE**：量化档 the reported L1-RSRP value is defined by a 7-bit value in the range [-140, -44] dBm with 1dB step size、差分 4bit/2dB（38.214 §5.2.1.4.3）、timeRestrictionForChannelMeasurements 锁机会；**RRM 路走 38.331 的 MeasurementReport**：L3 滤波→事件判据（A3 不等式持续 TTT）→measId 领航。38.215 5.1.1 还给 L1-RSRP 用途单发户口（SMTC 例外句）（M75 课 c4/dp6）。',
+        ref: '38.214#5.2.1.4.3' },
+      { q: '两条铁路的「资源」概念怎么对照？',
+        a: 'RRM 侧=量对象（measObject：频点+SSB/CSI-RS 资源表，同 ssbFrequency 至多一个）；L1 侧=CSI-ResourceConfig 下的量资源集——SRS-RSRP 每 set 1 ≤ K ≤ 32、CLI-RSSI 1 ≤ K ≤ 64、带宽 nrofRBs 为 4 的倍数；QCL 未配时兜底 the UE shall perform the SRS-RSRP measurement assuming that the resources are QCL ‘typeD’ to one of the latest received PDSCH and the latest monitored CORESET（38.214 §5.2.2.6/.7）。问上报先问铁路、问资源先问哪本规范（M75 课 c4）。',
+        ref: '38.214#5.2.2.6' }
+    ] },
+    'm75:q2': { levels: [
+      { q: 'SL 量测完去哪——谁消费 PSSCH/PSCCH-RSRP？',
+        a: '消费端在 38.214 §8.4.2：mode 2 感知选资源时 the UE measures RSRP for resource selection——sl-RS-ForSensing 设 \'pssch\' 测 PSSCH-RSRP（\'pscch\' 测 PSCCH-RSRP），都在 DMRS RE 上测（物理源在 38.211 §8.4.1.1/.3，端口集 the set of antenna ports  is given by [6, TS 38.214]）；CR/CBR 走另一条消费线——喂拥塞控制与资源池选择（38.215 §5.1.26）。配置与上报面在 38.331 §5.8.10.1（对端 PC5-RRC 四件套，本版 only RSRP）（M75 课 d1/dp7）。',
+        ref: '38.214#8.4.2' },
+      { q: 'SL 同步身份为什么是 672 不是 1008？',
+        a: 'Uu 与 SL 两套身份账：Uu 侧 1008 个 PCI（38.211 §7.4.2，PSS/SSS 两级拼出）；SL 侧 672 个 sidelink synchronization identities 且分 **id_net（网内）与 id_oon（覆盖外）两集**（§8.4.2）——覆盖外 UE 不再依赖网络时钟，id_oon 是自立身份段；DFN（侧链帧号）挂在这套 SL 时序上，TSL-RTOA 的 DFN 0 锚由此而来（M75 课 d2）。',
+        ref: '38.211#8.4.2' }
+    ] },
+    'm75:q4': { levels: [
+      { q: '为什么说跨规范追条款要「按内容认门牌」？',
+        a: '条款号会搬家（v46 实测）：38.215-j40 引用侧原文把 CJTC-Dd/F/P 指到 38.214 的 Clause 5.2.1.4.2 and 5.2.1.4.6/.7/.8、SGCS 指到 5.2.1.4.6（are describe 照录）；而 38.214-j50 实况是 **CJTC=.9/.10/.11**（中间插进 TDCP .5、CSI-PAI .6、L1-SRS-RSRP .7、L1-CLI-RSSI .8，门牌整体后移三号）、.6=CSI-PAI、**SGCS 全文零命中**（已迁移/移除）。引用规范指向它写作年代的版本——跨版本追条款用量名/reportQuantity 值（cjtc-Dd）/参数名（valueOfAD）反查并注明语料版本（M75 课 a2/f6）。',
+        ref: '38.214#5.2.1.4.9' },
+      { q: '量化台阶四张表记不住怎么办？',
+        a: '记锚点不记全表：L1-RSRP 与 L1-SRS-RSRP 同档 [-140,-44] dBm、1dB 步进、差分 4bit/2dB；L1-SINR [-23,40] dB、0.5dB、差分 1dB；L1-CLI-RSSI [-100,-25] dBm；数值↔测量量的映射收口在 38.133（[11]）。台阶只服务 L1/CSI 铁路（MAC CE）——RRM 报告不走这套档（M75 课 b3）。',
+        ref: '38.214#5.2.1.4.4' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

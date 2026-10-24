@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.48.0";
+const APP_VERSION = "1.51.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -11718,7 +11718,31 @@ function ipv6(rng) { return Array.from({ length: 16 }, () => rndByte(rng)); }
 // 变化），非「激活」。名字链缺口（29274 ies 名 'Metric' ≠ 组行名 'Load Metric'）已在
 // v1.43.0 AK P3-13 修复：语义分支未命中时兜底查行名（见 gtpcSampleValue/pfcpSampleValue）。
 // PFCP（semanticPfcpValue）同口径防御。
+
+// ---- v1.51.0 AS：semantic 命中面账本（防死分支无感累积） -----------------------------------
+// 键 = `gtp|pfcp/<spec|->:<规范化行名大写>`，值 = 命中次数。账本只读不写 rng——采样流
+// 逐字节零漂移（oracle 快照对拍坐实）。工具 tools/nas_semantic_hits.mjs 按账本出命中面
+// 清单与死分支清单（v8 审计期手工直方图的工具化；每批发版前自检一次）。
+const semanticHitLedger = new Map();
+function resetSemanticHits() { semanticHitLedger.clear(); }
+function recordSemanticHit(kind, name, spec) {
+  const key = `${kind}/${spec || '-'}:${String(name || '').trim().replace(/\s*\(\d+(?:\.\d+)*\)\s*$/, '').toUpperCase()}`;
+  semanticHitLedger.set(key, (semanticHitLedger.get(key) || 0) + 1);
+}
+
 function semanticGtpValue(name, rng, spec) {
+  const v = semanticGtpValueImpl(name, rng, spec);
+  if (v) recordSemanticHit('gtp', name, spec);
+  return v;
+}
+
+function semanticPfcpValue(name, rng) {
+  const v = semanticPfcpValueImpl(name, rng);
+  if (v) recordSemanticHit('pfcp', name, null);
+  return v;
+}
+
+function semanticGtpValueImpl(name, rng, spec) {
   const n = String(name || '').trim().replace(/\s*\(\d+(?:\.\d+)*\)\s*$/, '').toUpperCase();
   if (/^(INTERNATIONAL MOBILE SUBSCRIBER IDENTITY \(IMSI\)|IMSI|ALTERNATIVE IMSI|C-MSISDN|MSISDN)$/.test(n)) {
     return Uint8Array.from(bcdDigits(rng, 5 + Math.floor(rng() * 11))); // 5..15 位 BCD
@@ -11767,10 +11791,11 @@ function semanticGtpValue(name, rng, spec) {
     return Uint8Array.from([0xf1, 0x21, ...ipv4(rng)]);
   }
   if (n === 'MBMS SERVICE AREA' && spec === '29060') {
-    // 7.7.60：Length of MBMS Service Area list(1B) + 每项 2B——位布局随机长度而列表缺席
-    // → 越界（AN triage length-prefix 类 ×4/版）；空列表 [00] 合法（探针 E2：MBMS 本身
-    // 不再被拒，帧残余病火移 End User Address——多因叠加，本批同修）。
-    return Uint8Array.from([0x00]);
+    // 7.7.60：ext_length(2B) + 列表体——tshark 按「Extension Length + 内容」解剖
+    // （gtp.ext_length），内容 P 字节须满足 P≥4（P=0/2/3 判违、4..8 CLEAN——AQ 探针
+    // 细扫）。AN 期「空列表 [00]」结论作废：[00] 在真帧语境停 gtp.ext_length（门禁
+    // 窗口 ×20 帧可见），「接受面未定」实为整个 MBMS ext 族共享此病根（见下 AQ 块）。
+    return Uint8Array.from([0x00, 0x06, rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng)]);
   }
   if (n === 'RAN TRANSPARENT CONTAINER' && spec === '29060') {
     // 7.7.43：值首字节为容器长度前缀——AN 探针：[00]（空容器）干净、[00 00] 判违
@@ -11789,6 +11814,124 @@ function semanticGtpValue(name, rng, spec) {
     // e212.assoc.imsi）。
     return Uint8Array.from(bcdDigits(rng, 5 + Math.floor(rng() * 11)));
   }
+  // ---- AQ 批（v1.49.0）：29060 长度前缀族 + 29274 TMSI（探针 tmp/_v8_aq_probe3-6）----
+  // 病根：tshark 对 GTPv1 的 GSN Address / QoS Profile / MBMS 族 IE 的值按「2B 长度或
+  // Extension Length 前缀 + 内容」解剖（停点字段 gtp.ggsn_address_length / gtp.ext_length），
+  // 而 schema 布局只摄取内容部——前缀缺席时逐 IE 错位连环溢读，到帧尾字节耗尽才判违
+  // （真帧 lastIe 往往是下一个 IE，多因叠加帧「火移」表象的根源）。逐 IE 隔离探针定形。
+  if (/^(GSN|SGSN|GGSN) ADDRESS/.test(n) && spec === '29060') {
+    // 7.7.32：2B 长度(=4) + IPv4 4B——[00 04+4B] 隔离 CLEAN；行名跨消息别名
+    // （GGSN/SGSN Address for …）由 ie.name 'GSN Address' + 行名兜底双路命中。
+    return Uint8Array.from([0x00, 0x04, ...ipv4(rng)]);
+  }
+  if (/^ACCESS POINT NAME/.test(n) && spec === '29060') {
+    // 7.7.30：1B 长度 + 标签串——布局 open 行随机字节作长度域巨值溢读（Create PDP
+    // Context Request 帧停 gtp.apn_length/gtp.ext_length，AQ 后半程新显）；[01+1 字母] 干净。
+    // 29274 8.14 布局已含长度行、当前无病——spec 门控不误伤。
+    return Uint8Array.from([0x01, 0x61 + Math.floor(rng() * 26)]);
+  }
+  if (/^QUALITY OF SERVICE/.test(n) && spec === '29060') {
+    // 7.7.34：2B 长度(=2) + QoS Profile 2B——[00 02+2B] CLEAN，len=3/4 形态判违。
+    return Uint8Array.from([0x00, 0x02, rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'COMMON FLAGS' && spec === '29060') {
+    // 7.7.48：ext_length(=1) + flags 1B（全 0）。
+    return Uint8Array.from([0x00, 0x01, 0x00]);
+  }
+  if (/^TEMPORARY MOBILE GROUP IDENTITY/.test(n) && spec === '29060') {
+    // 7.7.56：ext_length(=6) + TMGI 6B（内容不校验，gsm_a 副解构仅专家告警不判违）。
+    // 前缀匹配：行名带 (TMGI) 后缀（行名兜底路径）与 ie.name 素名同分支。
+    return Uint8Array.from([0x00, 0x06, rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'MBMS SESSION IDENTIFIER' && spec === '29060') return Uint8Array.from([0x00, 0x01, rndByte(rng)]);
+  if (n === 'MBMS 2G/3G INDICATOR' && spec === '29060') return Uint8Array.from([0x00, 0x01, rndByte(rng)]);
+  if (n === 'MBMS SESSION DURATION' && spec === '29060') {
+    // 7.7.59：ext_length(=3) + 3B 时长（days/seconds 位域不校验取值）。
+    return Uint8Array.from([0x00, 0x03, rndByte(rng), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'MBMS SESSION REPETITION NUMBER' && spec === '29060') return Uint8Array.from([0x00, 0x01, rndByte(rng)]);
+  if (n === 'MBMS TIME TO DATA TRANSFER' && spec === '29060') return Uint8Array.from([0x00, 0x01, rndByte(rng)]);
+  if (n === 'MBMS FLOW IDENTIFIER' && spec === '29060') return Uint8Array.from([0x00, 0x02, rndByte(rng), rndByte(rng)]);
+  if (n === 'MBMS IP MULTICAST DISTRIBUTION' && spec === '29060') return Uint8Array.from([0x00, 0x00]);
+  if (/^CAMEL CHARGING INFORMATION CONTAINER/.test(n) && spec === '29060') {
+    // 7.7.x（iei 155）：ext 族又一员——tshark 读 ext_length(2B) 后解 CAMEL 容器；
+    // 空扩展 [00 00] 隔离 CLEAN（Create PDP Context Request ×5 帧停点，AQ 后半程新显）。
+    return Uint8Array.from([0x00, 0x00]);
+  }
+  if (n === 'ADDITIONAL MBMS TRACE INFO' && spec === '29060') {
+    // 7.7.68（布局未摄取 layouts=0，行 len=8 定长随机）：tshark 期待 Trace Reference 3B +
+    // Recording Session Ref 2B + Triggers 1B + Depth 1B + LOI 1B 恰 8B（7B 形态判违）。
+    return Uint8Array.from(Array.from({ length: 8 }, () => rndByte(rng)));
+  }
+  if (n === 'MBMS UE CONTEXT' && spec === '29060') {
+    // 7.7.55：linked NSAPI + Uplink TEID CP 4B + Enhanced NSAPI/PDP org/type + PDP 地址
+    // 长度 + GSN 地址长度(=4)+地址 + APN 长度 0 + 尾 0——16B 形态隔离 CLEAN（探针 v5 D）。
+    return Uint8Array.from([0x05, rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng), 0x00, 0x0a, 0x01, 0x00, 0x04,
+      rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng), 0x00, 0x00]);
+  }
+  if (/^USER LOCATION INFORMATION/.test(n) && spec === '29060') {
+    // 7.7.51：RAI 6B（MCC/MNC/LAC/RAC）。布局实产恒 11B（geo 部分错位体，扩窗直方图
+    // 78/78）——tshark 按「RAI 6B + geo_loc_type + 条件地理信息」复合解剖（v1.48 审计
+    // F2：geo 类型字节随机时概率性越界判违）；6B 纯 RAI 探针 CLEAN，去随机化。
+    return Uint8Array.from([rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'MM CONTEXT' && spec === '29060') {
+    // 7.7.28：flags 2B 全零 + CK 16B 零 + IK 16B 零 + quintuplets_length 2B=0 + 1×全零
+    // quintuplet 81B = 117B——36B 形态判违、117B 干净（探针 v6）。零随机消耗定形。
+    return new Uint8Array(117);
+  }
+  if (n === 'EXTENDED RANAP CAUSE' && spec === '29060') {
+    // 7.7.111：ext 族——tshark 读 ext_length 后按 RANAP Cause（APER CHOICE）解剖；
+    // [00 00]（row len=2）真帧 CLEAN（Relocation Cancel Request 三版确认，探针 AR-1/2）。
+    return Uint8Array.from([0x00, 0x00]);
+  }
+  // ---- AR 批（v1.50.0）：29274 深水六靶（探针 tmp/_v8_ar_probe1-4，真帧合成裁决）----
+  // 立档不建模：7.7.38 UTRAN Transparent Container（×2/版）——值 = [utran_field 1B] +
+  // RANAP APER（TargetRNC-/SourceRNC-ToTarget/SourceRNC-TransparentContainer，per.ext bit +
+  // 2 optional bits 后 rRC-Container OCTET STRING/targetRNC-ID——无 25.413 文法源，盲迭代
+  // 16+ 候选未破，立档归长期池：须真实抓包样本或 25.413 ASN.1 来源续探）。
+  if (n === 'SECONDARY RAT USAGE DATA REPORT' && spec === '29274') {
+    // 8.132：AO 期「12B 定长」结论作废（12B 缺 usage 段——tshark 双时间戳后无条件读
+    // DL/UL 各 8B 计数域，正帧溢读后续 IE 即判违）。AR 探针：27B 全形 = flags(0x00，
+    // srudn 置 0 无尾段) + RAT Type + EBI + start/end 时间戳各 4B + usage DL/UL 各 8B，
+    // 与行 len=27 一致；真帧合成 CLEAN（Delete Bearer Response 双 201 / FRCA）。
+    return Uint8Array.from([0x00, rndByte(rng), rndByte(rng),
+      rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng),
+      rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng),
+      ...Array.from({ length: 16 }, () => rndByte(rng))]);
+  }
+  if (n === 'MONITORING EVENT INFORMATION' && spec === '29274') {
+    // 8.120：tshark 实构 = [SCEF Reference ID 4B（byte0 高位即 srie/nscf/nsui/nsur 标志位，
+    // 置 0）][ID Length=byte4][ID][尾两字节]——8B 形（探针 AR-8：隔离随机内容 ×5 + 真帧
+    // 全 occ 双口径 PASS）。AR 期首版 [00][4B][01][1B] 七字节形缺尾两字节、且把随机字节
+    // 落在 len 域（189×3→×8 恶化）——撤形重立。注：FR-Req/IdentResp 行表有两个 189 行，
+    // 分支按行名全 occ 生效。
+    return Uint8Array.from([0x00, rndByte(rng), rndByte(rng), rndByte(rng), 0x01, rndByte(rng), 0x00, 0x00]);
+  }
+  if (n === 'COMPLETE REQUEST MESSAGE' && spec === '29274') {
+    // 8.46：值 = 完整 24.301 NAS 消息。最小一致形 [07 48 21]（PD=EMM + TAU Request
+    // + KSI/类型半八位组）真帧 CLEAN；Complete Attach Request 行同 IE 同分支（tshark
+    // 不做类型-消息相关性校验）。
+    return Uint8Array.from([0x07, 0x48, 0x21]);
+  }
+  if (/^ADDITIONAL MM CONTEXT/.test(n) && spec === '29274') {
+    // 8.90 SRVCC（iei 159）：[len_cm2=3][Classmark 2 三字节][len_cm3=2][Classmark 3 两字节]
+    // [len_scl=0] = 8B 定形（零随机）——CM3 后必须有 SCL 长度域（缺它停
+    // gtpv2.len_supp_codec_list 溢读）；SCL 空（len=0）为隔离+真帧双口径最小通过形。
+    // 须先于下方通用 MM CONTEXT 分支。
+    return Uint8Array.from([0x03, 0x27, 0x00, 0x40, 0x02, 0x30, 0x00, 0x00]);
+  }
+  if (/MM CONTEXT/.test(n) && spec === '29274') {
+    // 8.38（iei 103-108 行，GSM triplets 形）：flags(0x00) + 序字节(0x10——nr_tri=1、
+    // UAMBR/SAMBR 指示位 0) + 1×triplet（KC 8B + RAND 16B + SRES 4B）+ UE/MS 能力长度
+    // 与 MEI 长度三零字节封口 = 33B。隔离+真帧双口径 CLEAN 的**定长**形（探针 AR-7：
+    // 同语境下随机 triplet 字节判违——内容敏感，整体零随机定形）。注：8.90 SRVCC
+    // 行名亦含 MM CONTEXT，已由上方前缀分支截获。
+    return Uint8Array.from([0x00, 0x10,
+      0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+      0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+      0x01, 0x02, 0x03, 0x04, 0x00, 0x00, 0x00]);
+  }
   // 7.7.38 UTRAN transparent container（×2/版）：值内嵌 RRC 消息（tshark 按 UPER 解剖，
   // lastField=per.*）——须合成真实 RRC PDU，AN 批立档不建模（归后续批次评估）。
   if (/^USER LOCATION INFORMATION/.test(n) && spec === '29274') {
@@ -11800,10 +11943,9 @@ function semanticGtpValue(name, rng, spec) {
     return Uint8Array.from([0x00]);
   }
   // ---- AO 批（v1.47.0）：29274 容器尾定点（探针 Q1/R1/T1/T3 变体裁决）----
-  // 立档不建模：§8.132 Secondary RAT Usage Data Report——tshark 解剖器在双时间戳后
-  // **无条件**解析内嵌 ASN.1 PER usage report 段（探针 P1 的 12B 形态在帧尾短读语境
-  // 干净、正式帧中 PER 段读到后续 IE 字节即判违——end_timestamp NULL / usage_data_dl
-  // 巨值实证），与 §8.38 MM Context、§8.90 SRVCC Classmark 链同列 PER/深容器案。
+  // §8.132 Secondary RAT Usage Data Report 于 AR 批（v1.50.0）改为 27B 全形建模（上方
+  // AR 块）——AO 期「12B 定长」缺 DL/UL 各 8B 计数域（tshark 双时间戳后无条件读），
+  // 正帧溢读后续 IE 即判违，故当期回滚立档。§8.90 SRVCC 同于 AR 批破案。
   if (n === 'EXTENDED TRACE INFORMATION' && spec === '29274') {
     // 8.136：PLMN digits(3B)+Trace ID(3B)+Triggering Events/Trace Depth/List of Interfaces
     // 三个长度前缀段——位布局随机长度前缀（实测 trig_event_len=192）而段体缺席越界。
@@ -11823,6 +11965,12 @@ function semanticGtpValue(name, rng, spec) {
   if (n === 'P-TMSI SIGNATURE' && spec === '29274') {
     // 8.42：P-TMSI Signature 定长 3B（探针 T3）。
     return Uint8Array.from([rndByte(rng), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'TMSI' && spec === '29274') {
+    // 8.23：TMSI 定长 4B（TS 23.003）——布局 open 行（'5-n*'，字段名含规范散文）采 3B，
+    // 解剖器读第 4 字节越界（j50/j60 CS Paging Indication 帧，IE 恰为帧尾）；4B 双语境
+    // CLEAN（AQ 探针 v2；3B 帧中段因溢读后续字节假净——位置依赖，与 AO 201 同族教训）。
+    return Uint8Array.from([rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng)]);
   }
   // 立档不建模：§8.38 MM Context（超复杂 bitmask 容器 ×8）与 §8.90 Additional MM
   // context for SRVCC（内嵌 Classmark 2/3 链 + gsm_a 副解构，探针 S1/S2 均 MAL——×4）。
@@ -11866,7 +12014,7 @@ function semanticGtpValue(name, rng, spec) {
 // PFCP：标志位与变长地址部分一致（V4/V6 恒有且仅有所选地址族）。
 // v1.42.0 P3-6：导出——原先仅内部使用，PFCP 半边零测试不可钉（同 semanticGtpValue 的
 // 剥尾注为防御性归一化，非「激活」，叙事勘正见上）。
-function semanticPfcpValue(name, rng) {
+function semanticPfcpValueImpl(name, rng) {
   const n = String(name || '').trim().replace(/\s*\(\d+(?:\.\d+)*\)\s*$/, '').toUpperCase(); // 防御性归一化（同 semanticGtpValue）
   if (n === 'NODE ID') {
     // 8.2.38：Type 0=IPv4（4B）/ 1=IPv6（16B）
@@ -12338,7 +12486,7 @@ function gtpuKvLine(obj, skip) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, semanticGtpValue, semanticPfcpValue, sampleSchema, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
