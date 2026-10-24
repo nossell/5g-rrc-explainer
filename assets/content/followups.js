@@ -1025,6 +1025,30 @@
         a: '记锚点不记全表：L1-RSRP 与 L1-SRS-RSRP 同档 [-140,-44] dBm、1dB 步进、差分 4bit/2dB；L1-SINR [-23,40] dB、0.5dB、差分 1dB；L1-CLI-RSSI [-100,-25] dBm；数值↔测量量的映射收口在 38.133（[11]）。台阶只服务 L1/CSI 铁路（MAC CE）——RRM 报告不走这套档（M75 课 b3）。',
         ref: '38.214#5.2.1.4.4' }
     ] },
+    'm76:q0': { levels: [
+      { q: '恢复时 UE 从 Inactive 上下文恢复什么、刻意不恢复什么？',
+        a: '恢复清单（5.3.13.3 原文）：restore the RRC configuration, RoHC state, the EHC context(s), the UDC state, the stored QoS flow to DRB mapping rules and the KgNB and KRRCint keys——配置、三类头压缩状态、QoS 映射与密钥全解冻；**三例外**=masterCellGroup、mrdc-SecondaryCellGroup、pdcp-Config（等接收侧按新消息重配——抄旧小区组会跟新小区打架）。密钥还要**先行**：按存的 nextHopChainingCount 推新 KgNB 再派生四密钥，完整性保护立即生效；resumeMAC-I 用旧 KRRCint 且 COUNT/BEARER/DIRECTION 全置一（M76 课 b2/f1）。',
+        ref: '38.331#5.3.13.3' },
+      { q: 'RRCResumeComplete 的「可用旗标族」在报什么？',
+        a: '恢复完成消息一半是**存货清点单**（5.3.13.4）：VarMeasIdleReport→idleMeasAvailable、VarLogMeasReport→logMeasAvailable、VarConnEstFailReport→connEstFailInfoAvailable、VarRLF-Report→rlf-InfoAvailable、VarSuccessHO/SuccessPSCell 两变量→成功切换旗标、VarMobilityHistoryReport→mobilityHistoryAvail——网络按旗来取（m54 MDT 与 m43 MRO 的取数入口都在这里；M76 课 b3）。',
+        ref: '38.331#5.3.13.4' }
+    ] },
+    'm76:q2': { levels: [
+      { q: 'SCG 与 MCG 失败上报为什么是两条路？',
+        a: '腿不同：SCG 失败时 MCG 还活着——SCGFailureInformation 经 SRB1 直报 MN（failureType 九枚举分诊：t310-Expiry/synchReconfigFailureSCG/rlc-MaxNumRetx 等），MN 收完决定救不救；MCG 失败时只剩 SCG 腿——split SRB1 先把主路径倒到 SCG（未配复制时；MP 场景倒 indirect path），起 **T316** 等网络处置，消息经 SRB3 嵌 ULInformationTransferMRDC 送 MN（5.7.3.5 与 5.7.3b.4；M76 课 d1/d2/f2）。',
+        ref: '38.331#5.7.3b.4' },
+      { q: 'RA 报告账本的清账规则？',
+        a: '两条（5.7.10.4）：**48 小时**——The UE may discard the random access report information … 48 hours（最后一条入账后起算，与连接失败报告同款时限）；**换网即清**——RPLMN/注册 SNPN 不在账本 identityList 里就 clear the information included in VarRA-Report 重记；条目上限 maxRAReport、PLMN 上限 maxPLMN（EPLMN 整体入账）；SDT 失败与「MO-SDT 评估未满足」的 RSRP/数据量都记（M76 课 d2/f5）。',
+        ref: '38.331#5.7.10.4' }
+    ] },
+    'm76:q4': { levels: [
+      { q: 'ASN.1 字典和 §12 时延表为什么不建课？',
+        a: '颗粒不同：字典面（§6 系 IE 定义/§7.4 变量表/§11.2.2 节点间消息）与 §12 时延全表的单位是「字段/行」，课程的最小颗粒是**机制**（为什么、何时、谁）——查表交给工具页（词典/定时器网/变量地图已覆盖常用子集），课程按需引用不整章建课；§7.1.1 定时器总表只做纯讲述压舱（44 行起停表、纯表格叶不挂锚，工具页数据级底账）。inter-RAT/定位 17 叶维持 v44 记注、UE Assistance 目录 44.8k 由 m65/m66 概念课背书（M76 课 a2）。',
+        ref: '38.331#5.3.13.2' },
+      { q: 'H 高度事件族最特别的口径是什么？',
+        a: '第三条件的**量纲是米**（5.5.4.23）：Ms is the Aerial UE altitude relative to the sea level——Ms、Hys2、Thresh expressed in meters，别的判据全是 dB/dBm；迟滞拆双套（Hys1 管信号、Hys2 管高度）；A3H1/H2 两条件入判（AND）任一离判即离、A5H1/H2 三条件入判；NOTE 2 明言同款适用于 CondEvent 族（CHO 条件可用，M76 课 d4/f4）。',
+        ref: '38.331#5.5.4.23' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

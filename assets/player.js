@@ -626,7 +626,7 @@
         '每步大白话讲解 + 面试考法标注 + 结课自测',
         '买一次，浏览器本地永久离线可用'
       ];
-      var price = gate.price || '完整版 76 模块（M0–M75）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
+      var price = gate.price || '完整版 77 模块（M0–M76）一次性买断，本地永久离线可用<br>内测期全套 <b>¥99</b> / 单模块 <b>¥12</b>——获取方式见仓库 README';
       root.innerHTML = '';
       var w = el('div', 'gate-wrap');
       var c = el('div', 'gate');
@@ -639,7 +639,7 @@
         '<div class="g-actions">' +
         '<button class="btn primary" data-act="unlock">完整版解锁码</button>' +
         '<a class="btn" href="index.html">返回目录</a></div>' +
-        '<p class="g-note">免费层（Free Edition）：本站开放 M0–M3 四课与全部工具页；M4–M75 共 72 个模块属完整版，获取方式见仓库 README。</p>';
+        '<p class="g-note">免费层（Free Edition）：本站开放 M0–M3 四课与全部工具页；M4–M76 共 73 个模块属完整版，获取方式见仓库 README。</p>';
       w.appendChild(c); root.appendChild(w);
       c.querySelector('[data-act="unlock"]').onclick = function () {
         store.setLicense({ demo: true });
@@ -653,7 +653,7 @@
      主线 → 空口信令（RRC）→ 接口运输 → 信封外层（NAS/核心网）→ 底层地基 → 横切对照 */
   var HUB_GROUPS = [
     { key: 'main', no: '01', short: '主线', name: '主线 · 免费起点', desc: '一部电影看完全程：从开机到注册能上网的每一条信令——全站的地图，也是所有课的前置。', mods: ['ma'] },
-    { key: 'rrc', no: '02', short: 'RRC 空口', name: 'RRC · 空口信令组', desc: 'UE 与基站之间的对话全集：连接建立、系统消息、寻呼、测量、切换、承载重配、挂起、AS 安全、双连接，外加空闲态与小区重选专课（38.304）、测量机器深潜课（38.331 §5.5 + 38.133 秒表）、MRO 切换自愈课——切换失败后的取证、判责与参数自优化（38.300 §15.5.2 + 38.331 §5.7.9/5.7.10 + 38.423）、ANR 邻区自管理课——邻区关系怎么自己长：UE 取证读广播、NCRT 长表、AMF 中转 TNL 地址（38.300 §15.3.3/§15.3.4 + 38.331 §5.5.2–5.5.5）、话统 KPI 映射课——从接通率/掉线率/切换率/干扰覆盖四条 KPI 链反推空口信令与失败分支，每环配 UE 取证工具（38.331 §5.3.3/5.3.10 + 38.321 §5.1 + 38.300 §15.5.2/15.5.3）、CHO 条件切换课——网络备好候选、UE 条件满足自己拍板的执行机器（38.331 §5.3.5.13 + 38.300 §9.2.3.4）、LTM 触发移动性课——拍板信令降到 L2：gNB 收 L1/L3 测量报告后经 MAC CE 一击换小区、TCI 预激活与 early TA 把同步提前、RACH-less 免随机接入（38.331 §5.3.5.18 + 38.300 §9.2.3.5）、LTE RRC 连接控制全流程课——两代对称收官：4G 侧一条龙从 RACH 到 SRB1、双消息安全、mobilityControlInfo 切换、重建五步与重定向退场（36.331 §5.3.3/5.3.4/5.3.5/5.5/5.3.7/5.3.8/5.3.11）、MDT 最小化路测课——让 UE 自己当路测员：CONNECTED 配置、IDLE/INACTIVE 打点、T330 与 48 小时保留、reportType 三型门控、记录限额与 IDC 挂起，外加应用层测量与网侧 CSI 收集对照（38.331 §5.5a/§5.5b/§5.5c）、网侧测量与节能课——网络自己的三本账一次收齐：QoE 收集全生命周期（两基激活/容器链上报/去激活与过载暂停/IDLE 保留与 SRB4-5 取回/切片分簿/切换留放/RAN visible/MDT 对齐/高移动限定）、网络节能十式（booster 关断与波束账/cell DTX/DRX/驻留门禁/按需 SIB1/NES CHO/SSB-less/空域功放/OD-SSB/公共信道适应）与干扰管理两张账（RIM 大气波导与两框架/CLI 测量上报与静默）（38.300 §21+§15.4+§17）、UE 轻量省电课——终端侧三本账：SDT 小包传输（MO/MT 双发起、RACH 与 Type 1 CG 双入口、带/不迁移与 MT-SDT）、省电机制群（DRX 参数组/BA/DCP/LP-WUS/空闲测量放松与 LP-SS/双 DRX 组/RLM-BFD 放松/PDCCH skipping+SSSG）与覆盖增强（上行聚合重复八式/下行 FR1 两式）（38.300 §18+§11+§19）、安全·能力·标识课——架构三支柱收官：AS 安全（原则四条与 COUNT 一次性、KSEAF→KAMF 密钥树、水平/垂直推导与 NCC、AS SMC 六条激活时序、终止点与状态迁移键存亡）、UE 能力（分层与 category 决裂、FS 矩阵、过滤三闸与 eRedCap 镜像、能力 ID 与 AMF 存储、UTRA-FDD 动态 IE 现取不存）、NG 标识（RNTI 三十二枚认人/报事二分、网络标识十枚、侧链 Layer-2 ID 非对称拆分）（38.300 §13+§14+§8）。', mods: ['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'my', 'm42', 'm43', 'm44', 'm45', 'm46', 'm47', 'm48', 'm54', 'm65', 'm66', 'm67'] },
+    { key: 'rrc', no: '02', short: 'RRC 空口', name: 'RRC · 空口信令组', desc: 'UE 与基站之间的对话全集：连接建立、系统消息、寻呼、测量、切换、承载重配、挂起、AS 安全、双连接，外加空闲态与小区重选专课（38.304）、测量机器深潜课（38.331 §5.5 + 38.133 秒表）、MRO 切换自愈课——切换失败后的取证、判责与参数自优化（38.300 §15.5.2 + 38.331 §5.7.9/5.7.10 + 38.423）、ANR 邻区自管理课——邻区关系怎么自己长：UE 取证读广播、NCRT 长表、AMF 中转 TNL 地址（38.300 §15.3.3/§15.3.4 + 38.331 §5.5.2–5.5.5）、话统 KPI 映射课——从接通率/掉线率/切换率/干扰覆盖四条 KPI 链反推空口信令与失败分支，每环配 UE 取证工具（38.331 §5.3.3/5.3.10 + 38.321 §5.1 + 38.300 §15.5.2/15.5.3）、CHO 条件切换课——网络备好候选、UE 条件满足自己拍板的执行机器（38.331 §5.3.5.13 + 38.300 §9.2.3.4）、LTM 触发移动性课——拍板信令降到 L2：gNB 收 L1/L3 测量报告后经 MAC CE 一击换小区、TCI 预激活与 early TA 把同步提前、RACH-less 免随机接入（38.331 §5.3.5.18 + 38.300 §9.2.3.5）、LTE RRC 连接控制全流程课——两代对称收官：4G 侧一条龙从 RACH 到 SRB1、双消息安全、mobilityControlInfo 切换、重建五步与重定向退场（36.331 §5.3.3/5.3.4/5.3.5/5.5/5.3.7/5.3.8/5.3.11）、MDT 最小化路测课——让 UE 自己当路测员：CONNECTED 配置、IDLE/INACTIVE 打点、T330 与 48 小时保留、reportType 三型门控、记录限额与 IDC 挂起，外加应用层测量与网侧 CSI 收集对照（38.331 §5.5a/§5.5b/§5.5c）、网侧测量与节能课——网络自己的三本账一次收齐：QoE 收集全生命周期（两基激活/容器链上报/去激活与过载暂停/IDLE 保留与 SRB4-5 取回/切片分簿/切换留放/RAN visible/MDT 对齐/高移动限定）、网络节能十式（booster 关断与波束账/cell DTX/DRX/驻留门禁/按需 SIB1/NES CHO/SSB-less/空域功放/OD-SSB/公共信道适应）与干扰管理两张账（RIM 大气波导与两框架/CLI 测量上报与静默）（38.300 §21+§15.4+§17）、UE 轻量省电课——终端侧三本账：SDT 小包传输（MO/MT 双发起、RACH 与 Type 1 CG 双入口、带/不迁移与 MT-SDT）、省电机制群（DRX 参数组/BA/DCP/LP-WUS/空闲测量放松与 LP-SS/双 DRX 组/RLM-BFD 放松/PDCCH skipping+SSSG）与覆盖增强（上行聚合重复八式/下行 FR1 两式）（38.300 §18+§11+§19）、安全·能力·标识课——架构三支柱收官：AS 安全（原则四条与 COUNT 一次性、KSEAF→KAMF 密钥树、水平/垂直推导与 NCC、AS SMC 六条激活时序、终止点与状态迁移键存亡）、UE 能力（分层与 category 决裂、FS 矩阵、过滤三闸与 eRedCap 镜像、能力 ID 与 AMF 存储、UTRA-FDD 动态 IE 现取不存）、NG 标识（RNTI 三十二枚认人/报事二分、网络标识十枚、侧链 Layer-2 ID 非对称拆分）、主线拾遗课——38.331 主线的补刀（恢复线五叶：RAN 寻呼决策树/restore 三例外/停表清点/失败记账 6·3·3；重配细叶：fullConfig 留五件与密钥四支/CPAC 大小洗牌/SL 专配与中继增改；失败上报：failureType 九枚举与 MCG 倒换 T316；每 SIB 动作与按需 SI；H 高度事件米制与空闲测量；§7.1.1 定时器总表压舱）（38.331 §5.2/§5.3/§5.5/§5.7 拾遗 32 锚——过程面叶子级清账，ASN.1 字典与时延表记注）。', mods: ['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'my', 'm42', 'm43', 'm44', 'm45', 'm46', 'm47', 'm48', 'm54', 'm65', 'm66', 'm67', 'm76'] },
     { key: 'if', no: '03', short: '接口与用户面', name: '接口与用户面 · 信令离开基站之后', desc: '38.401 架构总纲课打底（NG-RAN 节点模型与协议栈分布的娘家）、NG/Xn/S1/X2/F1/E1 六本消息级接口台账一台凑齐、接口族收官课、数据面与 GTP-U 隧道——网络侧视角与比特流视角。', mods: ['mi', 'mx', 'mp', 'mz', 'mng', 'ms1', 'mx2', 'mf1', 'me1', 'm41'] },
     { key: 'nas', no: '04', short: 'NAS 与核心网', name: 'NAS 与核心网 · 信封的外层', desc: '注册与会话这一层的全套：5G NAS、5GC 会话流程、隧道与转发面信令（GTP-C/PFCP）、网络切片专课（S-NSSAI 的旅程）、EPS 侧 EMM/ESM 专章，加上 SBA 服务化架构（NRF/发现/token）、PDU 会话信令专课与 Service Request 专课。', mods: ['mn', 'mg', 'mb', 'me', 'mr', 'mo', 'mm', 'mns'] },
     { key: 'low', no: '05', short: '空口底层', name: '空口底层 · 信令脚下的地基', desc: '信令之前的那一秒：MAC 怎么敲门、物理层怎么把比特搬上无线帧、QoS 流怎么绑进承载（5QI/SDAP 专课）——学完上层再下井，豁然开朗。', mods: ['mc', 'mf', 'mq'] },
@@ -799,7 +799,7 @@
       function renderLic() {
         lic = store.license();
         licCard.innerHTML =
-          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0–M3 与全部工具页；完整版（M4–M75）获取方式见 README。</div></div>' +
+          '<div><div class="lc-t">付费模块授权</div><div class="lc-d">免费层开放 M0–M3 与全部工具页；完整版（M4–M76）获取方式见 README。</div></div>' +
           '<div style="display:flex;gap:8px;align-items:center">' +
           '<span class="license-state' + (lic.demo ? ' on' : '') + '">' + (lic.demo ? '完整版用户' : '免费层') + '</span>' +
           '<button class="btn sm" data-act="export-progress" title="生成 Markdown 学习进度单（完成态/测验分/下一步建议）">导出学习进度</button>' +
@@ -863,7 +863,7 @@
       headRow.appendChild(expandBtn);
       root.appendChild(headRow);
       root.appendChild(viewbar);
-      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程、M1 连接建立、M2 系统消息与 M3 寻呼与 DRX + 全部工具页；M4–M75 属完整版。'));
+      root.appendChild(el('p', 'sec-sub', '两级目录：先选学习域，展开后再挑课。免费层：M0 接入全流程、M1 连接建立、M2 系统消息与 M3 寻呼与 DRX + 全部工具页；M4–M76 属完整版。'));
       root.appendChild(tools);
       root.appendChild(pathView); pathView.style.display = 'none';
 
