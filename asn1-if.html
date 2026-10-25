@@ -54,6 +54,7 @@
 .ai-sec{font:700 11px var(--mono);color:var(--tx3);background:var(--inset);border-radius:5px;padding:2px 8px;cursor:pointer}
 .ai-sec:hover{color:var(--accent-deep)}
 .ai-dr{font:700 11px var(--sans);color:#2563EB;background:#EFF6FF;border-radius:5px;padding:2px 8px}
+.ai-rawnote{margin-top:7px;font-size:11.5px;color:#B45309;background:#FEF3C7;border-radius:6px;padding:4px 10px;line-height:1.6}
 .ai-desc{margin-top:7px;font-size:12.5px;color:var(--tx2);line-height:1.7;font-style:italic}
 .ai-desc b{font-style:normal;font-weight:700;color:var(--tx1)}
 .ai-body{margin-top:10px;background:var(--inset);border:1px solid var(--bd);border-radius:9px;padding:12px 14px;font:500 12px/1.75 var(--mono);color:var(--tx1);white-space:pre-wrap;overflow-wrap:anywhere;max-height:290px;overflow:hidden;position:relative;cursor:pointer}
@@ -177,7 +178,11 @@
     if (d.dr) h += '<span class="ai-dr">' + esc(d.dr) + '</span>';
     h += '</div>';
     if (d.d) h += '<div class="ai-desc">官方引言：This message is <b>' + esc(d.d) + '</b></div>';
-    h += '<pre class="ai-body">' + linkify(esc(d.b)) + '</pre></div>';
+    h += '<pre class="ai-body">' + linkify(esc(d.b)) + '</pre>';
+    if (/&[A-Za-z]+OPTIONAL/.test(d.b)) {
+      h += '<div class="ai-rawnote">语料原样：上一字段树正文在规范源文件（clauses.json）中即为此粘连形态（如 &amp;SuccessfulOutcomeOPTIONAL），本表照录不改写——规范 PDF 中其为换行分隔的正常两词。</div>';
+    }
+    h += '</div>';
     return h;
   }
 

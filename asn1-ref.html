@@ -60,6 +60,10 @@
 .a1-fr{display:flex;gap:10px;font-size:12px;line-height:1.7;padding:2.5px 0;align-items:baseline}
 .a1-fr .ff{flex:none;max-width:46%;font:700 11.5px var(--mono);color:var(--accent-deep);background:var(--accent-bg);border-radius:5px;padding:1px 7px;overflow-wrap:anywhere}
 .a1-fr .fd{color:var(--tx2);overflow-wrap:anywhere}
+.a1-multi{font:600 10px var(--sans);font-style:normal;color:#B45309;background:#FEF3C7;border-radius:4px;padding:1px 6px;margin-right:6px;white-space:nowrap}
+.a1-orph{margin-top:18px;border:1px dashed var(--bd);border-radius:9px;padding:10px 14px 12px}
+.a1-orph .ft{font:800 11px var(--sans);color:var(--tx3);margin-bottom:6px}
+.a1-oc{margin-top:8px;font:700 12.5px var(--mono);color:var(--tx1)}
 .a1-empty{margin-top:40px;text-align:center;color:var(--tx3);font-size:13.5px}
 .a1-foot{margin-top:34px;font-size:12.5px;color:var(--tx3);line-height:1.8;border-top:1px solid var(--bd);padding-top:16px}
 .a1-foot a{color:var(--accent-deep);font-weight:700;text-decoration:none}
@@ -120,7 +124,9 @@
   var LIMIT = 160;
 
   // 预索引：小写全文（搜索用，含字段注释行文本）与名字集合（交叉引用用）
-  // 字段表归属：先按定义名原样查，miss 再剥 -rNN 后缀查（表名/定义名后缀口径互异，双向兜底）
+  // 字段表归属 v2（v53）：①「A, B」/「A and B」多定义共享表拆分索引，逐一定义挂载；
+  // ②显式别名（表头拼写/大小写/全称缩写与定义名互异——AutonomousDenialParamters 少 a 系表头语料原样）；
+  // ③-rNN/-vNNNN 双后缀剥除（v1 只剥 -rNN）。v49-v51 审计 P2-3：16 张表/152 行进不了定义卡 → 归零。
   var names = {};
   var i, d;
   for (i = 0; i < D.length; i++) {
@@ -128,12 +134,32 @@
     d._s = (d.n + '\n' + d.b).toLowerCase();
     names[d.n.split(' { ')[0]] = i;
   }
-  for (var fn in FT) { /* 表名→定义名归属走 fieldsOf 动态查 */ }
-  function fieldsOf(d) {
+  var ALIAS = {
+    'AutonomousDenialParameters': 'AutonomousDenialParamters',
+    'MeasIdleConfigSIB': 'MeasIdleConfig',
+    'MeasIdleConfigDedicated': 'MeasIdleConfig',
+    'SSB-InfoNcell': 'SSB-InfoNCell',
+    'Uplink-powerControl': 'Uplink-PowerControl, Uplink-powerControlExt',
+    'MultiPDSCH-TDRA-List': 'MultiPDSCH-TimeDomainResourceAllocation'
+  };
+  var fldIdx = {};
+  for (var fk in FT) {
+    var fps = fk.split(/\s*,\s*|\s+and\s+/);
+    for (var pi = 0; pi < fps.length; pi++) if (fps[pi]) fldIdx[fps[pi]] = fk;
+  }
+  function fieldsKeyOf(d) {
     var bare = d.n.split(' { ')[0];
-    if (FT[bare]) return FT[bare];
-    var m = bare.match(/^(.*)-r\d+$/);
-    return m && FT[m[1]] ? FT[m[1]] : null;
+    var stripped = bare.replace(/-[rv]\d+$/, '');
+    var ks = bare === stripped ? [bare] : [bare, stripped];
+    for (var ki = 0; ki < ks.length; ki++) {
+      if (fldIdx[ks[ki]]) return fldIdx[ks[ki]];
+      if (ALIAS[ks[ki]] && FT[ALIAS[ks[ki]]]) return ALIAS[ks[ki]];
+    }
+    return null;
+  }
+  function fieldsOf(d) {
+    var k = fieldsKeyOf(d);
+    return k ? FT[k] : null;
   }
   for (i = 0; i < D.length; i++) {
     d = D[i];
@@ -179,11 +205,14 @@
     h += '<pre class="a1-body">' + linkify(esc(d.b)) + '</pre>';
     var fl = fieldsOf(d);
     if (fl && fl.length) {
-      h += '<div class="a1-fld"><div class="ft">官方字段注释 · ' + fl.length + ' 行（§6.3.2 表格面）</div>';
+      var fk2 = fieldsKeyOf(d);
+      var shared = fk2 && (fk2.indexOf(',') >= 0 || fk2.indexOf(' and ') >= 0);
+      h += '<div class="a1-fld"><div class="ft">官方字段注释 · ' + fl.length + ' 行（§6.3.2 表格面）' + (shared ? ' · 多定义共享表（' + esc(fk2) + '，逐一定义挂载）' : '') + '</div>';
       for (var r = 0; r < fl.length; r++) {
         var f0 = fl[r][0], f1 = fl[r][1] || '';
         if (!f0) { h += '<div class="a1-fr"><span class="fd">' + esc(f1) + '</span></div>'; continue; }
-        h += '<div class="a1-fr"><span class="ff">' + esc(f0) + '</span><span class="fd">' + esc(f1) + '</span></div>';
+        var multi = f1.charAt(0) === ',' ? '<i class="a1-multi">多字段共享</i>' : '';
+        h += '<div class="a1-fr"><span class="ff">' + esc(f0) + '</span><span class="fd">' + multi + esc(f1) + '</span></div>';
       }
       h += '</div>';
     }
@@ -241,11 +270,31 @@
   function foot() {
     var withD = 0;
     for (var j = 0; j < D.length; j++) if (D[j].d) withD++;
+    // v53 未归属字段表：拆分/别名/剥后缀后仍无定义卡认领的表，页脚显式上页不静默沉没
+    var usedKeys = {};
+    for (var j2 = 0; j2 < D.length; j2++) { var uk = fieldsKeyOf(D[j2]); if (uk) usedKeys[uk] = 1; }
+    var orph = [];
+    for (var ok in FT) if (!usedKeys[ok]) orph.push(ok);
+    orph.sort();
+    var orphRows = 0;
+    var oh = '';
+    if (orph.length) {
+      oh = '<div class="a1-orph"><div class="ft">未归属字段表 · ' + orph.length + ' 张 / 语料 §6.3.2 有注释表但无同名 ASN.1 定义认领——显式上页，不进定义卡搜索索引</div>';
+      for (var oi = 0; oi < orph.length; oi++) {
+        var rows3 = FT[orph[oi]];
+        orphRows += rows3.length;
+        oh += '<div class="a1-oc"><b>' + esc(orph[oi]) + '</b>（' + rows3.length + ' 行）</div>';
+        for (var ri = 0; ri < rows3.length; ri++) {
+          oh += '<div class="a1-fr"><span class="ff">' + esc(rows3[ri][0]) + '</span><span class="fd">' + esc(rows3[ri][1] || '') + '</span></div>';
+        }
+      }
+      oh += '</div>';
+    }
     document.getElementById('foot').innerHTML =
       '数据：<b>' + A.meta.src + '</b>（' + A.meta.corpus + ' 语料，§6.2.1–§11.2.2 十二组）· ' +
-      D.length + ' 条定义 · ' + withD + ' 条带官方引言 · ' + nWithFields + ' 条带官方字段注释（全库 ' + F.meta.tables + ' 张表 / ' + F.meta.rows + ' 行）· 生成器 tools/gen_asn1_defs.py + gen_asn1_fields.py。<br>' +
-      '原文照录（含行内 Need M/S/R 条件注释与个别拼写笔误，如规范原文所示）；条款号即 TS 38.331 章节号。' +
-      '中文详解词条见 <a href="dict.html">信元词典</a>；课程讲解从 <a href="index.html">目录</a> 进。';
+      D.length + ' 条定义 · ' + withD + ' 条带官方引言 · ' + nWithFields + ' 条带官方字段注释 + ' + orph.length + ' 张未归属表页脚上页（全库 ' + F.meta.tables + ' 张表 / ' + F.meta.rows + ' 行全量上页）· 生成器 tools/gen_asn1_defs.py + gen_asn1_fields.py。<br>' +
+      '原文照录（含行内 Need M/S/R 条件注释与个别拼写笔误，如规范原文所示；描述以逗号开头的行=多字段共享行，v53 起显式标注）；条款号即 TS 38.331 章节号。' +
+      '中文详解词条见 <a href="dict.html">信元词典</a>；课程讲解从 <a href="index.html">目录</a> 进。' + oh;
   }
 
   // 事件
