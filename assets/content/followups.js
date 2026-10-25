@@ -1097,6 +1097,66 @@
         a: 'TCRmax 窗内重选次数 vs NCR_M/NCR_H 分普通/中/高速；连续回跳同一小区的重选不计数；TCRmaxHyst 内中高速判据不再满足才回普通；高速缩放=Qhyst+sf-High、TreselectionNR×sf-High（乘法结果向上取整到秒）（M78 课 c3）。',
         ref: '38.304#5.2.4.3' }
     ] },
+    'm79:q1': { levels: [
+      { q: 'L2 服务栈五级给什么？CA 和 DC 在 L2 的分界在哪？',
+        a: '物理层→MAC 给 transport channels、MAC→RLC 给 logical channels、RLC→PDCP 给 RLC channels、PDCP→SDAP 给 radio bearers、SDAP→5GC 给 QoS flows；CA=多载波只暴露给 MAC（每 serving cell 一 HARQ 实体、TB 不跨 cell），DC=配 SCG 即两个 MAC 实体（MCG/SCG 各一）（M79 课 a1/c1/c3）。',
+        ref: '38.300#6.1' },
+      { q: 'RLC 三模式怎么配？AM 的溢价是什么？',
+        a: 'SRB0、寻呼与广播系统信息用 TM；其余 SRB 一律 AM；DRB 用 UM 或 AM。AM 独有四项：ARQ 纠错、重分段、重复检测、协议错检测；ARQ 按状态报告重传 SDU 或段、RLC 按需轮询、收端检出缺失即触发状态报告（M79 课 a3）。',
+        ref: '38.300#6.3.1' },
+      { q: 'PDCP 的 COUNT 回绕谁管？SDAP 一实体配几个？',
+        a: 'COUNT 不许在 DL/UL 回绕、防绕是网络的责任（释放重加承载或全配置）；SDAP 每 PDU session 配一个实体、QoS flow↔DRB 映射+双向打 QFI 标（M79 课 a4）。',
+        ref: '38.300#6.4.1' }
+    ] },
+    'm79:q2': { levels: [
+      { q: 'NR 参数集的 µ 表有什么坑？',
+        a: 'f=2µ×15kHz；PSS/SSS/PBCH 用 µ={0,1,3,4,5,6}（240kHz 不传数据）、其他信道用 µ={0,1,2,3,5,6}（60kHz 不做同步）；Normal CP 全支持、Extended CP 仅 µ=2；12 子载波一 PRB、载波至多 275 PRB（M79 课 b1）。',
+        ref: '38.300#5.1' },
+      { q: 'CD-SSB 与 NCD-SSB 的区别？',
+        a: '关联 RMSI（SIB1）的是 CD-SSB、PCell 恒挂同步栅格上的 CD-SSB；不关联的是 NCD-SSB——BWP 不含 CD-SSB 时做 RLM/BFD/RRM/RA 资源选择测量；每 BWP 至多配一 SSB（M79 课 b3）。',
+        ref: '38.300#5.2.4' },
+      { q: 'RA 前导四序列长度怎么分？',
+        a: '839 配 1.25/5kHz（支持 restricted Type A/B、仅授权频谱）；139 配 15-960kHz（授权或共享两用）；571 配 30/120/480kHz 与 1151 配 15/120kHz——FR1 仅共享频谱用（M79 课 b5）。',
+        ref: '38.300#5.3.4' }
+    ] },
+    'm79:q3': { levels: [
+      { q: 'SUL 与上行 CA 的本质区别？',
+        a: 'SUL：同一时刻只能在被补充 UL 或 SUL 之一上发（not on both at the same time）；同小区 2UL1DL、PUSCH 重叠靠调度避免、PUCCH 只能配在其中一个 UL、每个 UL 都支持初始接入（M79 课 c2）。',
+        ref: '38.300#5.4.2' },
+      { q: 'Inter-RAT 四条迁移里保序无损谁支持？',
+        a: '只有 NR↔E-UTRA 同 5GC（gNB↔ng-eNB）支持 in-sequence and lossless；5GC→EPC 与 NR-UTRA SRVCC 都明写不支持——SRVCC 只为进行中 IMS 语音、容器上限 2560 octets（M79 课 d2/d3/d5）。',
+        ref: '38.300#9.3.1.2' },
+      { q: '5GS→EPS 的端标记机器怎么走？',
+        a: '源 NG-RAN 无更多数据时发带 QFI 的 end marker（38.415 协议）给 UPF；UPF 按 QFI→EPS bearer ID 认隧道、发 SGW 时剥 QFI；反向 EPS→5GS 由 UPF 加 QFI、目标 NG-RAN 收到带 QFI 端标记才开始发新数据（M79 课 d3/d4）。',
+        ref: '38.300#9.3.2.5' }
+    ] },
+    'm80:q1': { levels: [
+      { q: 'SI 获取的触发有哪些？存量复用的例外？',
+        a: '八显式（开机选小区/重选/覆盖回归/同步重配完成/从其他 RAT 进入/SI 变更指示/PWS 通知/上层请求）+无有效存量兜底；除 MIB/SIB1/SIB6/SIB7/SIB8 外可复用存量（钥匙两枚+告警三枚必须新鲜）（M80 课 a2）。',
+        ref: '38.331#5.2.2.2' },
+      { q: 'CONNECTED 态什么时候取 MIB/SIB1？',
+        a: 'MIB：T311 跑（重建中）恒取；SIB1 三条件择一（都以配 searchSpaceSIB1 公共搜索空间为前提）：SI 变更指示/无有效存量且本修改周期未取/notBroadcasting（按需请求）（M80 课 a3）。',
+        ref: '38.331#5.2.2.3' }
+    ] },
+    'm80:q2': { levels: [
+      { q: '迁出 NR 的发起门槛？收到命令先停什么？',
+        a: '门槛：AS 安全已激活+SRB2 与至少一 DRB（或多播 MRB）已建未挂起；任何 DAPS 承载配置即禁。收到 MobilityFromNRCommand：停 T310/T312；T316 跑则停+VarRLF-Report 记 elapsedTimeT316 与 pSCellId（不支持快恢复报告则清空）；T390 全类别停（M80 课 c1/c2）。',
+        ref: '38.331#5.4.3.3' },
+      { q: '迁出成功后源侧清理什么？哪些定时器豁免？',
+        a: 'reset MAC；停全部定时器除 T325/T330/T400；释放 RNA 信息、AS 安全上下文四钥（KRRCenc/KRRCint/KUPint/KUPenc）、全部无线资源/RLC/MAC、全部 RB 的 PDCP/SDAP；delta 复用的 PDCP/SDAP 豁免（M80 课 c3）。',
+        ref: '38.331#5.4.3.4' },
+      { q: '迁出失败怎么回退？语音回落特例？',
+        a: '一般失败：回源 PCell 配置+发起 5.3.7 连接重建；语音回落（voiceFallbackIndication 或紧急回落）找不到 suitable E-UTRA 时，紧急呼叫进行中可选 acceptable 支持紧急呼叫的小区、直接回 RRC_IDLE（release cause RRC connection failure）不回 NR 重建（M80 课 c4）。',
+        ref: '38.331#5.4.3.5' }
+    ] },
+    'm80:q3': { levels: [
+      { q: 'UE 能力上报的三容器怎么分工？',
+        a: 'nr→UE-NR-Capability（带 supportedBandCombinationList/featureSets/featureSetCombinations）；eutra-nr→支持 (NG)EN-DC 或 NE-DC 才报 UE-MRDC-Capability；eutra→按 36.331 5.6.3.3（capabilityRequestFilter 可过滤）；utra-fdd 装容器（M80 课 d2）。',
+        ref: '38.331#5.6.1.3' },
+      { q: 'band combination 的三容器拼图规则？',
+        a: '三容器间 feature set ID 必须一致（无未定义引用）；gNB 用 UE-NR 的 featureSets+UE-MRDC 的 featureSetCombinations 拼 MRDC 能力，eNB 镜像用 UE-EUTRA 的 featureSetsEUTRA+同组合；无 frequencyBandListFilter 的查询不支持；装不下裁剪 up to UE 实现（M80 课 d3）。',
+        ref: '38.331#5.6.1.4' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

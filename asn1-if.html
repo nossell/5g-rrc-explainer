@@ -109,10 +109,6 @@
   <div class="ai-list" id="list"></div>
   <div class="ai-foot" id="foot"></div>
 </div>
-<script src="assets/content/xn-defs.js"></script>
-<script src="assets/content/ng-defs.js"></script>
-<script src="assets/content/e1-defs.js"></script>
-<script src="assets/content/f1-defs.js"></script>
 <script>
 (function () {
   'use strict';
@@ -122,17 +118,37 @@
     { key: 'e1', label: 'E1AP', obj: 'IF_ASN1_E1', ts: 'TS 38.463', role: 'gNB-CU-CP ↔ gNB-CU-UP（控制面与用户面间）', chips: ['BearerContextSetupRequest', 'E1SetupRequest', 'gNB-CU-UP-UE-E1-AP-ID', 'Cause', 'id-Reset'] },
     { key: 'f1', label: 'F1AP', obj: 'IF_ASN1_F1', ts: 'TS 38.473', role: 'gNB-CU ↔ gNB-DU（集中单元与分布单元间）', chips: ['F1SetupRequest', 'UEContextSetupRequest', 'ResetType', 'GNBDUConfigurationUpdate', 'maxnoof'] },
   ];
+  var FILE = { xn: 'assets/content/xn-defs.js', ng: 'assets/content/ng-defs.js', e1: 'assets/content/e1-defs.js', f1: 'assets/content/f1-defs.js' };
   var KIND = { q: 'SEQUENCE 结构', e: 'ENUMERATED 枚举', c: 'CHOICE 选择', l: 'SEQUENCE OF 列表', s: '标量类型', k: '过程码/常量' };
   var LIMIT = 160;
   var state = { s: 'f1', q: '', g: -1 };
 
   var DATA = {};
-  SPECS.forEach(function (sp) {
-    var o = window[sp.obj];
-    if (!o || !o.defs) return;
-    DATA[sp.key] = o;
-  });
-  if (!DATA[state.s]) state.s = Object.keys(DATA)[0];
+
+  /* v54 按规范懒加载（审计第八节第 2 步）：四本接口规范数据共 1.4MB 原为四枚同步
+     <script> 全量加载，首屏只需要默认/URL 指定的一本——改为点按/需要时动态拉取并缓存，
+     首屏字节 -69%。已加载规范同步回调，未加载的去重排队。 */
+  var LOADING = {};
+  function loadSpec(key, cb) {
+    if (DATA[key]) { cb(); return; }
+    var sp = SPECS.filter(function (x) { return x.key === key; })[0];
+    if (!sp) { cb(); return; }
+    if (LOADING[key]) { LOADING[key].push(cb); return; }
+    LOADING[key] = [cb];
+    var s = document.createElement('script');
+    s.src = FILE[key];
+    s.onload = function () {
+      var o = window[sp.obj];
+      if (o && o.defs) DATA[key] = o;
+      var cbs = LOADING[key] || []; delete LOADING[key];
+      cbs.forEach(function (f) { f(); });
+    };
+    s.onerror = function () {
+      var cbs = LOADING[key] || []; delete LOADING[key];
+      cbs.forEach(function (f) { f(); });
+    };
+    document.head.appendChild(s);
+  }
 
   // 预索引（按规范惰性建：切到才建）
   var IDX = {};
@@ -223,10 +239,10 @@
   function renderSpecs() {
     var h = '';
     SPECS.forEach(function (sp) {
-      if (!DATA[sp.key]) return;
+      var sc = DATA[sp.key] ? DATA[sp.key].defs.length + ' 定义' : (LOADING[sp.key] ? '加载中…' : '点按加载');
       h += '<div class="ai-spec' + (state.s === sp.key ? ' on' : '') + '" data-s="' + sp.key + '">' +
         '<div class="sn">' + sp.label + '</div><div class="st">' + sp.ts + ' · ' + esc(sp.role) + '</div>' +
-        '<div class="sc">' + DATA[sp.key].defs.length + ' 定义</div></div>';
+        '<div class="sc">' + sc + '</div></div>';
     });
     specsEl.innerHTML = h;
   }
@@ -286,8 +302,13 @@
     if (t.classList && t.classList.contains('ai-chip')) {
       qEl.value = t.getAttribute('data-q'); state.q = qEl.value; render(); syncHash();
     } else if (t.classList && t.classList.contains('ai-spec')) {
-      state.s = t.getAttribute('data-s'); state.g = -1; state.q = ''; qEl.value = '';
-      renderSpecs(); renderGroups(); renderChips(); renderNote(); render(); syncHash();
+      var nk = t.getAttribute('data-s');
+      if (!DATA[nk] && !LOADING[nk]) { state.s = nk; renderSpecs(); }  // 先亮「加载中」
+      state.s = nk; state.g = -1; state.q = ''; qEl.value = '';
+      loadSpec(nk, function () {
+        idxOf(nk);
+        renderSpecs(); renderGroups(); renderChips(); renderNote(); foot(); render(); syncHash();
+      });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else if (t.classList && t.classList.contains('ai-g')) {
       state.g = parseInt(t.getAttribute('data-g'), 10);
@@ -311,17 +332,21 @@
   }
   function fromHash() {
     var m = location.hash.match(/s=([a-z0-9]+)/);
-    if (m && DATA[m[1]]) state.s = m[1];
+    if (m && FILE[m[1]]) state.s = m[1];
     m = location.hash.match(/q=([^&]+)/);
     qEl.value = m ? decodeURIComponent(m[1]) : '';
     state.q = qEl.value;
     m = location.hash.match(/g=(\d+)/);
     state.g = m ? parseInt(m[1], 10) : -1;
   }
-  window.addEventListener('hashchange', function () { fromHash(); renderSpecs(); renderGroups(); renderChips(); renderNote(); render(); });
+  function renderAll() {
+    renderSpecs(); renderGroups(); renderChips(); renderNote(); foot(); render();
+  }
+  window.addEventListener('hashchange', function () { fromHash(); loadSpec(state.s, function () { idxOf(state.s); renderAll(); }); });
 
-  idxOf(state.s);
-  fromHash(); renderSpecs(); renderGroups(); renderChips(); renderNote(); foot(); render();
+  fromHash();
+  renderSpecs();  // 数据未到先亮骨架（未加载规范显示「点按加载」）
+  loadSpec(state.s, function () { idxOf(state.s); renderAll(); });
 })();
 </script>
 </body>

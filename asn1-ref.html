@@ -113,7 +113,6 @@
   <div class="a1-foot" id="foot"></div>
 </div>
 <script src="assets/content/asn1-defs.js"></script>
-<script src="assets/content/asn1-fields.js"></script>
 <script>
 (function () {
   'use strict';
@@ -124,9 +123,6 @@
   var LIMIT = 160;
 
   // 预索引：小写全文（搜索用，含字段注释行文本）与名字集合（交叉引用用）
-  // 字段表归属 v2（v53）：①「A, B」/「A and B」多定义共享表拆分索引，逐一定义挂载；
-  // ②显式别名（表头拼写/大小写/全称缩写与定义名互异——AutonomousDenialParamters 少 a 系表头语料原样）；
-  // ③-rNN/-vNNNN 双后缀剥除（v1 只剥 -rNN）。v49-v51 审计 P2-3：16 张表/152 行进不了定义卡 → 归零。
   var names = {};
   var i, d;
   for (i = 0; i < D.length; i++) {
@@ -134,6 +130,9 @@
     d._s = (d.n + '\n' + d.b).toLowerCase();
     names[d.n.split(' { ')[0]] = i;
   }
+  // 字段表归属 v2（v53）：①「A, B」/「A and B」多定义共享表拆分索引，逐一定义挂载；
+  // ②显式别名（表头拼写/大小写/全称缩写与定义名互异——AutonomousDenialParamters 少 a 系表头语料原样）；
+  // ③-rNN/-vNNNN 双后缀剥除（v1 只剥 -rNN）。v49-v51 审计 P2-3：16 张表/152 行进不了定义卡 → 归零。
   var ALIAS = {
     'AutonomousDenialParameters': 'AutonomousDenialParamters',
     'MeasIdleConfigSIB': 'MeasIdleConfig',
@@ -143,10 +142,14 @@
     'MultiPDSCH-TDRA-List': 'MultiPDSCH-TimeDomainResourceAllocation'
   };
   var fldIdx = {};
-  for (var fk in FT) {
-    var fps = fk.split(/\s*,\s*|\s+and\s+/);
-    for (var pi = 0; pi < fps.length; pi++) if (fps[pi]) fldIdx[fps[pi]] = fk;
+  function buildFldIdx() {
+    fldIdx = {};
+    for (var fk in FT) {
+      var fps = fk.split(/\s*,\s*|\s+and\s+/);
+      for (var pi = 0; pi < fps.length; pi++) if (fps[pi]) fldIdx[fps[pi]] = fk;
+    }
   }
+  buildFldIdx();
   function fieldsKeyOf(d) {
     var bare = d.n.split(' { ')[0];
     var stripped = bare.replace(/-[rv]\d+$/, '');
@@ -161,17 +164,38 @@
     var k = fieldsKeyOf(d);
     return k ? FT[k] : null;
   }
-  for (i = 0; i < D.length; i++) {
-    d = D[i];
-    var fl = fieldsOf(d);
-    if (fl) {
-      var extra = [];
-      for (var fi = 0; fi < fl.length; fi++) extra.push(fl[fi][0] + ' ' + fl[fi][1]);
-      d._s += '\n' + extra.join('\n').toLowerCase();
-    }
-  }
   var nWithFields = 0;
-  for (i = 0; i < D.length; i++) if (fieldsOf(D[i])) nWithFields++;
+
+  /* v54 字段注释表懒加载（审计第八节第 2 步）：asn1-fields.js（795KB）不进首屏同步
+     <script>——首帧后 idle 注入，到位后重建搜索索引（先重置 base 再并字段文本，幂等）
+     并重渲染。注入前 fieldsOf 恒 null：卡片暂不带字段区块、页脚暂不显示表统计，无错降级。 */
+  var FLD_READY = false;
+  function initFields() {
+    F = window.RRC_ASN1_FIELDS || F;
+    FT = F.t;
+    buildFldIdx();
+    for (i = 0; i < D.length; i++) {
+      d = D[i];
+      d._s = (d.n + '\n' + d.b).toLowerCase();
+      var fl = fieldsOf(d);
+      if (fl) {
+        var extra = [];
+        for (var fi = 0; fi < fl.length; fi++) extra.push(fl[fi][0] + ' ' + fl[fi][1]);
+        d._s += '\n' + extra.join('\n').toLowerCase();
+      }
+    }
+    nWithFields = 0;
+    for (i = 0; i < D.length; i++) if (fieldsOf(D[i])) nWithFields++;
+    FLD_READY = true;
+    render(); foot();
+  }
+  (window.requestIdleCallback || function (f) { setTimeout(f, 250); })(function () {
+    var s = document.createElement('script');
+    s.src = 'assets/content/asn1-fields.js';
+    s.onload = function () { initFields(); };
+    s.onerror = function () { /* 保持降级：字段表缺席不阻塞主功能 */ };
+    document.head.appendChild(s);
+  });
 
   var qEl = document.getElementById('q');
   var clearEl = document.getElementById('clear');
@@ -270,6 +294,14 @@
   function foot() {
     var withD = 0;
     for (var j = 0; j < D.length; j++) if (D[j].d) withD++;
+    if (!FLD_READY) {
+      document.getElementById('foot').innerHTML =
+        '数据：<b>' + A.meta.src + '</b>（' + A.meta.corpus + ' 语料，§6.2.1–§11.2.2 十二组）· ' +
+        D.length + ' 条定义 · ' + withD + ' 条带官方引言 · <i>字段注释表（§6.3.2）加载中——idle 注入，不阻塞首屏搜索</i>。<br>' +
+        '原文照录（含行内 Need M/S/R 条件注释与个别拼写笔误，如规范原文所示；描述以逗号开头的行=多字段共享行，v53 起显式标注）；条款号即 TS 38.331 章节号。' +
+        '中文详解词条见 <a href="dict.html">信元词典</a>；课程讲解从 <a href="index.html">目录</a> 进。';
+      return;
+    }
     // v53 未归属字段表：拆分/别名/剥后缀后仍无定义卡认领的表，页脚显式上页不静默沉没
     var usedKeys = {};
     for (var j2 = 0; j2 < D.length; j2++) { var uk = fieldsKeyOf(D[j2]); if (uk) usedKeys[uk] = 1; }

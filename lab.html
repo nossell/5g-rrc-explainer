@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.56.0";
+const APP_VERSION = "1.58.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -5023,6 +5023,16 @@ function evalExpr(e, scope) {
       default: throw new Error('未知运算符 ' + e.op);
     }
   }
+  if (e.t === 'call') {
+    // AZ 批（v1.57.0）：函数记法（csn1parse §11.2.21 max(val(X)) 同款 AST）——
+    // 重复上界聚合；未知函数名显式炸（不猜语义）。
+    const args = (e.args || []).map((a) => evalExpr(a, scope));
+    if (e.fn === 'max') return args.length ? Math.max(...args) : 0;
+    if (e.fn === 'min') return args.length ? Math.min(...args) : 0;
+    if (e.fn === 'ceil') return Math.ceil(args[0]);
+    if (e.fn === 'floor') return Math.floor(args[0]);
+    throw new Error('未知函数 ' + e.fn);
+  }
   throw new Error('表达式不可求值');
 }
 function countOf(n, scope) {
@@ -5413,13 +5423,46 @@ function csn1Tokenize(text) {
   // 注释剥离（-- 与 // 均到行尾）
   let inComment = false;
   const lines = String(text).split(/\r?\n/).map((l) => {
-    // 单 '-' 散文注释（'0 - use MCS-1 …' 实测）先归一为 '--'；后随数字的不动（负号）
-    l = l.replace(/ - (?=[A-Za-z]{2,})/g, ' -- ');
+    // 单 '-' 散文注释（'0 - use MCS-1 …' 实测）先归一为 '--'；后随数字的不动（负号）。
+    // AZ 批（v1.57.0）：未闭合 '(' 内不归一——定义名含 ' - part 1)' 形（§11.2.5a
+    // 'Extended Access Burst Method - part 1' 实测）此前被整段当注释截断，'::=' 一并
+    // 丢失 → looksLikeDef 永假 → 全格静默（defs 0 notes 0）。
+    {
+      let out = '';
+      let depth = 0;
+      for (let x = 0; x < l.length; x++) {
+        const c = l[x];
+        if (c === '(') depth++;
+        else if (c === ')') depth = Math.max(0, depth - 1);
+        if (depth === 0 && c === ' ' && l[x + 1] === '-' && l[x + 2] === ' '
+          && /[A-Za-z]/.test(l[x + 3] || '') && /[A-Za-z]/.test(l[x + 4] || '')) {
+          out += ' -- ';
+          x += 2;
+          continue;
+        }
+        out += c;
+      }
+      l = out;
+    }
     // 注释续行（docx 软换行把注释折到下一物理行）：无文法记号的行整行丢弃
     if (inComment && !/[<>{}|;=]|\d/.test(l)) return '';
     inComment = false;
     const idxs = [l.indexOf('--'), l.indexOf('//')].filter((i) => i >= 0);
-    if (idxs.length) { inComment = true; return l.slice(0, Math.min(...idxs)); }
+    if (idxs.length) {
+      const ci = Math.min(...idxs);
+      let head = l.slice(0, ci);
+      // AZ 批（v1.57.0）：注释尾文法记号回收——44.060 排版里 '-- 注释' 后同行直接跟文法
+      // 尾巴（'| 1 -- next UL … } } ** 0;' §11.2.58、'| 1 -- Final Ack Indicator = 1 }'
+      // §11.2.51 实测，docx 逐字核实系规范自身排版）——严格「到行尾」语义把闭合/重复
+      // 后缀吞进注释致「选择缺 }」。回收锚定：注释尾部以 '}' 或 ';' 开头、后续仅
+      // } { ; * 0 1 与空白（真实散文注释以字母结尾，永不命中）。
+      if (l[ci] === '-' && l[ci + 1] === '-') {
+        const m = /([};][};\s*01;]*)$/.exec(l.slice(ci + 2));
+        if (m) { inComment = false; return head + m[1]; }
+      }
+      inComment = true;
+      return head;
+    }
     return l;
   });
   const src = lines.join('\n');
@@ -5484,7 +5527,10 @@ function csn1Tokenize(text) {
   return toks;
 }
 
-const CSN1_DELIM = new Set(['bar', 'rb', 'semi', 'lt', 'def']);
+// AZ 批（v1.57.0）：'lb' 入分隔集——缺尖括号容错的描述收集止于 '{'（§12.66 'C_VALUE :
+// bit (6) { 0 | 1 …' 实测，此前值组起始 '{' 被吞进描述致「标签描述不可解析」；
+// 正常 '< X : { … } >' 形走 parseAngle 不经收集循环，不受影响。
+const CSN1_DELIM = new Set(['bar', 'rb', 'semi', 'lt', 'def', 'lb']);
 
 // ---------- 解析器 ----------
 class Csn1Parser {
@@ -5589,6 +5635,14 @@ class Csn1Parser {
       const t = this.peek();
       if (t.k === 'lt') { depth++; parts.push(t); this.next(); continue; }
       if (t.k === 'gt') {
+        // AZ 批（v1.57.0）：'< X : >Ref IE >' 缺 '<' 容差——冒号后紧跟的 '>' 不作闭合
+        // （§11.2.6a 文档原样排版实测，docx XML 逐字核实），该 '>' 留在描述内由
+        // labeledNode 的 gt 分支补 '<' 解析。
+        if (depth === 1 && parts.length && parts[parts.length - 1].k === 'colon') {
+          parts.push(t);
+          this.next();
+          continue;
+        }
         depth--;
         if (depth === 0) { this.next(); break; }
         parts.push(t);
@@ -5782,7 +5836,16 @@ class Csn1Parser {
   parseBrace() {
     this.next(); // {
     const body = this.parseAltList('brace');
-    if (!this.is('rb')) throw new Error(`选择缺 } 上下文: ${this.ctx()}`);
+    if (!this.is('rb')) {
+      // AZ 批（v1.57.0）：花括号失衡容差——文档级少一个 '}'（§11.2.10 Repeated Iu Page
+      // info struct / §11.2.23a PSI6 实测，剥注释后 lb=rb+1）。定义边界（';' / EOF /
+      // 新定义头）处组必须收口，闭合位置无歧义——不消费边界词元，静默闭合。
+      const t = this.peek();
+      if (t && t.k !== 'semi' && !(t.k === 'lt' && this.looksLikeDef())) {
+        throw new Error(`选择缺 } 上下文: ${this.ctx()}`);
+      }
+      return body;
+    }
     this.next();
     return body;
   }
@@ -5810,9 +5873,36 @@ class Csn1Parser {
       this.onRef(name);
       return { t: 'ref', name: csn1NormName(name), raw: name };
     }
+    // AZ 批（v1.57.0）：'< X : >Ref IE > >' 缺 '<' 容差（§11.2.6a 文档原样排版实测，
+    // docx XML 逐字核实 ': >Channel Request Description IE > >' 系规范自身笔误）——
+    // 描述以游离 '>' 开头时视为缺失的 '<'，语义唯一（引用名与标签名同构）。
+    if (descParts[0] && descParts[0].k === 'gt') {
+      try {
+        // 首部 gt 是缺失 '<' 的伪影本体——剥掉再作引用解析（未闭合角由 parseAngle
+        // 的名字提取兜底）。
+        const sub = new Csn1Parser([{ k: 'lt' }, ...descParts.slice(1)]);
+        const a = sub.parseAngle();
+        if (a.name) return this.typedRefNode(name, a);
+      } catch { /* 落后续兜底 */ }
+    }
+    // AZ 批（v1.57.0）：'bit (expr) & { 值组 ** 错误标签 }' 形（§12.8.3 Pulse Format
+    // Bitmap 实测）——& 后组为编码侧值枚举/错误出口，解码建模为位段本身（AX '&' 体级
+    // 拼接跳过的标签描述内同族收口）。
+    const amp = descParts.findIndex((p) => p.k === 'word' && p.v === '&');
+    if (amp > 0) {
+      const fAmp = this.fieldFromWords(name, descParts.slice(0, amp));
+      if (fAmp) return fAmp;
+    }
     const flat = descParts.map((p) => (p.k === 'eq' ? '==' : p.k === 'colon' ? ':' : p.k === 'lp' ? '(' : p.k === 'rp' ? ')' : p.k === 'lb' ? '{' : p.k === 'rb' ? '}' : p.k === 'bar' ? '|' : p.v ?? p.k)).join(' ');
     let m = /^bit\s*==\s*(L|H)$/i.exec(flat);
     if (m) return { t: 'eqbit', name, eq: m[1].toUpperCase() === 'L' ? 'L' : 'H' };
+    // AZ 批（v1.57.0）：裸值组 '< X : 1 | 01 | 00 >'（§12.8.3 Non Hopping Carrier Pulse
+    // Format 实测——值组花括号省略形）——全 n01/L/H/bar 描述直接按值组建模。
+    if (descParts.length >= 3
+      && descParts.every((p) => p.k === 'n01' || p.k === 'bar' || (p.k === 'word' && /^[LH]$/i.test(p.v)))) {
+      const vals = this.parseValueGroup([{ k: 'lb' }, ...descParts, { k: 'rb' }]);
+      if (vals.length) return { t: 'valtag', name, values: vals };
+    }
     if (descParts.length === 1 && descParts[0].k === 'n01' && /^[01]+$/.test(descParts[0].v)) {
       return { t: 'valtag', name, values: [descParts[0].v] };
     }
@@ -5997,6 +6087,15 @@ class Csn1Parser {
         while (this.peek() && !this.is('rp') && !this.is('rb')) { nameParts.push(this.next().v); }
         if (this.is('rp')) this.next(); // 缺右括号容差（不越花括号）
         return { t: 'val', name: csn1NormName(nameParts.join(' ')) };
+      }
+      // AZ 批（v1.57.0）：函数记法 '* (1 + max(val(X)))'（§11.2.21 Neighbour Cell params
+      // 2 struct 实测）——此前 max 落 val(max) 后遇 '(' 即断，rep 表达式报「缺 )」。
+      if (this.is('lp')) {
+        this.next();
+        const args = [this.parseExpr()];
+        while (this.peek() && !this.is('rp') && !this.is('rb')) { args.push(this.parseExpr()); }
+        if (this.is('rp')) this.next();
+        return { t: 'call', fn: csn1NormName(w), args };
       }
       return { t: 'val', name: csn1NormName(w) };
     }
@@ -11812,6 +11911,111 @@ async function ingestDocxZip(zipBytes, { spec, version }) {
   return { schema, structured, problems, stats: structured.stats, docxName: docxName || '(docx)' };
 }
 
+// ==== tools/nas_quirks.mjs ====
+// nas_quirks.mjs — BA 批（v1.58.0）：解剖器怪癖登记表（数据驱动收口）。
+//
+// 动机（v1.57.0 评审段 P2/P3）：tshark 侧怪癖处置散落在采样器/oracle 的 if 特判里
+//（29060 130/180/212、29244 327、322 伪影——327 已是第四个硬编码），每加一个都要动
+// 代码路径；本表收口为「数据登记 + 纯函数匹配器」，新增怪癖 = 加一条目、零代码改动。
+// 三类：
+//   SAMPLE_STOP_ROWS   采样器行守卫（停采）——tshark 恒炸/内容无关类，缺席采样；
+//   VALUE_REMAP_ROWS   采样后值字节重映射——值特定证据空洞，rng 消耗不变仅改登记值；
+//   TSHARK_ARTIFACTS   oracle L3 显示伪影豁免——tshark 字段自证矛盾且帧侧自洽。
+// 纪律：
+//   ① 每条目必带 id/reason（病根一句话）/evidence（探针与报告留档路径）/batch（入表批次），
+//     缺一不可（nas_quirks.test.js 有台账卫生钉）；
+//   ② 匹配器纯只读、不消耗 rng——SAMPLE_STOP/VALUE_REMAP 落点与原硬编码逐处对齐，
+//     采样流零漂移（60 seeds 走链钉 + oracle 快照对拍坐实）；
+//   ③ TSHARK_ARTIFACTS 是 oracle「不预先豁免」立规以来的唯一例外通道：仅收
+//     tshark 显示字段 pos/size/value 互不相容且帧侧结构自洽的条目；命中记 report.artifacts
+//     如实计数（不冒充已核、不吞真不符），未登记的一律照旧 EXTRACT 失败。
+// 注意：本文件进 build.js 单作用域打包清单（nassample 依赖）——只允许顶层 const/function。
+
+// ---- SAMPLE_STOP_ROWS：采样器行守卫（停采） --------------------------------
+// 匹配条件全 AND：spec / ieis / msgTypes（null = 任意消息）/ fmt（null = 任意格式）。
+const SAMPLE_STOP_ROWS = [
+  {
+    id: 'GTPV1-130-180-212-FWDRELOC-FAMILY',
+    spec: '29060', ieis: [130, 180, 212], msgTypes: [0x33, 0x35, 0x36, 0x37], fmt: null,
+    reason: 'IE 130 PDP Context / 180 PS Handover XID Parameters / 212 eNodeB ID 在携带它们的消息族（SGSN Context Response 0x33、Forward Relocation 0x35-0x37）内被 tshark 内容无关恒判 malformed——约 100 形扫描全炸（零/ff 长度、正确地址长度语义、QoS 变体、前后组合），同字节在 0x50/0x82-0x84 CLEAN：tshark 消息特定解剖限制，非生成器病（重编码逐字节==原帧），行按缺席采样',
+    evidence: 'tmp/_v10_aw_probe4-9（130 约 100 形）/ _v10_aw_probe24-25（180）/ _v10_aw_probe28（212）',
+    batch: 'AN 立例（130），AW 扩族（v1.54.0）',
+  },
+  {
+    id: 'PFCP-327-N6-JITTER-GROUPED',
+    spec: '29244', ieis: [327], msgTypes: null, fmt: null,
+    reason: 'IE 327 N6 Jitter Measurement（Rel-18 新 IE，8.2.222 def 未摄取）在 IE 324 组内与任一他子项共现即 tshark 4.6.8 恒判 malformed（Exception occurred，内容无关——零值共现形同炸、单独形 CLEAN；顶层/247 组内 len≥2 走未知 IE 兜底 CLEAN）。QFI/Time Stamp 系 M 行必采、327 被采中必共现必炸，组循环行守卫停采（p=0.4 判定后，未采中帧 rng 零漂移）',
+    evidence: 'tmp/_v10_az1_probe（隔离二分）',
+    batch: 'AZ（v1.57.0）',
+  },
+];
+
+function sampleStopHit(spec, iei, msgType = null) {
+  for (const q of SAMPLE_STOP_ROWS) {
+    if (q.spec !== spec || !q.ieis.includes(iei)) continue;
+    if (q.msgTypes && !q.msgTypes.includes(msgType)) continue;
+    return q;
+  }
+  return null;
+}
+
+// ---- VALUE_REMAP_ROWS：采样后值字节重映射 ----------------------------------
+// 用途：值特定的 tshark 证据空洞——某值使 tshark 静默吞 IE（无字段、无 malformed、
+// 帧其余部分全对齐），oracle 无从核验该 IE。重映射到有证据的值：采样器在正常取值
+// 之后、push 之前替换，rng 消耗不变，漂移局限在采中该值的帧（约 1/256）。
+const VALUE_REMAP_ROWS = [
+  {
+    id: 'GTPV1-21-RANAP-CAUSE-ZERO-VOID',
+    spec: '29060', iei: 21, fmt: 'TV', onlyLen: 1, fromByte: 0x00, toByte: 0x43,
+    reason: '值 0x00 是 tshark 4.6.8 的 gtp.ranap_cause 证据空洞：同帧上下文四值对照 0x01/0x43/0xff 均正常产字段、唯 0x00 零字段且无 malformed（全消息面 6100 帧唯一一起 NO_EVIDENCE，帧 2805 其余 IE 逐位对齐）——0x00 重映射 0x43（同语境多帧有证据）。真 RANAP APER 内容仍属外部依赖档（AZ-3，待 25.413 材料）',
+    evidence: 'tmp/_ba1_ie21_probe.mjs + tmp/_ba1_ie21_probe_result.json（四值对照）+ tmp/_ba1_wide_29060_j00.json（6100 帧唯一一起）',
+    batch: 'BA（v1.58.0）',
+  },
+];
+
+function valueRemapHit(spec, iei, fmt, value) {
+  if (!value || value.length !== 1) return null;
+  for (const q of VALUE_REMAP_ROWS) {
+    if (q.spec !== spec || q.iei !== iei) continue;
+    if (q.fmt != null && fmt != null && fmt !== q.fmt) continue;
+    if (q.onlyLen != null && value.length !== q.onlyLen) continue;
+    if (value[0] === q.fromByte) return Uint8Array.from([q.toByte]);
+  }
+  return null;
+}
+
+// ---- TSHARK_ARTIFACTS：oracle L3 显示伪影豁免台账 --------------------------
+// 豁免条件全 AND（任一不中仍按 EXTRACT 失败）：
+//   ① spec ② 字段名全等（PDML field name）③ 声称跨度 size === claimedSize
+//   ④ 帧切片 ≡ claimedSlice（逐字节，不是前缀）⑤ headerIntact：从 pos 起
+//   [类型 2B][长度 2B][体 len B] 完整落帧内（帧侧结构自洽锚点）。
+const TSHARK_ARTIFACTS = [
+  {
+    id: 'PFCP-322-METADATA-BINARY-DISPLAY',
+    spec: '29244', field: 'pfcp.metadata.binary_metadata', claimedSize: 3, claimedSlice: '014200', headerIntact: true,
+    reason: 'tshark 4.6.8 PFCP Metadata（IE 322，8.2.219）解剖器显示伪影：binary_metadata 字段 pos/size 指向 IE 头 3 字节（0142 00）而 value 为帧外自产值——五起（db9ac5/8d8bd2/9545e9/e08713/78ee81）均不在帧内、亦非体任何校验和/摘要前缀，显示字段自证矛盾即证据不可用。帧 CLEAN、L2 12897 IE 全过、AY worktree 对拍同 5 起（AZ 前已存在）；记 artifacts 如实计数，322 体不冒充已核',
+    evidence: 'tmp/_ba1_322_probe.mjs + tmp/_ba1_322_probe_result.json（单帧 PDML 复现）+ tmp/_ba_review_az1_ext_k10_2024.json（评审段五起）',
+    batch: 'BA（v1.58.0）',
+  },
+];
+
+function tsharkArtifactMatch({ spec, field, pos, size, frameHex }) {
+  if (typeof pos !== 'number' || typeof size !== 'number' || !frameHex) return null;
+  for (const a of TSHARK_ARTIFACTS) {
+    if (a.spec !== spec || a.field !== field) continue;
+    if (a.claimedSize != null && size !== a.claimedSize) continue;
+    const slice = frameHex.slice(pos * 2, (pos + size) * 2);
+    if (!slice || (a.claimedSlice != null && slice !== a.claimedSlice)) continue;
+    if (a.headerIntact) {
+      const lenHex = frameHex.slice((pos + 2) * 2, (pos + 4) * 2);
+      const len = parseInt(lenHex, 16);
+      if (!Number.isFinite(len) || len < 0 || pos + 4 + len > frameHex.length / 2) continue;
+    }
+    return a;
+  }
+  return null;
+}
+
 // ==== tools/nassample.mjs ====
 // nassample.mjs — M4 对拍采样器：schema 驱动随机消息 → JSONL（供 pycrate 线缆级校验 /
 // 全版本回环门禁）。采样规则：M 行必采（V 按定长随机字节 / VH 随机半八位组 / TV 按 len-1 /
@@ -12656,7 +12860,10 @@ function sampleGtpcSchema(schema, N, seed, msgRe) {
               continue;
             }
             if (!/^M$/i.test((r.presence || '').trim()) && rng() > 0.4) continue;
-            parts.push({ rowIdx: ri, value: gtpcSampleValue(r, schema, rng) });
+            let gtpcValue = gtpcSampleValue(r, schema, rng);
+            const remapped = valueRemapHit(schema.spec, parseInt(r.iei, 10), r.format, gtpcValue);
+            if (remapped) gtpcValue = remapped;
+            parts.push({ rowIdx: ri, value: gtpcValue });
           }
           if (!ok) { skipped[instKey] = skipped[instKey] || '必配行无类型值'; continue; }
           const bytes = encMsg(inst, parts, schema.spec);
@@ -12688,6 +12895,14 @@ function pfcpSampleValue(r, schema, rng, depth = 0) {
           continue;
         }
         if (!/^M$/i.test((cr.presence || '').trim()) && rng() > 0.4) continue;
+        // AZ 批（v1.57.0）：IE 327 N6 Jitter Measurement（Rel-18 新 IE，8.2.222 def 未摄取）
+        // 组内停采——探针 tmp/_v10_az1_probe：324 组内 327 与任一他子项共现 tshark 4.6.8
+        // 恒判 malformed（Exception occurred，内容无关——零值共现形同炸；单独形 CLEAN）。
+        // QFI/Time Stamp 为 M 行必采，327 被采中必共现必炸。守卫在 p=0.4 判定后：
+        // 未采中 327 的帧 rng 消耗序列零漂移（AW 行守卫同款）。
+        // BA 起（v1.58.0）迁 nas_quirks.mjs SAMPLE_STOP_ROWS 登记表——匹配条件与原硬编码
+        // 逐字等价（spec 29244 + iei 327 + 任意消息），落点不变，采样流零漂移。
+        if (sampleStopHit(schema.spec, parseInt(cr.iei, 10), null)) continue;
         body.push(...pfcpIe(parseInt(cr.iei, 10), pfcpSampleValue(cr, schema, rng, depth + 1)));
       }
       return Uint8Array.from(body);
@@ -12733,7 +12948,10 @@ function samplePfcpSchema(schema, N, seed, msgRe) {
               continue;
             }
             if (!/^M$/i.test((r.presence || '').trim()) && rng() > 0.4) continue;
-            parts.push({ rowIdx: ri, value: pfcpSampleValue(r, schema, rng) });
+            let pfcpValue = pfcpSampleValue(r, schema, rng);
+            const remapped = valueRemapHit(schema.spec, parseInt(r.iei, 10), r.format, pfcpValue);
+            if (remapped) pfcpValue = remapped;
+            parts.push({ rowIdx: ri, value: pfcpValue });
           }
           if (!ok) { skipped[instKey] = skipped[instKey] || '必配行无类型值'; continue; }
           const bytes = encMsg(inst, parts, schema.spec);
@@ -12813,10 +13031,16 @@ function sampleGtpv1Schema(schema, N, seed, msgRe) {
             // 病、非 encMsg 记账病（AV 段假说作废）。IE 180 PS Handover XID Parameters（探针
             // p24/p25）与 IE 212 eNodeB ID（探针 p28：全形含 0000 MAL+停走）同病——tshark
             // 该两解剖器疑似吃到消息尾才自洽，链中恒炸；行 Optional 同按缺席采样（AN 批
-            // 停采先例）。
-            if (schema.spec === '29060' && [130, 180, 212].includes(parseInt(r.iei, 10))
-              && (inst.msgType === 0x33 || (inst.msgType >= 0x35 && inst.msgType <= 0x37))) continue;
-            parts.push({ rowIdx: ri, value: gtpv1SampleValue(r, schema, rng) });
+            // 停采先例）。BA 起（v1.58.0）迁 nas_quirks.mjs SAMPLE_STOP_ROWS 登记表——
+            // 匹配条件与原硬编码逐字等价（0x33/0x35-0x37 × {130,180,212}），落点不变。
+            if (sampleStopHit(schema.spec, parseInt(r.iei, 10), inst.msgType)) continue;
+            // BA 批（v1.58.0）：值字节重映射 consult（nas_quirks.mjs VALUE_REMAP_ROWS）——
+            // 正常取值之后、push 之前替换，rng 消耗不变，仅登记值命中帧变（29060 IE 21
+            // RANAP Cause 0x00 证据空洞）。29274/29244 循环同款 consult（当前零条目命中）。
+            let gtpv1Value = gtpv1SampleValue(r, schema, rng);
+            const remapped = valueRemapHit(schema.spec, parseInt(r.iei, 10), r.format, gtpv1Value);
+            if (remapped) gtpv1Value = remapped;
+            parts.push({ rowIdx: ri, value: gtpv1Value });
           }
           if (!ok) { skipped[instKey] = skipped[instKey] || '必配行无类型值'; continue; }
           const bytes = encMsg(inst, parts, schema.spec);
@@ -12911,7 +13135,7 @@ function gtpuKvLine(obj, skip) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, valueRemapHit, tsharkArtifactMatch, SAMPLE_STOP_ROWS, VALUE_REMAP_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
