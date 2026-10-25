@@ -1073,6 +1073,30 @@
         a: '①物理层报问题启动的定时器到期（期间恢复则停）；②另一问题定时器运行期间、配置了定时器的 measId 触发测量报告所启定时器到期；③随机接入失败；④RLC 失败；⑤共享频谱持续上行 LBT 失败；⑥IAB-MT 收 BH RLF。DAPS HO 时源小区检测持续到目标 RA 成功（M77 课 d3）。',
         ref: '38.300#9.2.7' }
     ] },
+    'm78:q1': { levels: [
+      { q: 'S 准则和 R 准则怎么分工？',
+        a: 'S 是「能不能进候选」的门槛：Srxlev>0 AND Squal>0（公式含 Qrxlevmin/Pcompensation/Qoffsettemp）；R 是「同频与等优先级异频里谁第一」的排名：Rs=Qmeas,s+Qhyst−Qoffsettemp、Rn=Qmeas,n−Qoffset−Qoffsettemp；跨频高低优先级归 ThreshX 门限法则——三层各司其职（M78 课 b2/c4）。',
+        ref: '38.304#5.2.3.2' },
+      { q: '评估邻区用谁的参数？终检呢？',
+        a: '§5.2.1 原文：评估非服务小区的 Srxlev/Squal 用**服务小区**提供的参数；重选落地那一下的最终检查用**目标小区**的参数——「参数随谁发走」；多波束小区量=最高波束值或阈上 top-N 线性平均（M78 课 a3）。',
+        ref: '38.304#5.2.1' }
+    ] },
+    'm78:q2': { levels: [
+      { q: 'PO 和 PF 怎么算？',
+        a: '两条公式：(SFN+PF_offset) mod T=(T div N)×(UE_ID mod N) 定 PF；i_s=floor(UE_ID/N) mod Ns 定 PF 内第几个 PO；T 取三源最短（CN 广播默认+CN 专用+RAN 专用——IDLE 比前两源、INACTIVE 三源全比）；SearchSpaceId=0 时 Ns=1 或 2（前后半帧）（M78 课 d3）。',
+        ref: '38.304#7.1' },
+      { q: 'INACTIVE 收到 CN 寻呼怎么办？RAN 寻呼呢？',
+        a: 'CN 寻呼→UE 回 RRC_IDLE 并告知 NAS（L2 Relay 代收例外不回）；RAN 寻呼→发起 RRCResume——两网双呼的行为分水岭；SDT 进行中只监听 ShortMessage（NOTE 0b）（M78 课 d3）。',
+        ref: '38.304#7.1' }
+    ] },
+    'm78:q3': { levels: [
+      { q: '重选优先级的三来源？专用信令的覆盖规则？',
+        a: '三来源：系统信息/RRCRelease 专用/跨 RAT 继承；专用信令出现 cellReselectionPriority 就忽略 SI 同名字段；只有其他频率的专用优先级时当前频率垫底（HSDN UE 高速态把 HSDN 小区视为永远最高、非高速永远最低）（M78 课 c1）。',
+        ref: '38.304#5.2.4.1' },
+      { q: '移动性三态怎么判？乒乓算吗？',
+        a: 'TCRmax 窗内重选次数 vs NCR_M/NCR_H 分普通/中/高速；连续回跳同一小区的重选不计数；TCRmaxHyst 内中高速判据不再满足才回普通；高速缩放=Qhyst+sf-High、TreselectionNR×sf-High（乘法结果向上取整到秒）（M78 课 c3）。',
+        ref: '38.304#5.2.4.3' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

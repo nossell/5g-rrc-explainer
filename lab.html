@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.53.0";
+const APP_VERSION = "1.54.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -5750,6 +5750,7 @@ class Csn1Parser {
       if (/^(I|or)$/i.test(v)) { this.next(); return { t: 'null' }; } // 伪影兜底
       if (/^reserved$/i.test(v)) { this.next(); return { t: 'null' }; } // v1.53.0 AU：值保留裸词备选（44.060 §11.2.0.1 '< … == 1 10101 > reserved |' 实测）
       if (/^[.·]+$/.test(v)) { this.next(); return { t: 'null' }; } // v1.53.0 AU：docx 提取散点噪声（'< … struct > ::= . { 0 | 1 …' §11.2.21 实测）
+      if (v === '&') { this.next(); return { t: 'null' }; } // v1.55.0 AX：CSN.1 '&' 值连接符作拼接跳过（44.060 §12.3.1 '< bit (val(L)) > & < struct >' 实测——体级；标签描述内的 & 仍拦）
       if (/^z$/i.test(v)) { this.next(); return { t: 'null' }; } // v1.53.0 AU：'< padding bits >z' 散点（§11.2.17c 实测——z=填充尾标记伪影）
       if (/^-$/.test(v)) { this.next(); return { t: 'null' }; } // 游离 '-' 噪声（散文残段）
       // 缺尖括号字段容错：本词起 K token 内有冒号（中间只许 word/bits）→ 词到冒号为名
@@ -9630,7 +9631,34 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
     // 旧节题注会滞留在 paras 里跨节泄漏，题注不可信）；② 题注 'Table 10.5.2.78.1:'（IPA 等
     // 节标题无 Heading 样式且定义名不匹配时）；③ 表 heading。
     if (it.rows.some((r) => r.some((c) => (c.text || '').includes('::=')))) {
-      const cells = it.rows.flat().filter((c) => (c.text || '').includes('::=')).map((c) => c.text);
+      let cells;
+      if (spec === '44060') {
+        // AX 批（v1.55.0）：44.060 §11/§12 消息文法表为「Rel 版本分片」表——基线文法 +
+        // 各 REL 增补行（'| 1 -- Additions for REL-5/6/7…' 续闭包）按行序拼回同一定义；
+        // 旧过滤只留含 '::=' 的格 → 增补行全丢、文法括号失衡（11.2.7 单格差 6、整表
+        // 82/82 平衡实测——25 项解析失败的 19 项「选择缺 }」病根）。另有 ':: =' 带空格
+        // 变体（RLC Entity Struct 实测）被 includes('::=') 误漏。整表行序拼接 + 按定义
+        // 起始 '::\s*=' 切分；定义起始前片段归前一定义（UFPS 续体实测落入下一定义格首）。
+        // spec 限定防误伤他族池（44018 csn1 面 332/332 锚点依赖现池内容）。
+        cells = [];
+        let buf = '';
+        for (const r of it.rows) {
+          for (const c of r) {
+            const t = (c.text || '');
+            if (!t.trim()) continue;
+            // 切分点 = 定义头 '< 名（无冒号）> ::='——切在 '::=' 前会把定义名留在前段
+            const parts = t.split(/(?=<\s*[^<>:]*?>\s*::\s*=)/);
+            for (let i = 0; i < parts.length; i++) {
+              if (i > 0) { if (buf.trim()) cells.push(buf); buf = ''; }
+              buf += (buf && !/\n$/.test(buf) ? '\n' : '') + parts[i];
+            }
+          }
+        }
+        if (buf.trim()) cells.push(buf);
+        cells = cells.filter((t) => /<\s*[^<>:]*?>\s*::\s*=/.test(t));
+      } else {
+        cells = it.rows.flat().filter((c) => (c.text || '').includes('::=')).map((c) => c.text);
+      }
       // v1.43.0 AK P2-3：段号允许中间带字母后缀（'11.2.5a.1 …'——原正则 \d+\. 不吃 '5a.'，
       // 20 张 ::= 表静默丢弃；候选形态 (?:\d+[a-z]?\.)+ 全族零漂移证后落）
       const hSec = it.heading ? (it.heading.text.match(/^\s*((?:\d+[a-z]?\.)+\d+[a-z]?)\s/) || [])[1] || null : null;
@@ -11979,11 +12007,59 @@ function semanticGtpValueImpl(name, rng, spec) {
     // [00 00]（row len=2）真帧 CLEAN（Relocation Cancel Request 三版确认，探针 AR-1/2）。
     return Uint8Array.from([0x00, 0x00]);
   }
+  // ---- AW 批（v1.54.0）：29060 Forward Relocation/SGSN Context 族内容敏感 IE 定形
+  //（探针 tmp/_v10_aw_probe1-21，正确 12B 头帧法。勘正：AR/AV 期探针 frame() 在 flags
+  // 0x32 下少写 npdu+nextExt 两字节，帧体错位 2 字节——其 CLEAN/MAL 判定全部作废，
+  //「IE 130 内容隔离 CLEAN」「139 盲迭代 16+ 候选未破」均系错位帧伪影）。正确帧法重测：
+  // IE 130 PDP Context 在携带它的全部消息（0x33 SGSN Context Resp、0x35-0x37 Fwd
+  // Relocation）内容无关恒判 malformed（~100 形：零/ff 长度扫描 1..20B、正确 PDP 地址
+  // 长度语义、QoS Neg 变体、MM 容器状态、前后 IE 组合；同字节在 0x50/0x82-0x84 CLEAN）
+  // ——tshark 消息特定解剖限制，非生成器病（重编码逐字节 == 原帧），采样器对 0x33/
+  // 0x35-0x37 的 130 行按缺席采样（sampleGtpv1Schema 行守卫）。IE 139 值为全零串（≥4B）
+  // 时 tshark RANAP 子解剖器不炸——AR 立档「无 25.413 文法源不建模」勘正为零串定形；
+  // 真 RANAP 内容仍属外部依赖（待 25.413 文本或真实抓包），零串形 = IE 链完整、tshark
+  // 全帧解剖到底的最小一致形。以下 11 分支全部零随机定形（探针组合语境 CLEAN）。
+  if (n === 'UTRAN TRANSPARENT CONTAINER' && spec === '29060') {
+    return new Uint8Array(8); // 1/2/3B 与 ff 串判违；4..32B 全零串 CLEAN（探针 p12/p14）
+  }
+  if (n === 'CELL IDENTIFICATION' && spec === '29060') {
+    return new Uint8Array(17); // choice=0（CGI）+16B 全零；16B 或 choice=f 判违（探针 p18）
+  }
+  if (n === 'TARGET IDENTIFICATION' && spec === '29060') {
+    return new Uint8Array(12); // 4B 判违、12B 全零 CLEAN（探针 p18）
+  }
+  if (n === 'UE USAGE TYPE' && spec === '29060') {
+    return new Uint8Array(4); // 2B 判违、4/16B CLEAN（探针 p18）
+  }
+  if (n === 'PDP CONTEXT PRIORITIZATION' && spec === '29060') {
+    return new Uint8Array(4); // 探针 p18
+  }
+  if (n === 'CSG ID' && spec === '29060') {
+    return new Uint8Array(4); // 探针 p18
+  }
+  if (n === 'UE NETWORK CAPABILITY' && spec === '29060') {
+    return Uint8Array.from([0x01, 0x00]); // 能力长度 1 + 1B 全零；长度 0 判违（探针 p18）
+  }
+  if (n === 'PS HANDOVER XID PARAMETERS' && spec === '29060') {
+    return new Uint8Array(3); // 4B 判违、3B CLEAN（探针 p19）
+  }
+  if (/^ADDITIONAL MM CONTEXT/.test(n) && spec === '29060') {
+    return new Uint8Array(4); // 1/2B 全判违（任意字节）、4B 全零 CLEAN（探针 p20）
+  }
+  if (n === 'SCEF PDN CONNECTION' && spec === '29060') {
+    return new Uint8Array(4); // 2/3B 与非零尾判违、≥4B 全零 CLEAN（探针 p21）
+  }
+  if (n === 'EXTENDED COMMON FLAGS' && spec === '29060') {
+    return new Uint8Array(3); // walk-through 探针 p26（3B 零全链穿越；布局随机 flags 非零有炸面）
+  }
+  if (n === 'EXTENDED COMMON FLAGS II' && spec === '29060') {
+    return Uint8Array.from([0x00]); // 行 len=1；再生流实测非零 flags（0209542f）tshark 炸——零形走通
+  }
   // ---- AR 批（v1.50.0）：29274 深水六靶（探针 tmp/_v8_ar_probe1-4，真帧合成裁决）----
-  // 立档不建模：7.7.38 UTRAN Transparent Container（×2/版）——值 = [utran_field 1B] +
-  // RANAP APER（TargetRNC-/SourceRNC-ToTarget/SourceRNC-TransparentContainer，per.ext bit +
-  // 2 optional bits 后 rRC-Container OCTET STRING/targetRNC-ID——无 25.413 文法源，盲迭代
-  // 16+ 候选未破，立档归长期池：须真实抓包样本或 25.413 ASN.1 来源续探）。
+  // 7.7.38 UTRAN Transparent Container（×2/版）——AR 期立档「不建模」（值 = [utran_field 1B]
+  // + RANAP APER，无 25.413 文法源，盲迭代 16+ 候选未破）。AW 批（v1.54.0）勘正：该轮
+  // 探针 frame() 少写 2B 可选部致帧体错位、判定全部无效；正确帧法下全零串（≥4B）CLEAN，
+  // 已于上方 AW 块定形建模（真 RANAP 内容仍归外部依赖档）。
   if (n === 'SECONDARY RAT USAGE DATA REPORT' && spec === '29274') {
     // 8.132：AO 期「12B 定长」结论作废（12B 缺 usage 段——tshark 双时间戳后无条件读
     // DL/UL 各 8B 计数域，正帧溢读后续 IE 即判违）。AR 探针：27B 全形 = flags(0x00，
@@ -12026,8 +12102,9 @@ function semanticGtpValueImpl(name, rng, spec) {
       0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
       0x01, 0x02, 0x03, 0x04, 0x00, 0x00, 0x00]);
   }
-  // 7.7.38 UTRAN transparent container（×2/版）：值内嵌 RRC 消息（tshark 按 UPER 解剖，
-  // lastField=per.*）——须合成真实 RRC PDU，AN 批立档不建模（归后续批次评估）。
+  // 7.7.38 UTRAN transparent container（×2/版）：AN 期立档「值内嵌 RRC 消息（tshark 按
+  // UPER 解剖）不建模」——协议判读有误（29060 侧值为 RANAP APER 非 RRC），且探针帧体
+  // 错位判定无效；AW 批（v1.54.0）已勘正为零串定形建模（见上方 AW 块）。
   if (/^USER LOCATION INFORMATION/.test(n) && spec === '29274') {
     // 8.21（GTPv2 侧）：oct5 八个存在标志与后续条件字段体必须自洽——位布局随机 flags
     // （实测帧 0x83=ExtMacro+SAI+CGI）而体字节缺席，tshark 按标志读 e212.* 越界（AM 探针：
@@ -12708,6 +12785,17 @@ function sampleGtpv1Schema(schema, N, seed, msgRe) {
               continue;
             }
             if (!/^M/i.test((r.presence || '').trim()) && rng() > 0.4) continue;
+            // AW 批（v1.54.0）：IE 130 PDP Context 在携带它的消息族（SGSN Context Response
+            // 0x33、Forward Relocation Request/Response/Complete 0x35-0x37）被 tshark 内容
+            // 无关恒判 malformed——探针 tmp/_v10_aw_probe4-9 约 100 形（零/ff 长度扫描、
+            // 正确地址长度语义、QoS Neg 变体、MM 容器状态、前后 IE 组合；同字节在 0x50/
+            // 0x82-0x84 CLEAN）——本机走链与重编码逐字节自洽（re-encode == 原帧），非生成器
+            // 病、非 encMsg 记账病（AV 段假说作废）。IE 180 PS Handover XID Parameters（探针
+            // p24/p25）与 IE 212 eNodeB ID（探针 p28：全形含 0000 MAL+停走）同病——tshark
+            // 该两解剖器疑似吃到消息尾才自洽，链中恒炸；行 Optional 同按缺席采样（AN 批
+            // 停采先例）。
+            if (schema.spec === '29060' && [130, 180, 212].includes(parseInt(r.iei, 10))
+              && (inst.msgType === 0x33 || (inst.msgType >= 0x35 && inst.msgType <= 0x37))) continue;
             parts.push({ rowIdx: ri, value: gtpv1SampleValue(r, schema, rng) });
           }
           if (!ok) { skipped[instKey] = skipped[instKey] || '必配行无类型值'; continue; }
