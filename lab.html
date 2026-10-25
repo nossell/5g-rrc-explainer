@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.54.0";
+const APP_VERSION = "1.56.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -5446,6 +5446,12 @@ function csn1Tokenize(text) {
     if (src.startsWith(')', i)) { toks.push({ k: 'rp' }); i++; continue; }
     if (src.startsWith(';', i)) { toks.push({ k: 'semi' }); i++; continue; }
     if (src.startsWith('::=', i)) { toks.push({ k: 'def' }); i += 3; continue; }
+    {
+      // v1.55.0 AX：':: =' 带空格变体（44.060 §11.2.4/11.2.5a 实测——旧抽取整格丢弃，
+      // Rel 分片拼接后入池）——'::' 后容许空白再 '='
+      const mSp = /^::\s*=/.exec(src.slice(i, i + 8));
+      if (mSp) { toks.push({ k: 'def' }); i += mSp[0].length; continue; }
+    }
     if (src.startsWith(':=', i)) { toks.push({ k: 'def' }); i += 2; continue; }
     if (src.startsWith('==', i)) { toks.push({ k: 'eq' }); i += 2; continue; }
     if (src.startsWith('**', i)) { toks.push({ k: 'star2' }); i += 2; continue; }
@@ -9642,19 +9648,24 @@ function ingestDocumentXml(xml, styleMap, spec, version) {
         // spec 限定防误伤他族池（44018 csn1 面 332/332 锚点依赖现池内容）。
         cells = [];
         let buf = '';
+        const flush = () => { if (buf.trim()) cells.push(buf); buf = ''; };
         for (const r of it.rows) {
           for (const c of r) {
             const t = (c.text || '');
             if (!t.trim()) continue;
-            // 切分点 = 定义头 '< 名（无冒号）> ::='——切在 '::=' 前会把定义名留在前段
-            const parts = t.split(/(?=<\s*[^<>:]*?>\s*::\s*=)/);
-            for (let i = 0; i < parts.length; i++) {
-              if (i > 0) { if (buf.trim()) cells.push(buf); buf = ''; }
-              buf += (buf && !/\n$/.test(buf) ? '\n' : '') + parts[i];
+            // 切分点 = 定义头 '< 名（无冒号）> ::='——V8 零宽匹配在 index 0 时 split 不产
+            // 空首段（实测），故用 matchAll 手工切片
+            let last = 0;
+            for (const m of t.matchAll(/<\s*[^<>:]*?>\s*::\s*=/g)) {
+              buf += (buf && !/\n$/.test(buf) ? '\n' : '') + t.slice(last, m.index);
+              flush();
+              buf = m[0];
+              last = m.index + m[0].length;
             }
+            buf += (buf && !/\n$/.test(buf) ? '\n' : '') + t.slice(last);
           }
         }
-        if (buf.trim()) cells.push(buf);
+        flush();
         cells = cells.filter((t) => /<\s*[^<>:]*?>\s*::\s*=/.test(t));
       } else {
         cells = it.rows.flat().filter((c) => (c.text || '').includes('::=')).map((c) => c.text);
@@ -12187,6 +12198,15 @@ function semanticGtpValueImpl(name, rng, spec) {
 // 剥尾注为防御性归一化，非「激活」，叙事勘正见上）。
 function semanticPfcpValueImpl(name, rng) {
   const n = String(name || '').trim().replace(/\s*\(\d+(?:\.\d+)*\)\s*$/, '').toUpperCase(); // 防御性归一化（同 semanticGtpValue）
+  if (n === 'PFD CONTENTS') {
+    // 8.2.39（AY 批 v1.56.0）：octet 5 = 内容类型标志位（ADNP/AURL/AFD/DNP/CP/DN/URL/FD）
+    // + octet 6 Spare——布局只建模这两字节、无内容体行；flags 随机置位（实测帧 0xfd=8 位
+    // 全置）时 tshark 按位读 8 段长度前缀内容即越界判违（58 Application ID's PFDs 组内
+    // 嵌套 61 出现，扩窗 seed 2024 实测 15 帧/版）。零标志形 [00 00] = 最小一致形（探针
+    // tmp/_v10_ay9：[00 00] CLEAN 29 字段全解剖、[fd 00] MAL 负对照）。AT 立档「tshark
+    // 需内联 AppID+PFD Context 全形」由此收口。
+    return Uint8Array.from([0x00, 0x00]);
+  }
   if (n === 'NODE ID') {
     // 8.2.38：Type 0=IPv4（4B）/ 1=IPv6（16B）
     return rng() < 0.7
