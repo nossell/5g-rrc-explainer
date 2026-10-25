@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.51.0";
+const APP_VERSION = "1.53.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -5094,7 +5094,10 @@ function csn1Decode(defs, root, bytes, { bitOff = 0, areaBytes = bytes.length - 
         if (n <= 0) return;
         const v = r.readBits(n);
         if (node.exclude != null) {
-          if (v.toString(2).padStart(n, '0') === expand(node.exclude)) {
+          // v1.53.0 AU：多排除值 '|' 连接（44.060 CD_LENGTH 双 exclude 实测）逐值比对
+          const exs = String(node.exclude).split('|');
+          const vs = v.toString(2).padStart(n, '0');
+          if (exs.some((e) => vs === expand(e))) {
             warn(`字段 ${node.name} 取到排除值 ${node.exclude}（保留值）`);
           }
         }
@@ -5745,6 +5748,9 @@ class Csn1Parser {
       if (/^null$/i.test(v)) { this.next(); return { t: 'null' }; }
       if (/^bit$/i.test(v)) { this.next(); return { t: 'bits', name: 'bit', n: 1 }; } // B.1.3 裸 bit
       if (/^(I|or)$/i.test(v)) { this.next(); return { t: 'null' }; } // 伪影兜底
+      if (/^reserved$/i.test(v)) { this.next(); return { t: 'null' }; } // v1.53.0 AU：值保留裸词备选（44.060 §11.2.0.1 '< … == 1 10101 > reserved |' 实测）
+      if (/^[.·]+$/.test(v)) { this.next(); return { t: 'null' }; } // v1.53.0 AU：docx 提取散点噪声（'< … struct > ::= . { 0 | 1 …' §11.2.21 实测）
+      if (/^z$/i.test(v)) { this.next(); return { t: 'null' }; } // v1.53.0 AU：'< padding bits >z' 散点（§11.2.17c 实测——z=填充尾标记伪影）
       if (/^-$/.test(v)) { this.next(); return { t: 'null' }; } // 游离 '-' 噪声（散文残段）
       // 缺尖括号字段容错：本词起 K token 内有冒号（中间只许 word/bits）→ 词到冒号为名
       // （'BSIC : bit (6)' / 'E-UTRAN Measurement Parameters Description : <…>' EC 实测）
@@ -5823,6 +5829,13 @@ class Csn1Parser {
       return { t: 'typed', name, body: { t: 'seq', items: [{ t: 'fixed', bits: descParts[0].v }, restBody] } };
     }
     if (descParts[0].k === 'lb') {
+      // 双 exclude 值组（v1.53.0 AU 先于值组路径）：'{ bit ( 5 ) exclude 00000 exclude 11111 }'
+      const w2 = descParts.map((p) => (p.k === 'lp' ? '(' : p.k === 'rp' ? ')' : p.k === 'lb' ? '{' : p.k === 'rb' ? '}' : p.v ?? p.k)).join(' ');
+      const me = /^\{\s*bit\s*\(\s*(\d+)\s*\)\s*((?:exclude\s+[01]+\s*)+)\}\s*$/.exec(w2);
+      if (me) {
+        const ex = [...me[2].matchAll(/exclude\s+([01]+)/gi)].map((x) => x[1]).join('|');
+        return { t: 'bits', name, n: parseInt(me[1], 10) || ex.length, exclude: ex };
+      }
       const vals = this.parseValueGroup(descParts);
       // 纯值组：全部 token 都是终端位串/L/H 与分隔（'<Multiband supported : { 101 | 110 }>' 实测）
       const pureGroup = descParts.every((p) => ['lb', 'rb', 'bar', 'n01'].includes(p.k)
@@ -5894,7 +5907,8 @@ class Csn1Parser {
 
   // 类型描述词组 → 字段节点
   fieldFromWords(name, toks) {
-    const words = toks.map((p) => (p.k === 'eq' ? '==' : p.k === 'star2' ? '**' : p.k === 'star' ? '*' : p.k === 'lp' ? '(' : p.k === 'rp' ? ')' : p.v ?? p.k)).join(' ');
+    // v1.53.0 AU：lb/rb/bar 补映射（'{ 0000 | 0010 }' 值组形态此前落字面 'lb' 永不中）
+    const words = toks.map((p) => (p.k === 'eq' ? '==' : p.k === 'star2' ? '**' : p.k === 'star' ? '*' : p.k === 'lp' ? '(' : p.k === 'rp' ? ')' : p.k === 'lb' ? '{' : p.k === 'rb' ? '}' : p.k === 'bar' ? '|' : p.v ?? p.k)).join(' ');
     // 'bit-string(4)' 连字符变体（24008 §10.5.5.11 sapi 实测，v1.43.0 AK 收编）
     let m = /^(?:bit[-\s]*(?:string)?|bit)\s*\((.+)\)\s*$/i.exec(words);
     if (m) return { t: 'bits', name, n: this.exprOrNum(m[1]) };
@@ -5904,10 +5918,25 @@ class Csn1Parser {
     if (m) return { t: 'valtag', name, values: [m[2].replace(/\s+/g, '')] };
     m = /^bit\s*\(\s*(\d+)\s*\)\s*exclude\s*([01]+)\s*$/i.exec(words) || /^(?:bit\s*string|bit)\s*exclude\s*([01]+)\s*$/i.exec(words);
     if (m) return { t: 'bits', name, n: parseInt(m[1], 10) || m[2].length, exclude: m[2] }; // 值排除约束（SI9 modulus 实测）
+    // 双 exclude 值组（v1.53.0 AU）：'< CD_LENGTH : { bit (5) exclude 00000 exclude 11111 } >'
+    // （44.060 §11.2.9e/17a 实测）——多排除值 '|' 连接，csn1.js 解码侧拆分逐值比对。
+    m = /^bit\s*\(\s*(\d+)\s*\)\s*((?:exclude\s+[01]+\s*)+)$/i.exec(words);
+    if (m) {
+      const ex = [...m[2].matchAll(/exclude\s+([01]+)/gi)].map((x) => x[1]).join('|');
+      return { t: 'bits', name, n: parseInt(m[1], 10) || ex.length, exclude: ex };
+    }
     m = /^bit\s*(\d+)\s*\)\s*$/i.exec(words);
     if (m) return { t: 'bits', name, n: parseInt(m[1], 10) }; // 'bit6 )' 括号丢失实测
+    // 位字段 + 值组（v1.53.0 AU）：'< TBF_RELEASE_CAUSE : bit ( 4 ) { 0000 | 0010 } >' §11.2.26/56 实测
+    m = /^bit\s*\(\s*(\d+)\s*\)\s*\{\s*([01 |]+)\s*\}\s*$/.exec(words);
+    if (m) return { t: 'valtag', name, values: m[2].split('|').map((x) => x.replace(/\s+/g, '')).filter(Boolean) };
+    m = /^bit\s*\(\s*(\d+)\s*\)\s*(?:>|gt)\s*$/.exec(words);
+    if (m) return { t: 'bits', name, n: parseInt(m[1], 10) }; // 'bit ( 7 ) >' 游离 gt（§11.2.29 实测）
+    m = /^bit\s*\(\s*(\d+)\s*$/.exec(words);
+    if (m) return { t: 'bits', name, n: parseInt(m[1], 10) }; // 'bit ( 5' 缺右括号（§11.2.41 MS_ID 实测）
     if (/^bit$/i.test(words)) return { t: 'bits', name, n: 1 };
     if (/^bit\s*\*\*?$/i.test(words)) return { t: 'bitstring', name }; // bit** 无界（A2）
+    if (/^octet\s*\*\*?$/.test(words)) return { t: 'bitstring', name }; // octet ** 无界（v1.53.0 AU：44.060 §11.2.17c/36/47 CONTAINER_DATA/Application Data 实测）
     m = /^octet\s*\((.+)\)\s*$/i.exec(words);
     if (m) return { t: 'octets', name, n: this.exprOrNum(m[1]) };
     m = /^spare\s*bit\s*\((.+)\)\s*$/i.exec(words);
@@ -5969,12 +5998,50 @@ class Csn1Parser {
 }
 
 // ---------- 顶层 ----------
-// parseGrammar(cellText) → { defs:[{name,raw,body}], notes:[], refs:[...] }
+// CSN.1 `!` 错误标签剥除（v1.53.0 AU）：`! <名 : bit (N|*) = < no string > [fallback]>`——
+// 错误标签零编码（throw 位置），语义建模 = 整体剔除、`= < no string >` 后若带 fallback
+// 角组则原位保留（44.060 §11.1.3.1 'Generic error labels' 53 项主形态 + §11.2.x 消息文法
+// 尾部 `! < Unknown message type … >` 族——原词法把 ! 静默丢弃、标签体进标签解析炸 star/
+// no string，整定义连坐失败 83 项中的 65 项）。平衡 <> 扫描；未闭合则截断到 ! 为止。
+function stripCsn1ErrorLabels(text) {
+  let src = String(text);
+  let n = 0;
+  for (;;) {
+    const bang = src.indexOf('!');
+    if (bang < 0) break;
+    const start = src.indexOf('<', bang);
+    if (start < 0) { src = src.slice(0, bang); n++; break; }
+    let depth = 0;
+    let j = start;
+    for (; j < src.length; j++) {
+      if (src[j] === '<') depth++;
+      else if (src[j] === '>') { depth--; if (depth === 0) break; }
+    }
+    if (depth !== 0) { src = src.slice(0, bang); n++; break; } // 未闭合：截到 ! 为止
+    const label = src.slice(start + 1, j);
+    let repl = '';
+    const m = /<\s*no\s*string\s*>/.exec(label);
+    if (m) {
+      const rest = label.slice(m.index + m[0].length);
+      const f = /^([\s]*<[\s\S]*>)[\s]*$/.exec(rest);
+      if (f) repl = f[1].trim(); // fallback 内容原位保留
+    }
+    src = src.slice(0, bang) + repl + src.slice(j + 1);
+    n++;
+  }
+  // 裸 no-string 值形（v1.53.0 AU 二型）：{ 11 bit (*) = < no string > }——无 ! 无标签壳，
+  // 位模式备选直接落 throw（44.060 §11.2.7 CARRIER_SPECIFIC_INFO 实测）；连前导判别位一起剔除。
+  src = src.replace(/(?:[01]+\s+)?bit\s*(?:\(\s*\*\s*\)|\*\*)\s*=\s*<\s*no\s*string\s*>/g, () => { n++; return ''; });
+  return { text: src, count: n };
+}
+
+// parseGrammar(cellText) → { defs:[{name,raw,body}], notes:[], refs:[...], errorLabels }
 function parseGrammar(cellText) {
   const refs = new Set();
-  const p = new Csn1Parser(csn1Tokenize(cellText), { onRef: (n) => refs.add(csn1NormName(n)) });
+  const stripped = stripCsn1ErrorLabels(cellText);
+  const p = new Csn1Parser(csn1Tokenize(stripped.text), { onRef: (n) => refs.add(csn1NormName(n)) });
   const { defs, notes } = p.parseUnit();
-  return { defs, notes, refs: [...refs] };
+  return { defs, notes, refs: [...refs], errorLabels: stripped.count };
 }
 
 // ==== src/nas/gtpc.js ====
@@ -7506,7 +7573,7 @@ function encMsg(inst, parts = [], spec = '24501', gtpcHdr = undefined) {
 //   - count>1：按行布局重复 count 个 octet（值可各不相同）；
 //   - open（'3-n' 开区间尾段）：采 1..3 个该行布局的 octet；
 //   - framed=true（TV/TLV/LV 外框由 codec 提供）：剥离首部 '…IEI' 与 'Length of …' 行。
-function layoutSample(octets, rng, framed = false) {
+function layoutSample(octets, rng, framed = false, opts = {}) {
   const rows = [...octets];
   if (framed) {
     while (rows.length && isIeiRow(rows[0])) rows.shift();
@@ -7521,21 +7588,46 @@ function layoutSample(octets, rng, framed = false) {
   // 采到的重复数折算）。只回填不改变行序与其它字段值。
   const lenPatches = [];
   const rowRanges = [];
+  // 批次 AT（v1.52.0）：suppressExplicitTails——PFCP 布局的「These octet(s) is/are
+  // present only if explicitly specified」尾段行按规范语义是缺省不存在的；随机吐
+  // 1..3 字节在分组 IE 内成为残留（tshark 子 IE 解剖器读完核心后残留 → 下一子头错位
+  // 连环炸）。开启后该固定文案 open 行采 0 重复；不影响 Network Instance 等内容型 open 行。
+  // 同旗标还修 PFCP 侧 count² 平方病：count>1 行 packRow 每次重复已产 count 字节，
+  // 而 reps 又取 count → 4B 行（Precedence/Measurement Period/延迟阈值）产 16B 且低位
+  // 恒零。旗标下改为 count=1 行克隆逐八位组独立采样（「值可各不相同」的本意）；旗标
+  // 关闭时 29060/29274 行为逐字节不变（那些路径有定长校验兜底，不碰回归风险）。
+  const suppressTails = !!opts.suppressExplicitTails;
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const lenShape = isInnerLenRow(row);
+    // AT 批：PFCP 旗标下放行多字节长度行（isInnerLenRow 旧守卫 count===1 把 294 DNS
+    // Query/Response Filter 的 2B「Length of Domain Name Pattern」整个排除在修补外，
+    // 高字节随机 → tshark 读巨值越界）。旗标关闭时守卫照旧，29060/29274 零漂移。
+    const lenShape = isInnerLenRow(row, suppressTails);
     const n = row.compressed ? 1 : row.count || 1;
+    const explicitTail = suppressTails && row.open
+      && /present only if explicitly specified/i.test(String(row.fields?.[0]?.name || ''));
     // 长度形态行恒采 1 个重复（长度字段自身不重复——8.123 Remote User ID 等全 open
     // 布局里 Length 行与内容行同为 '5-n*'，重复无意义）
-    const reps = lenShape ? 1 : row.open ? 1 + Math.floor(rng() * 3) : n;
+    let reps;
+    let rowRep = row;
+    if (lenShape) reps = 1;
+    else if (explicitTail) reps = 0;
+    else if (row.open) reps = 1 + Math.floor(rng() * 3);
+    else if (suppressTails && n > 1) { reps = n; rowRep = { ...row, count: 1 }; }
+    else reps = n;
     const start = bytes.length;
-    for (let k = 0; k < reps; k++) bytes.push(...packRow(row, fields, rng, k, reps));
+    for (let k = 0; k < reps; k++) bytes.push(...packRow(rowRep, fields, rng, k, reps));
     rowRanges[i] = [start, bytes.length];
-    if (lenShape && rows[i + 1]) lenPatches.push({ at: start, next: i + 1, name: row.fields[0].name });
+    if (lenShape && rows[i + 1]) lenPatches.push({ at: start, width: bytes.length - start, next: i + 1, name: row.fields[0].name });
   }
   for (const p of lenPatches) {
+    // AT 批（v1.52.0）：长度行按行宽做大端回填（旧行为只写字节 0——PFCP 侧 2B 长度行
+    // 〔DNS Query/Response Filter 的 Length of Domain Name Pattern〕在 count 拆分后高
+    // 字节随机 → tshark 读巨值越界；1B 行为与旧版完全一致）。
     const L = rowRanges[p.next][1] - rowRanges[p.next][0];
-    bytes[p.at] = L & 0xff;
+    for (let bi = 0; bi < p.width; bi++) {
+      bytes[p.at + p.width - 1 - bi] = (L >> (8 * bi)) & 0xff;
+    }
     fields[p.name] = L;
   }
   return { bytes: Uint8Array.from(bytes), fields };
@@ -7543,8 +7635,10 @@ function layoutSample(octets, rng, framed = false) {
 
 // 布局中部的长度指示行：单字段、整 8 bit、名形如 'Length of X' / 'X Length'。
 // （framed 剥离只针对行首外框 Length；此处补内嵌长度行——open 标记不豁免，见上。）
-function isInnerLenRow(row) {
-  return !row.half && !row.compressed && (row.count || 1) === 1
+// allowMulti（AT 批）：PFCP 旗标下放行多字节长度行（294 DNS 过滤器的 2B 长度域），
+// 由调用侧按行宽做大端回填；缺省守卫 count===1 维持 29060/29274 旧行为。
+function isInnerLenRow(row, allowMulti = false) {
+  return !row.half && !row.compressed && (allowMulti || (row.count || 1) === 1)
     && row.fields.length === 1 && row.fields[0].bits === 8
     && /^(length of .+|.+ length)$/i.test(String(row.fields[0].name || '').trim());
 }
@@ -12022,12 +12116,19 @@ function semanticPfcpValueImpl(name, rng) {
       ? Uint8Array.from([0x00, ...ipv4(rng)])
       : Uint8Array.from([0x01, ...ipv6(rng)]);
   }
-  if (n === 'F-SEID' || n === 'F-TEID') {
-    const seid = n === 'F-SEID';
+  if (n === 'F-SEID') {
+    // 8.2.37：位序与 F-TEID **相反**——V4=bit2(0x02)/V6=bit1(0x01)（schema hi=2/hi=1）。
     const v4 = rng() < 0.75;
-    const flags = v4 ? 0x02 : 0x01; // V4@bit2 / V6@bit1，其余（CHID/CH）为 0
-    const body = Array.from({ length: seid ? 8 : 4 }, () => rndByte(rng));
-    return Uint8Array.from([flags, ...body, ...(v4 ? ipv4(rng) : ipv6(rng))]);
+    const body = Array.from({ length: 8 }, () => rndByte(rng));
+    return Uint8Array.from([v4 ? 0x02 : 0x01, ...body, ...(v4 ? ipv4(rng) : ipv6(rng))]);
+  }
+  if (n === 'F-TEID') {
+    // 8.2.3：位序 V4=bit1(0x01)/V6=bit2(0x02)——原「v4?0x02:0x01」与 schema 及 tshark
+    // 实测（0x02→V6 Present）相反：分支产物恒声称 V6 却给 IPv4（或反之），tshark 按标志
+    // 读 16B IPv6 越界——F-TEID 只在 29244 组内出现，病面藏于组桶（311/Create PDR 炸因）。
+    const v4 = rng() < 0.75;
+    const body = Array.from({ length: 4 }, () => rndByte(rng));
+    return Uint8Array.from([v4 ? 0x01 : 0x02, ...body, ...(v4 ? ipv4(rng) : ipv6(rng))]);
   }
   if (n === 'UE IP ADDRESS' || n === 'SOURCE IP ADDRESS' || n === 'ALTERNATIVE SMF IP ADDRESS') {
     const v4 = rng() < 0.75;
@@ -12051,6 +12152,216 @@ function semanticPfcpValueImpl(name, rng) {
     // 8.2.128：Pool Id Length(2B) 与实际标识字节数一致（布局随机 2B 长度前缀 →
     // ue_ip_address_pool_length 巨值越界）；取 len=1 + 1 字节标识。
     return Uint8Array.from([0x00, 0x01, 0x61 + Math.floor(rng() * 26)]);
+  }
+  // ---- AT 批（v1.52.0）：29244 组内子 IE 清账族——十桶病根 = 布局摄取形态与
+  // tshark 解剖器期望不配（标志位声称的条件内容缺席 / 特异布局需补域 / 需最小形）。
+  // 全部形经隔离探针 + 真组合成双口径裁决（tmp/_v9_at_probe4-8）。
+  if (n === 'SDF FILTER') {
+    // 8.2.5：tshark 在 flags 后无条件读 [Spare 1B][FD Length 2B][FD 内容 lenB]——
+    // 最小形 flags0+spare0+FD 空；FD 形 flags=0x01+空描述同样 CLEAN（fd 内容随机易炸）。
+    return Uint8Array.from([0x00, 0x00, 0x00, 0x00]);
+  }
+  if (n === 'FAILED RULE ID') {
+    // 8.2.80：[Rule ID Type 1B][Rule ID value N B]——值宽跟随被引 IE：PDR(0)/MAR(4)
+    // 2B（8.2.36/8.2.123），FAR(1)/QER(2)/UBR(3) 4B（8.2.74/75/xx）；tshark 按类型读宽。
+    const t = Math.floor(rng() * 5);
+    const nb = t === 1 || t === 2 || t === 3 ? 4 : 2;
+    return Uint8Array.from([t, ...Array.from({ length: nb }, () => rndByte(rng))]);
+  }
+  if (n === 'GTP-U PATH INTERFACE TYPE' || n === 'NUMBER OF UE IP ADDRESSES' || n === 'LINK-SPECIFIC MULTIPATH IP ADDRESS' || n === 'MPTCP LINK-SPECIFIC IP ADDRESS') {
+    // 8.2.166 / 8.2.183 / 8.2.158：唯一 CLEAN 形 = [0x00]——tshark 对 N3/N9（241）、
+    // IPv6/IPv4（268）、NV6/NV4/V6/V4（229）置位都要读后续接口/计数字节而布局/期望不配。
+    return Uint8Array.from([0x00]);
+  }
+  if (n === 'DL DATA PACKETS SIZE') {
+    // 8.2.173：恰 2B（tshark 读 16bit 后残留即炸）。
+    return Uint8Array.from([rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'CP IP ADDRESS') {
+    // 8.2.199：位序 V4=0x02/V6=0x01（与 F-TEID 相反！schema hi=2/hi=1 + tshark 双证）。
+    return rng() < 0.75
+      ? Uint8Array.from([0x02, ...ipv4(rng)])
+      : Uint8Array.from([0x01, ...ipv6(rng)]);
+  }
+  if (n === 'MPQUIC ADDRESS INFORMATION') {
+    // 8.2.226：[flags][Proxy Type][Proxy Port 2B][地址按 flags]——位序 V4=0x01/V6=0x02。
+    const v4 = rng() < 0.75;
+    return Uint8Array.from([v4 ? 0x01 : 0x02, 0x00, rndByte(rng), rndByte(rng), ...(v4 ? ipv4(rng) : ipv6(rng))]);
+  }
+  if (n === 'MBS SESSION IDENTIFIER' || n === 'MBSN4RESP-FLAGS') {
+    // 8.2.206 / 8.2.211：flags 位随机置位 → tshark 读 TMGI 6B / NIDI 源地址长度域越界；
+    // 0x00 最小形 CLEAN（残留 Note 不致命，但零残留更净）。
+    return Uint8Array.from([0x00]);
+  }
+  if (n === 'LOCAL INGRESS TUNNEL') {
+    // 8.2.209：[flags][UDP Port 2B][V4 地址 4B]——位序 V4=0x01/V6=0x02。
+    const v4 = rng() < 0.75;
+    return Uint8Array.from([v4 ? 0x01 : 0x00, rndByte(rng), rndByte(rng), ...(v4 ? ipv4(rng) : [])]);
+  }
+  if (n === 'RAT TYPE') {
+    // def/ref 双空（schema 275 行）落 2-9B 随机的唯一入口；tshark 读 1B 枚举（0..6 全收）。
+    return Uint8Array.from([Math.floor(rng() * 7)]);
+  }
+  if (n === 'SOURCE INTERFACE') {
+    // 8.2.2：1B（低半八位组 Interface value 0..3），open 尾已由 suppressExplicitTails 抑制。
+    return Uint8Array.from([Math.floor(rng() * 4)]);
+  }
+  if (n === 'DOWNLINK DATA SERVICE INFORMATION' || n === 'DATA STATUS' || n === 'DL DATA STATUS') {
+    // 8.2.27 / 8.2.179：flags 置位声明条件体（DLPSI→2B 等）而体不摄 → 0x00 最小形。
+    return Uint8Array.from([0x00]);
+  }
+  if (n === 'IP MULTICAST ADDRESS') {
+    // 8.2.137：位序 V4=0x02/V6=0x01 + 地址按 flags（同 292 族）。
+    return rng() < 0.75
+      ? Uint8Array.from([0x02, ...ipv4(rng)])
+      : Uint8Array.from([0x01, ...ipv6(rng)]);
+  }
+  if (n === 'CP PFCP ENTITY IP ADDRESS') {
+    // 8.2.135：位序同 CP IP Address（V4=0x02/V6=0x01），同族同治（Session Retention 组炸因）。
+    return rng() < 0.75
+      ? Uint8Array.from([0x02, ...ipv4(rng)])
+      : Uint8Array.from([0x01, ...ipv6(rng)]);
+  }
+  if (n === 'N6 ROUTING INFORMATION') {
+    // 8.2.243：DPO/DIPV6/DIPV4/SPO/SIPV6/SIPV4 六标志各声明条件地址/指示体而体不摄 →
+    // 0x00 最小形（f34 实证六位全开连环炸）。
+    return Uint8Array.from([0x00]);
+  }
+  // ---- AT 批续（URR/MAR 计量叶族，探针 11/12 矩阵）：Create/Update URR 内的条件体 IE。
+  if (n === 'VOLUME THRESHOLD' || n === 'SUBSEQUENT VOLUME THRESHOLD' || n === 'DROPPED DL TRAFFIC THRESHOLD') {
+    // 8.2.13 / 8.2.16 / 8.2.49：flags 置位声明 8B 计量体（DLVOL/ULVOL/TOVOL、DLBY/DLPA）
+    // 而体不摄 → 0x00 最小形（flags+3×8B 亦 CLEAN，取最小）。
+    return Uint8Array.from([0x00]);
+  }
+  if (n === 'EVENT THRESHOLD' || n === 'EVENT QUOTA') {
+    // 8.2.113 / 8.2.112：flags 0 反而 MAL——tshark 无条件读 4B 计数；[0x01+4B] CLEAN。
+    return Uint8Array.from([0x01, rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'QUOTA VALIDITY TIME') {
+    // 8.2.132：布局 Timer 1B，tshark 读 4B（同 IE 35 家族口径）。
+    return Uint8Array.from([rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'TIME QUOTA MECHANISM') {
+    // 8.2.81：[Base Time Interval Type 1B][Base Time Interval 4B]——Rel-17 增 4B 间隔域，
+    // 1B 形（spec 布局）与 ≤4B 形全 MAL，5B 起 CLEAN。
+    return Uint8Array.from([0x00, rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'QOS MONITORING MEASUREMENT') {
+    // 8.2.171（IE 248）：八标志各声明测量容器而体不摄 → 0x00 最小形（Session Report→
+    // QoS Monitoring Report 组炸因）。
+    return Uint8Array.from([0x00]);
+  }
+  if (n === 'OUTER HEADER CREATION') {
+    // 8.2.56（IE 84）：desc 16bit——0x0000 干净；置 GTP-U/UDP/IPv4|IPv6 位则 tshark 强制
+    // 读 TEID(4B)+地址；仅 UDP/IPv4 位（0x0400）无地址体反 MAL。
+    const r = rng();
+    if (r < 0.6) return Uint8Array.from([0x00, 0x00]);
+    if (r < 0.8) return Uint8Array.from([0x01, 0x00, ...Array.from({ length: 4 }, () => rndByte(rng)), ...ipv4(rng)]);
+    return Uint8Array.from([0x02, 0x00, ...Array.from({ length: 4 }, () => rndByte(rng)), ...ipv6(rng)]);
+  }
+  if (n === 'MULTICAST TRANSPORT INFORMATION') {
+    // 8.2.207（IE 306）：[Spare][CTEID 4B][Distribution Addr Type(2b)|Len(6b)+地址]
+    // + [Source Addr Type|Len + 地址]——**双地址块**，缺 Source 块 tshark 消化完仍判
+    // malformed（探针 v9at26 实证）。Type 0=IPv4(len4)/1=IPv6(len16)。
+    const v4 = rng() < 0.75;
+    const d = v4 ? [0x04, ...ipv4(rng)] : [0x50, ...ipv6(rng)];
+    const s = v4 || rng() < 0.5 ? [0x04, ...ipv4(rng)] : [0x50, ...ipv6(rng)];
+    return Uint8Array.from([0x00, rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng), ...d, ...s]);
+  }
+  if (n === '5GS USER PLANE NODE ID') {
+    // 8.2.143（IE 198）：布局只摄 BID 位，tshark 另有 SOUR 位（置位即读后续源接口域）
+    // → 0x00 最小形（Created Bridge/Router Info 组炸因）。
+    return Uint8Array.from([0x00]);
+  }
+  if (n === 'REDIRECT INFORMATION') {
+    // 8.2.20：[Redirect Address Type 1B][Server Address Length 2B][Address]——布局长度
+    // 行名带 docx 脚注后缀「=a」逃过 isInnerLenRow 修补 → 2B 随机巨值。type 1=IPv4/2=IPv6。
+    return rng() < 0.75
+      ? Uint8Array.from([0x01, 0x00, 0x04, ...ipv4(rng)])
+      : Uint8Array.from([0x02, 0x00, 0x10, ...ipv6(rng)]);
+  }
+  if (n === 'FORWARDING POLICY') {
+    // 8.2.23：布局只有「Forwarding Policy Identifier Length」行、标识内容行未摄取 →
+    // 长度随机巨值越界；len=1..3 + 等长 ASCII 标识。
+    const l = 1 + Math.floor(rng() * 3);
+    return Uint8Array.from([l, ...Array.from({ length: l }, () => 0x61 + Math.floor(rng() * 26))]);
+  }
+  if (n === 'HEADER ENRICHMENT') {
+    // 8.2.67：[Header Type 1B][Name Len 1B][Name][Value Len 2B][Value]——布局缺 Value
+    // 段，tshark 读完 Name 强制读 Value Len 2B → [type 0][len1 'a'][0000] 最小形。
+    return Uint8Array.from([0x00, 0x01, 0x61, 0x00, 0x00]);
+  }
+  if (n === 'VOLUME QUOTA' || n === 'SUBSEQUENT VOLUME QUOTA' || n === 'VOLUME MEASUREMENT') {
+    // 8.2.50 / 8.2.86 / 8.2.44：同 Volume Threshold——flags 置位声明 8B 计量体而不摄 →
+    // 0x00 最小形（NOP 位形亦 MAL，探针 v9at31）。
+    return Uint8Array.from([0x00]);
+  }
+  if (n === 'MPTCP ADDRESS INFORMATION') {
+    // 8.2.157（IE 228）：v4/v6 置位形 MAL（同 MPQUIC 首扫），最小形 [flags0][type][port] CLEAN。
+    return Uint8Array.from([0x00, 0x00, rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'PMF ADDRESS INFORMATION') {
+    // 8.2.159（IE 230）：MAC 形 [flags=0x08][MAC 6B][Port 2B] CLEAN；0x00/纯 V4/V6 形 MAL
+    // （探针 v9at31——tshark 对 MAC 位形消化最完整）。
+    return Uint8Array.from([0x08, ...Array.from({ length: 6 }, () => rndByte(rng)), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'TRACE INFORMATION') {
+    // 8.2.108（IE 152）：[MCC/MNC 3B（BCD 数字 0-9）][Trace ID 3B][Triggering Events
+    // Length 1B=1][Events 1B][Depth 1B][接口域 2B]——tshark 读完 Depth 强制再读 2B
+    // （探针 v9at32：≤10B 全 MAL，11B CLEAN）；布局缺 Depth/接口域。
+    const d = () => Math.floor(rng() * 10);
+    return Uint8Array.from([
+      (d() << 4) | d(), (d() << 4) | d(), (d() << 4) | d(),
+      rndByte(rng), rndByte(rng), rndByte(rng),
+      0x01, 1 + Math.floor(rng() * 15), 1 + Math.floor(rng() * 3), 0x00, 0x00,
+    ]);
+  }
+  if (n === 'USER ID' || n === 'DL FLOW LEVEL MARKING' || n === 'THRESHOLDS' || n === 'THRESHOLD VALUES' || n === 'PACKET RATE') {
+    // 8.2.101 / 8.2.66 / 8.2.196 / 8.2.63（IE 94）：flags 置位声明 len+体（IMEI 数字串/
+    // TTC 2B/RTT-PLR 阈值/包速率 2B 项）而不摄 → 0x00 最小形（探针 v9at33/34/38——
+    // Packet Rate 置位形反全 MAL，0x00 唯一净形）。
+    return Uint8Array.from([0x00]);
+  }
+  if (n === 'MAC ADDRESSES DETECTED' || n === 'MAC ADDRESSES REMOVED') {
+    // 8.2.103 / 8.2.104：[Number of MAC addresses k][k×6B MAC]——计数行不是 length 形
+    // （名「Number of …」）不进内嵌长度修补，随机 k 与 6B 固定体不配 → k=1+单 MAC 形。
+    return Uint8Array.from([0x01, ...Array.from({ length: 6 }, () => rndByte(rng))]);
+  }
+  if (n === 'UE LEVEL MEASUREMENTS CONFIGURATION') {
+    // 8.2.245（IE 353）：[Job Type][k][k×Measurement Type][Time Period 3B]——tshark 无
+    // 条件读 3B Time Period（探针 v9at42：缺/2B/4B 全 MAL，恰 3B CLEAN）。
+    return Uint8Array.from([0x00, 0x01, 1 + Math.floor(rng() * 15), rndByte(rng), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'DL PERIODICITY') {
+    // 8.2.221（IE 326）：布局 null 落随机长；tshark 读 [flags 1B][periodicity 4B]（探针
+    // v9at46：≤4B 全 MAL，5B CLEAN）。
+    return Uint8Array.from([0x00, rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'TRAFFIC PARAMETER THRESHOLD' || n === 'REQUESTED QOS MONITORING' || n === 'REPORTING FREQUENCY'
+    || n === 'PACKET DELAY THRESHOLDS' || n === 'REPORTING THRESHOLDS') {
+    // 8.2.220 / 8.2.167 / 8.2.168 / 8.2.169 / 8.2.240：Create/Update SRR 子树 flags 叶——
+    // 0x00 形全 CLEAN（探针 v9at44），布局随机置位或缺布局落随机长的病面一并封死。
+    return Uint8Array.from([0x00]);
+  }
+  if (n === 'PMF CONTROL INFORMATION') {
+    // 8.2.156（IE 224）：tshark 只消化 flags 字节本身——PQPM/DRTTI 置位或带 QFI 体
+    // （布局 Number of QFI 行）皆 MAL（探针 v9at50-53 全扫）；恰 1B flags（0/1/3）CLEAN。
+    return Uint8Array.from([0x00]);
+  }
+  if (n === 'TIMER' || n === 'MINIMUM WAIT TIME') {
+    // 8.2.35 / 8.2.170：布局 Timer 1B，tshark 按「Subsequent Time Threshold」读 4B
+    // （探针 v9at7：1B/2B/3B 全 MAL，4B 起 CLEAN）。
+    return Uint8Array.from([rndByte(rng), rndByte(rng), rndByte(rng), rndByte(rng)]);
+  }
+  if (n === 'L2TP USER AUTHENTICATION') {
+    // 8.2.187（IE 278）：[Proxy Authen Type 2B][spare+PAI/PAR/PAC/PAN flags 1B][按标志
+    // len+值]——tshark 把 type 读 16 位（布局只摄 1B），flags 随机置位即越界（探针 v9at59）。
+    const forms = [
+      [0x00, 0x01, 0x00],
+      [0x00, 0x01, 0x01, 0x01, 0x61],
+      [0x00, 0x01, 0x08, 0x01, 0x61],
+    ];
+    return Uint8Array.from(forms[Math.floor(rng() * forms.length)]);
   }
   return null;
 }
@@ -12288,11 +12599,17 @@ function pfcpSampleValue(r, schema, rng, depth = 0) {
       || (r.name && r.name !== ie.name ? semanticPfcpValue(r.name, rng) : null); // AK P3-13 行名兜底（同 gtpc 侧）
     if (sem) return sem;
     if (ie.layouts && ie.layouts[0] && ie.layouts[0].octets.length) {
-      const { bytes } = layoutSample(ie.layouts[0].octets, rng, false);
+      // AT 批（v1.52.0）：PFCP 布局抑制「present only if explicitly specified」尾段
+      // （组内残留炸因，见 values.js suppressExplicitTails 注）。
+      const { bytes } = layoutSample(ie.layouts[0].octets, rng, false, { suppressExplicitTails: true });
       if (bytes.length) return bytes;
     }
     if (r.len && /^\d+$/.test(r.len)) return Uint8Array.from({ length: +r.len }, () => Math.floor(rng() * 256));
   }
+  // AT 批（v1.52.0）：组行引用断链（schema 未摄取的分组定义，如 7.5.2.8-3 Non-3GPP
+  // AFAI——Last IE 实拍 f38 假子 IE 头连环炸）或超过递归深度时，旧行为落 2-9B 随机
+  // 即伪组体；改产空组体（tshark 对空分组 IE 不判违）。仅 PFCP 侧，29060/29274 不涉。
+  if (r.ref || (ref && depth >= 4)) return Uint8Array.from([]);
   return Uint8Array.from({ length: 2 + Math.floor(rng() * 8) }, () => Math.floor(rng() * 256));
 }
 

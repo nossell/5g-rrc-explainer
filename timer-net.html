@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>定时器交互网 · RRC 讲解器</title>
-<meta name="description" content="14 个 RRC/接入定时器的启动、停止、超时三问——内部视角第一张图。">
+<meta name="description" content="14 个 RRC/接入定时器的启动、停止、超时三问 + §12 官方处理时延表全量 26 行——内部视角第一张图。">
 <meta property="og:title" content="定时器网 · RRC 讲解器">
 <meta property="og:description" content="14 个 RRC/接入定时器的启动、停止、超时三问——内部视角第一张图。">
 <meta property="og:type" content="website">
@@ -42,6 +42,35 @@
 .tn-links a{font:700 11px var(--mono);text-decoration:none;color:var(--nas);background:#F5F0FE;border:1px solid #DDD3F5;border-radius:6px;padding:2px 9px}
 .tn-links a:hover{background:#EDE4FC}
 .tn-note{margin-top:26px;font-size:12.5px;color:var(--tx3);line-height:1.7;border-top:1px solid var(--bd);padding-top:14px}
+/* §12 处理时延表（v49） */
+.tn-t12{margin-top:38px}
+.tn-t12>h2{font-size:18px;font-weight:800;letter-spacing:-.2px}
+.tn-t12>.gsub{color:var(--tx2);font-size:13px;margin-top:3px;line-height:1.7}
+.tn-t12>.toff{margin-top:10px;border:1px dashed var(--bd);border-radius:10px;padding:10px 15px;background:var(--inset);font-size:12px;color:var(--tx2);line-height:1.7}
+.t12-grp{margin-top:22px}
+.t12-grp>h3{font:800 13.5px var(--sans);color:var(--tx1)}
+.t12-tbl{margin-top:8px;border:1px solid var(--bd);border-radius:10px;overflow:hidden;background:var(--panel)}
+.t12-h,.t12-r{display:grid;grid-template-columns:minmax(180px,2.2fr) minmax(120px,1.4fr) minmax(120px,1.4fr) minmax(90px,.9fr) minmax(90px,1.6fr);gap:8px;padding:7px 13px;font-size:12px;line-height:1.6;align-items:baseline}
+.t12-h{background:var(--inset);font-weight:800;color:var(--tx2);font-size:11.5px}
+.t12-r+.t12-r{border-top:1px solid var(--bd)}
+.t12-r .p{color:var(--tx1);font-weight:600}
+.t12-r .m{font:600 11.5px var(--mono);color:var(--nas);overflow-wrap:anywhere}
+.t12-r .m a{color:var(--nas);text-decoration:none;border-bottom:1px dashed var(--nas);cursor:pointer}
+.t12-r .m a:hover{color:#6D28D9}
+.t12-r .v{font:800 12px var(--mono);color:var(--accent-deep);background:var(--accent-bg);border-radius:5px;padding:1px 8px;justify-self:start}
+.t12-r .n{color:var(--tx3)}
+.t12-msg{margin-top:26px;border:1px solid var(--bd);border-radius:12px;background:var(--panel);padding:13px 17px}
+.t12-msg>h3{font:800 13.5px var(--sans);cursor:pointer;user-select:none}
+.t12-msg>h3 .hint{font:600 11px var(--sans);color:var(--tx3);margin-left:6px}
+.t12-msg .body{display:none;margin-top:10px}
+.t12-msg.open .body{display:block}
+.t12-mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:4px 18px;font-size:12px}
+.t12-mr{display:flex;gap:7px;align-items:baseline;padding:2px 0}
+.t12-mr .mm{font:700 11.5px var(--mono);color:var(--tx1);overflow-wrap:anywhere}
+.t12-mr .mk{font:800 10px var(--mono);border-radius:4px;padding:0 5px}
+.mk-p{background:#E7F6EC;color:#0E7C37}.mk-m{background:#F1F5F9;color:#64748B}
+.t12-mr .cm{color:var(--tx3);font-size:11px;line-height:1.55}
+.t12-notes{margin-top:12px;font-size:11.5px;color:var(--tx3);line-height:1.7;border-top:1px dashed var(--bd);padding-top:9px}
 </style>
 </head>
 <body>
@@ -65,11 +94,13 @@
   </header>
   <section class="tn-hero">
     <h1>定时器交互网——RRC 的心跳与秒表</h1>
-    <p class="sub">协议文本里散落各章的定时器，在这里摆成一张网。<b>每个定时器回答三个问题：什么时候开始跑、什么事件让它停、跑到头会发生什么</b>——背下这三问，比背档位表有用。点卡片展开，再点收起。</p>
+    <p class="sub">协议文本里散落各章的定时器，在这里摆成一张网。<b>每个定时器回答三个问题：什么时候开始跑、什么事件让它停、跑到头会发生什么</b>——背下这三问，比背档位表有用。点卡片展开，再点收起。页尾附 <b>§12 处理时延表</b>：规范替 UE 担保的每个 RRC 过程的回话时限，全量照录。</p>
   </section>
 
   <div class="tn-statebar" id="tn-statebar"></div>
   <div id="tn-groups"></div>
+
+  <section class="tn-t12" id="tn-t12"></section>
 
   <p class="tn-note">内容纪律：档位与行为为自写讲解（含条款号锚点），不搬运 3GPP 规范原文；全部条目可与课程字段树互证（各消息里出现的定时器已挂词条）。T304/T316/T380 的完整档位表见切换课与 INACTIVE 课的字段树。另注：按需 SI 请求（RRCSystemInfoRequest）没有对应标准定时器，重试节奏由 UE 实现决定；CONNECTED 态按需 SIB 才另有 T350 抑制计时（§5.2.2.3.5）。</p>
 </div>
@@ -218,6 +249,52 @@
     var c = root.querySelector('.tn-card[data-t="' + id + '"]');
     if (c) { c.classList.add('open'); c.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
   });
+})();
+</script>
+
+<script src="assets/content/timing-12.js"></script>
+<script>
+/* §12 处理时延表（v49）：官方 Table 12.1-1 全量 26 行 + 消息属性面 53 行——数据生成器
+   tools/gen_timing_defs.py 直出，渲染零硬编码数字（全部由 RRC_TIMING12 实况推导）。 */
+(function () {
+  'use strict';
+  var T = window.RRC_TIMING12;
+  if (!T) return;
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  var IDENT = /^[A-Za-z][A-Za-z0-9-]*$/;
+  function msgCell(s) {
+    s = String(s || '');
+    if (IDENT.test(s)) return '<a href="asn1-ref.html#q=' + encodeURIComponent(s) + '" title="在 ASN.1 速查表中查字段树">' + esc(s) + '</a>';
+    return esc(s);
+  }
+  var nDelay = 0;
+  T.groups.forEach(function (g) { nDelay += g.rows.length; });
+
+  var h = '<h2>§12 加演：RRC 过程处理时延——官方上限速查</h2>';
+  h += '<div class="gsub">上表是"UE 自己的秒表"（定时器档位），本表是"规范替 UE 担保的秒表"：TS 38.331 §12 给每个 RRC 过程定了处理时延上限——面试答"这条信令发出去多久必须准备好回话"，查这里。<b>' + nDelay + ' 行全量照录</b>，值列单位 ms；消息名（紫字）可点进 ASN.1 速查表看字段树。</div>';
+  h += '<div class="toff"><b>口径</b>（官方）：从 UE 物理层收完网络下行消息，到 UE 准备好接收上行响应消息的上行授权为止的时长——不含调度、随机接入、物理层同步引入的时延（即"排除一切排队，只算 UE 处理"）。分段消息的值含每段的开销（如 16+( Nseg-1)*10）。</div>';
+  T.groups.forEach(function (g) {
+    h += '<div class="t12-grp"><h3>' + esc(g.name) + '（' + g.rows.length + ' 行）</h3><div class="t12-tbl">';
+    h += '<div class="t12-h"><span>过程</span><span>网络 → UE</span><span>UE → 网络</span><span>值 [ms]</span><span>Notes</span></div>';
+    g.rows.forEach(function (r) {
+      h += '<div class="t12-r"><span class="p">' + esc(r[0]) + '</span><span class="m">' + msgCell(r[1]) + '</span><span class="m">' + msgCell(r[2]) + '</span><span class="v">' + esc(r[3]) + '</span><span class="n">' + esc(r[4]) + '</span></div>';
+    });
+    h += '</div></div>';
+  });
+  h += '<div class="t12-msg" id="t12-msg"><h3>§12 附表：消息级属性面（' + T.msg.rows.length + ' 行，点击展开）<span class="hint">表头照录官方原文：' + esc(T.msg.head.join(' / ')) + '</span></h3><div class="body"><div class="t12-mgrid">';
+  T.msg.rows.forEach(function (r) {
+    var mk = function (v) { return v === '+' ? '<span class="mk mk-p">+</span>' : '<span class="mk mk-m">' + esc(v || '·') + '</span>'; };
+    h += '<div class="t12-mr"><span class="mm">' + esc(r[0]) + '</span>' + mk(r[1]) + mk(r[2]) + mk(r[3]) + (r[4] ? '<span class="cm">' + esc(r[4]) + '</span>' : '') + '</div>';
+  });
+  h += '</div>';
+  if (T.msg.notes && T.msg.notes.length) {
+    h += '<div class="t12-notes"><b>官方 NOTE（照录）</b>：<br>' + T.msg.notes.map(esc).join('<br>') + '</div>';
+  }
+  h += '</div></div>';
+  var el = document.getElementById('tn-t12');
+  el.innerHTML = h;
+  var mh = document.querySelector('#t12-msg > h3');
+  if (mh) mh.addEventListener('click', function () { mh.parentNode.classList.toggle('open'); });
 })();
 </script>
 </body>

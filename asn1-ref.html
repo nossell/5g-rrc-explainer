@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ASN.1 速查表 · RRC 讲解器</title>
-<meta name="description" content="TS 38.331 全量 ASN.1 定义速查：消息与信元的字段树、枚举值、maxNrof 上限——名称/字段名一搜即达，类型名可点击跳转。">
+<meta name="description" content="TS 38.331 全量 ASN.1 定义速查：消息与信元的字段树、官方字段注释表、枚举值、maxNrof 上限——名称/字段名/注释一搜即达，类型名可点击跳转。">
 <meta property="og:title" content="ASN.1 速查表 · RRC 讲解器">
-<meta property="og:description" content="TS 38.331 全量 ASN.1 定义速查：消息与信元的字段树、枚举值、maxNrof 上限——名称/字段名一搜即达，类型名可点击跳转。">
+<meta property="og:description" content="TS 38.331 全量 ASN.1 定义速查：消息与信元的字段树、官方字段注释表、枚举值、maxNrof 上限——名称/字段名/注释一搜即达，类型名可点击跳转。">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://nossell.github.io/5g-rrc-explainer/asn1-ref.html">
 <link rel="stylesheet" href="assets/site.css">
@@ -55,6 +55,11 @@
 .a1-body:not(.open)::after{content:'… 点击展开全文';position:absolute;left:0;right:0;bottom:0;padding:26px 0 4px;background:linear-gradient(transparent,var(--inset));font:600 11px var(--sans);color:var(--tx3);text-align:center}
 .a1-tk{color:var(--nas);font-weight:700;cursor:pointer;border-bottom:1px dashed var(--nas)}
 .a1-tk:hover{color:#6D28D9}
+.a1-fld{margin-top:10px;border:1px solid var(--bd);border-radius:9px;padding:10px 14px 11px;background:var(--panel)}
+.a1-fld .ft{font:800 11px var(--sans);color:var(--tx3);letter-spacing:.02em;margin-bottom:7px}
+.a1-fr{display:flex;gap:10px;font-size:12px;line-height:1.7;padding:2.5px 0;align-items:baseline}
+.a1-fr .ff{flex:none;max-width:46%;font:700 11.5px var(--mono);color:var(--accent-deep);background:var(--accent-bg);border-radius:5px;padding:1px 7px;overflow-wrap:anywhere}
+.a1-fr .fd{color:var(--tx2);overflow-wrap:anywhere}
 .a1-empty{margin-top:40px;text-align:center;color:var(--tx3);font-size:13.5px}
 .a1-foot{margin-top:34px;font-size:12.5px;color:var(--tx3);line-height:1.8;border-top:1px solid var(--bd);padding-top:16px}
 .a1-foot a{color:var(--accent-deep);font-weight:700;text-decoration:none}
@@ -84,7 +89,7 @@
 
   <section class="a1-hero">
     <h1>ASN.1 速查表——全规范定义的案头抽屉</h1>
-    <p class="sub">课程里遇到任何一个消息名、信元名、字段类型，回到这张表都能翻到它的<b>完整字段树</b>。数据由生成器从 TS 38.331 语料直出、逐条带条款号：<b>Uu 消息怎么拼、信元有哪些字段、枚举取什么值、每个列表的上限是多少</b>——原文照录，一条不落。字段树里出现的其他定义名（下划虚线紫字）可以点击跳转，顺着类型链一路查到底。</p>
+    <p class="sub">课程里遇到任何一个消息名、信元名、字段类型，回到这张表都能翻到它的<b>完整字段树</b>。数据由生成器从 TS 38.331 语料直出、逐条带条款号：<b>Uu 消息怎么拼、信元有哪些字段、枚举取什么值、每个列表的上限是多少</b>——原文照录，一条不落。命中的定义还带<b>官方字段注释表</b>（每个字段一段官方散文说明）；字段树里出现的其他定义名（下划虚线紫字）可以点击跳转，顺着类型链一路查到底。</p>
     <div class="a1-searchbar">
       <input id="q" type="text" placeholder="搜名称或字段名，如 RRCReconfiguration / physCellId / maxNrof…" autocomplete="off" spellcheck="false">
       <span class="a1-clear" id="clear" hidden>清空 ✕</span>
@@ -103,15 +108,18 @@
   <div class="a1-foot" id="foot"></div>
 </div>
 <script src="assets/content/asn1-defs.js"></script>
+<script src="assets/content/asn1-fields.js"></script>
 <script>
 (function () {
   'use strict';
   var A = window.RRC_ASN1;
-  var D = A.defs, G = A.groups;
+  var F = window.RRC_ASN1_FIELDS || { meta: { tables: 0, rows: 0 }, t: {} };
+  var D = A.defs, G = A.groups, FT = F.t;
   var KIND = { q: 'SEQUENCE 结构', e: 'ENUMERATED 枚举', c: 'CHOICE 选择', l: 'SEQUENCE OF 列表', s: '标量类型', k: 'maxNrof 约束值' };
   var LIMIT = 160;
 
-  // 预索引：小写全文（搜索用）与名字集合（交叉引用用）
+  // 预索引：小写全文（搜索用，含字段注释行文本）与名字集合（交叉引用用）
+  // 字段表归属：先按定义名原样查，miss 再剥 -rNN 后缀查（表名/定义名后缀口径互异，双向兜底）
   var names = {};
   var i, d;
   for (i = 0; i < D.length; i++) {
@@ -119,6 +127,24 @@
     d._s = (d.n + '\n' + d.b).toLowerCase();
     names[d.n.split(' { ')[0]] = i;
   }
+  for (var fn in FT) { /* 表名→定义名归属走 fieldsOf 动态查 */ }
+  function fieldsOf(d) {
+    var bare = d.n.split(' { ')[0];
+    if (FT[bare]) return FT[bare];
+    var m = bare.match(/^(.*)-r\d+$/);
+    return m && FT[m[1]] ? FT[m[1]] : null;
+  }
+  for (i = 0; i < D.length; i++) {
+    d = D[i];
+    var fl = fieldsOf(d);
+    if (fl) {
+      var extra = [];
+      for (var fi = 0; fi < fl.length; fi++) extra.push(fl[fi][0] + ' ' + fl[fi][1]);
+      d._s += '\n' + extra.join('\n').toLowerCase();
+    }
+  }
+  var nWithFields = 0;
+  for (i = 0; i < D.length; i++) if (fieldsOf(D[i])) nWithFields++;
 
   var qEl = document.getElementById('q');
   var clearEl = document.getElementById('clear');
@@ -149,7 +175,18 @@
     if (d.dr) h += '<span class="a1-dr">' + esc(d.dr) + '</span>';
     h += '</div>';
     if (d.d) h += '<div class="a1-desc">官方引言：The … <b>' + esc(d.d) + '</b></div>';
-    h += '<pre class="a1-body">' + linkify(esc(d.b)) + '</pre></div>';
+    h += '<pre class="a1-body">' + linkify(esc(d.b)) + '</pre>';
+    var fl = fieldsOf(d);
+    if (fl && fl.length) {
+      h += '<div class="a1-fld"><div class="ft">官方字段注释 · ' + fl.length + ' 行（§6.3.2 表格面）</div>';
+      for (var r = 0; r < fl.length; r++) {
+        var f0 = fl[r][0], f1 = fl[r][1] || '';
+        if (!f0) { h += '<div class="a1-fr"><span class="fd">' + esc(f1) + '</span></div>'; continue; }
+        h += '<div class="a1-fr"><span class="ff">' + esc(f0) + '</span><span class="fd">' + esc(f1) + '</span></div>';
+      }
+      h += '</div>';
+    }
+    h += '</div>';
     return h;
   }
 
@@ -205,7 +242,7 @@
     for (var j = 0; j < D.length; j++) if (D[j].d) withD++;
     document.getElementById('foot').innerHTML =
       '数据：<b>' + A.meta.src + '</b>（' + A.meta.corpus + ' 语料，§6.2.1–§11.2.2 十二组）· ' +
-      D.length + ' 条定义 · ' + withD + ' 条带官方引言 · 生成器 tools/gen_asn1_defs.py。<br>' +
+      D.length + ' 条定义 · ' + withD + ' 条带官方引言 · ' + nWithFields + ' 条带官方字段注释（全库 ' + F.meta.tables + ' 张表 / ' + F.meta.rows + ' 行）· 生成器 tools/gen_asn1_defs.py + gen_asn1_fields.py。<br>' +
       '原文照录（含行内 Need M/S/R 条件注释与个别拼写笔误，如规范原文所示）；条款号即 TS 38.331 章节号。' +
       '中文详解词条见 <a href="dict.html">信元词典</a>；课程讲解从 <a href="index.html">目录</a> 进。';
   }
