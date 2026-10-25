@@ -1049,6 +1049,30 @@
         a: '第三条件的**量纲是米**（5.5.4.23）：Ms is the Aerial UE altitude relative to the sea level——Ms、Hys2、Thresh expressed in meters，别的判据全是 dB/dBm；迟滞拆双套（Hys1 管信号、Hys2 管高度）；A3H1/H2 两条件入判（AND）任一离判即离、A5H1/H2 三条件入判；NOTE 2 明言同款适用于 CondEvent 族（CHO 条件可用，M76 课 d4/f4）。',
         ref: '38.331#5.5.4.23' }
     ] },
+    'm77:q1': { levels: [
+      { q: '38.300 和 38.331 怎么分工？',
+        a: '38.331 是 RRC 协议规范——每个过程的每条消息、每个字段、每枚定时器；38.300 是 Stage-2 总述——NG-RAN 怎么搭（§4 架构与功能分割）、RRC 提供什么（§7 服务与三态）、每类过程的全景框架图（§9 三张名图）。答"讲接入/切换流程"用 38.300 的步序口径最稳（M77 课 h0/a1）。',
+        ref: '38.300#4.1' },
+      { q: '面试答流程题怎么用好 38.300？',
+        a: '三张名图随身：IDLE→CONNECTED 十步（步 3 首 NAS 搭 RRCSetupComplete、步 7 安全激活、SRB0→SRB1）；RNAU 八步（I-RNTI+cause、last gNB 三岔、path switch）；Xn 四步 HO（REQUEST→ACK 带新配置→转发、UE 不读 SI 即接入→Complete）——先报步序再下钻 38.331 字段（M77 课 c2/c4/d2）。',
+        ref: '38.300#9.2.1.3' }
+    ] },
+    'm77:q2': { levels: [
+      { q: 'IDLE 和 INACTIVE 的分水岭是什么（38.300 口径）？',
+        a: '三枚：谁发起寻呼（IDLE=5GC/INACTIVE=NG-RAN 的 RAN 寻呼）；谁配寻呼 DRX（IDLE=NAS/INACTIVE=NG-RAN）；上下文存哪（INACTIVE 双端存 Inactive AS context、5GC–NG-RAN 连接保持、CM-CONNECTED 不变）。INACTIVE 与 CONNECTED 的分水岭=NG-RAN 知道的是 RNA 还是 cell（M77 课 b2）。',
+        ref: '38.300#7.2' },
+      { q: '寻呼 DRX 的三源最短怎么判？',
+        a: '三源：CN 广播默认 cycle（SI）、CN 经 NAS 的 UE 专用、RAN 经 RRC 的 UE 专用；IDLE 只比前两源、INACTIVE 三源全比、取最短。Paging 消息走 PCCH、ShortMessage 直接 PDCCH，都用 P-RNTI（M77 课 d4）。',
+        ref: '38.300#9.2.5' }
+    ] },
+    'm77:q3': { levels: [
+      { q: '连接态测量的两级滤波是怎么分的？',
+        a: '物理层内部滤波出波束质量，RRC 层把多波束（至少一个）功率平均成小区质量——服务/非服务小区同法；L3 上报按小区质量、可带 X best beams；L1 上报按波束质量走 LTM 事件触发的 MAC CE 通道（M77 课 d1，账本机器在 m42、量定义在 M73）。',
+        ref: '38.300#9.2.4' },
+      { q: 'RLF 的判据能数全吗（38.300 六条）？',
+        a: '①物理层报问题启动的定时器到期（期间恢复则停）；②另一问题定时器运行期间、配置了定时器的 measId 触发测量报告所启定时器到期；③随机接入失败；④RLC 失败；⑤共享频谱持续上行 LBT 失败；⑥IAB-MT 收 BH RLF。DAPS HO 时源小区检测持续到目标 RA 成功（M77 课 d3）。',
+        ref: '38.300#9.2.7' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },
