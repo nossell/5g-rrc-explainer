@@ -7,10 +7,11 @@
    注册侧三重约束（index/app/interview 尾部）：仅 https: 注册——本地 http/file
    与全部测试面零影响；GitHub Pages 是 HTTPS 满足要求。
    ============================================================ */
-var CACHE = 'rrc-v46';
+var CACHE = 'rrc-v47';
 var CORE = [
   'index.html', 'app.html', 'interview.html', 'dict.html', 'anim.html', 'timer-net.html',
   'variables-map.html', 'log-detective.html', 'meas-sandbox.html', 'search.html',
+  'asn1-ref.html',
   'assets/site.css', 'assets/engine.js', 'assets/player.js', 'assets/interview.js',
   'assets/flowanim.js', 'assets/flowanim2.js', 'manifest.json', 'assets/icon-192.png', 'assets/icon-512.png'
 ];

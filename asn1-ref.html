@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ASN.1 速查表 · RRC 讲解器</title>
+<meta name="description" content="TS 38.331 全量 ASN.1 定义速查：消息与信元的字段树、枚举值、maxNrof 上限——名称/字段名一搜即达，类型名可点击跳转。">
+<meta property="og:title" content="ASN.1 速查表 · RRC 讲解器">
+<meta property="og:description" content="TS 38.331 全量 ASN.1 定义速查：消息与信元的字段树、枚举值、maxNrof 上限——名称/字段名一搜即达，类型名可点击跳转。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://nossell.github.io/5g-rrc-explainer/asn1-ref.html">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+.a1-wrap{max-width:1080px;margin:0 auto;padding:34px 26px 70px}
+.a1-hero h1{font-size:26px;font-weight:800;letter-spacing:-.4px}
+.a1-hero .sub{color:var(--tx2);font-size:14px;margin-top:8px;line-height:1.75;max-width:760px}
+.a1-hero .sub b{color:var(--tx1)}
+.a1-searchbar{margin-top:22px;display:flex;gap:10px;align-items:center}
+.a1-searchbar input{flex:1;max-width:520px;font:600 15px var(--mono);padding:11px 16px;border:1.5px solid var(--bd);border-radius:12px;background:var(--panel);color:var(--tx1);outline:none}
+.a1-searchbar input:focus{border-color:var(--accent)}
+.a1-searchbar .a1-clear{font:700 12px var(--sans);color:var(--tx3);cursor:pointer;user-select:none;padding:6px 4px}
+.a1-searchbar .a1-clear:hover{color:var(--tx1)}
+.a1-chips{margin-top:12px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.a1-chips .lbl{font:600 12px var(--sans);color:var(--tx3)}
+.a1-chip{font:700 11.5px var(--mono);padding:4px 11px;border-radius:7px;background:var(--inset);color:var(--tx2);cursor:pointer;border:1px solid transparent}
+.a1-chip:hover{border-color:var(--accent);color:var(--tx1)}
+.a1-count{margin-top:14px;font:600 12.5px var(--mono);color:var(--tx3)}
+.a1-count b{color:var(--accent-deep)}
+.a1-legend{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;font:600 11.5px var(--sans);color:var(--tx3)}
+.a1-legend .k{font:800 10px var(--mono);padding:2px 8px;border-radius:5px}
+.k-q{background:#E7F6EC;color:#0E7C37}.k-e{background:#EEF2FF;color:#4338CA}
+.k-c{background:#FEF3C7;color:#B45309}.k-l{background:#FCE7F3;color:#BE185D}
+.k-s{background:#ECFDF5;color:#0F766E}.k-k{background:#F1F5F9;color:#334155}
+.a1-groups{margin-top:24px;display:flex;gap:8px;flex-wrap:wrap}
+.a1-g{font:700 12px var(--sans);padding:7px 14px;border-radius:10px;border:1px solid var(--bd);background:var(--panel);cursor:pointer;color:var(--tx2)}
+.a1-g:hover{border-color:var(--accent)}
+.a1-g.on{background:var(--accent-bg);border-color:var(--accent);color:var(--accent-deep)}
+.a1-g .gc{font:800 11px var(--mono);color:var(--tx3);margin-left:5px}
+.a1-g.on .gc{color:var(--accent-deep)}
+.a1-note{margin-top:16px;border:1px dashed var(--bd);border-radius:12px;padding:12px 18px;background:var(--inset);font-size:12.5px;color:var(--tx2);line-height:1.75}
+.a1-note b{color:var(--tx1)}
+.a1-list{margin-top:22px}
+.a1-more{margin:18px 0;font-size:13px;color:var(--tx3);text-align:center}
+.a1-card{margin-top:14px;border:1px solid var(--bd);border-radius:12px;background:var(--panel);padding:15px 18px}
+.a1-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.a1-name{font:800 15px var(--mono);color:var(--tx1);overflow-wrap:anywhere}
+.a1-meta{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.a1-sec{font:700 11px var(--mono);color:var(--tx3);background:var(--inset);border-radius:5px;padding:2px 8px;cursor:pointer}
+.a1-sec:hover{color:var(--accent-deep)}
+.a1-dr{font:700 11px var(--sans);color:#2563EB;background:#EFF6FF;border-radius:5px;padding:2px 8px}
+.a1-desc{margin-top:7px;font-size:12.5px;color:var(--tx2);line-height:1.7;font-style:italic}
+.a1-desc b{font-style:normal;font-weight:700;color:var(--tx1)}
+.a1-body{margin-top:10px;background:var(--inset);border:1px solid var(--bd);border-radius:9px;padding:12px 14px;font:500 12px/1.75 var(--mono);color:var(--tx1);white-space:pre-wrap;overflow-wrap:anywhere;max-height:290px;overflow:hidden;position:relative;cursor:pointer}
+.a1-body.open{max-height:none;overflow:visible;cursor:default}
+.a1-body:not(.open)::after{content:'… 点击展开全文';position:absolute;left:0;right:0;bottom:0;padding:26px 0 4px;background:linear-gradient(transparent,var(--inset));font:600 11px var(--sans);color:var(--tx3);text-align:center}
+.a1-tk{color:var(--nas);font-weight:700;cursor:pointer;border-bottom:1px dashed var(--nas)}
+.a1-tk:hover{color:#6D28D9}
+.a1-empty{margin-top:40px;text-align:center;color:var(--tx3);font-size:13.5px}
+.a1-foot{margin-top:34px;font-size:12.5px;color:var(--tx3);line-height:1.8;border-top:1px solid var(--bd);padding-top:16px}
+.a1-foot a{color:var(--accent-deep);font-weight:700;text-decoration:none}
+.a1-foot a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="a1-wrap">
+  <header class="top" style="margin:-34px -26px 0;padding:0 26px">
+  <a class="brand" href="index.html">
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 15 L7.5 15 L10 8 L13 18 L15.5 12 L17.5 15 L21 15" stroke="#18A34A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="15" r="1.6" fill="#18A34A"/></svg>
+    RRC 讲解器
+  </a>
+  <nav class="topnav">
+    <a class="navlink" href="index.html">目录</a>
+    <a class="navlink" href="app.html">课程</a>
+    <a class="navlink" href="interview.html">面试</a>
+    <a class="navlink" href="dict.html">词典</a>
+    <a class="navlink" href="anim.html">动画</a>
+    <a class="navlink" href="timer-net.html">定时器网</a>
+    <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink" href="log-detective.html">日志侦探</a>
+    <a class="navlink on" href="asn1-ref.html">ASN.1 速查</a>
+    <a class="navlink" href="search.html">搜索</a>
+  </nav>
+  </header>
+
+  <section class="a1-hero">
+    <h1>ASN.1 速查表——全规范定义的案头抽屉</h1>
+    <p class="sub">课程里遇到任何一个消息名、信元名、字段类型，回到这张表都能翻到它的<b>完整字段树</b>。数据由生成器从 TS 38.331 语料直出、逐条带条款号：<b>Uu 消息怎么拼、信元有哪些字段、枚举取什么值、每个列表的上限是多少</b>——原文照录，一条不落。字段树里出现的其他定义名（下划虚线紫字）可以点击跳转，顺着类型链一路查到底。</p>
+    <div class="a1-searchbar">
+      <input id="q" type="text" placeholder="搜名称或字段名，如 RRCReconfiguration / physCellId / maxNrof…" autocomplete="off" spellcheck="false">
+      <span class="a1-clear" id="clear" hidden>清空 ✕</span>
+    </div>
+    <div class="a1-chips" id="chips"><span class="lbl">试搜：</span></div>
+    <div class="a1-count" id="count"></div>
+    <div class="a1-legend">
+      <span class="k k-q">SEQUENCE 结构</span><span class="k k-e">ENUMERATED 枚举</span><span class="k k-c">CHOICE 选择</span><span class="k k-l">SEQUENCE OF 列表</span><span class="k k-s">标量类型</span><span class="k k-k">maxNrof 约束值</span>
+      <span style="margin-left:4px">字段树中 OPTIONAL 的 Need M / Need S / Need R 为官方条件注释，原文照录</span>
+    </div>
+  </section>
+
+  <div class="a1-groups" id="groups"></div>
+  <div class="a1-note"><b>与信元词典的分工</b>：词典页（dict.html）是精选信元的中文讲解；本表是全量 ASN.1 的原文速查——一个讲"为什么"，一个查"是什么"。搜索页的全文检索面向课程内容，本表自带独立搜索。</div>
+  <div class="a1-list" id="list"></div>
+  <div class="a1-foot" id="foot"></div>
+</div>
+<script src="assets/content/asn1-defs.js"></script>
+<script>
+(function () {
+  'use strict';
+  var A = window.RRC_ASN1;
+  var D = A.defs, G = A.groups;
+  var KIND = { q: 'SEQUENCE 结构', e: 'ENUMERATED 枚举', c: 'CHOICE 选择', l: 'SEQUENCE OF 列表', s: '标量类型', k: 'maxNrof 约束值' };
+  var LIMIT = 160;
+
+  // 预索引：小写全文（搜索用）与名字集合（交叉引用用）
+  var names = {};
+  var i, d;
+  for (i = 0; i < D.length; i++) {
+    d = D[i];
+    d._s = (d.n + '\n' + d.b).toLowerCase();
+    names[d.n.split(' { ')[0]] = i;
+  }
+
+  var qEl = document.getElementById('q');
+  var clearEl = document.getElementById('clear');
+  var listEl = document.getElementById('list');
+  var countEl = document.getElementById('count');
+  var groupsEl = document.getElementById('groups');
+  var state = { q: '', g: -1 };
+
+  function esc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function linkify(escaped) {
+    // 词级查名：命中定义名 → 可点击跳转的 token
+    return escaped.replace(/[A-Za-z][A-Za-z0-9-]*/g, function (w) {
+      if (Object.prototype.hasOwnProperty.call(names, w)) {
+        return '<span class="a1-tk" data-tk="' + w + '">' + w + '</span>';
+      }
+      return w;
+    });
+  }
+
+  function card(d) {
+    var h = '<div class="a1-card">';
+    h += '<div class="a1-top"><span class="a1-name">' + esc(d.n) + '</span>';
+    h += '<span class="k k-' + d.k + '">' + KIND[d.k] + '</span>';
+    h += '<span class="a1-sec" data-g="' + d.g + '" title="只看该分组">§' + d.c + '</span>';
+    if (d.dr) h += '<span class="a1-dr">' + esc(d.dr) + '</span>';
+    h += '</div>';
+    if (d.d) h += '<div class="a1-desc">官方引言：The … <b>' + esc(d.d) + '</b></div>';
+    h += '<pre class="a1-body">' + linkify(esc(d.b)) + '</pre></div>';
+    return h;
+  }
+
+  function render() {
+    var q = state.q.trim().toLowerCase();
+    var hits = [];
+    var nameHits = [];
+    for (var j = 0; j < D.length; j++) {
+      var d = D[j];
+      if (state.g >= 0 && d.g !== state.g) continue;
+      if (!q) { hits.push(d); continue; }
+      if (d.n.toLowerCase().indexOf(q) >= 0) { nameHits.push(d); }
+      else if (d._s.indexOf(q) >= 0) { hits.push(d); }
+    }
+    var all = nameHits.concat(hits);
+    var shown = Math.min(all.length, LIMIT);
+    var h = '';
+    for (var k = 0; k < shown; k++) h += card(all[k]);
+    if (all.length > LIMIT) {
+      h += '<div class="a1-more">命中 ' + all.length + ' 条，已显示前 ' + LIMIT + ' 条——输入更精确的名称或字段名收窄。</div>';
+    }
+    if (!all.length) {
+      h = '<div class="a1-empty">没有命中——试试短一点的词（如 physCellId、SetupRelease、failureType）。<br>组过滤与搜索同时生效，检查是否只看了某一组。</div>';
+    }
+    listEl.innerHTML = h;
+
+    // 计数行（全部由实况推导）
+    var cs;
+    if (!q && state.g < 0) {
+      cs = '全表 <b>' + D.length + '</b> 个 ASN.1 定义（TS 38.331 ' + A.meta.corpus + ' 语料直出，生成于 ' + A.meta.generated + '）';
+    } else if (!q) {
+      cs = '分组「' + G[state.g].name + '」：<b>' + all.length + '</b> 个定义';
+    } else {
+      cs = '「' + esc(state.q.trim()) + '」命中 <b>' + all.length + '</b> 个定义' + (state.g >= 0 ? '（组「' + G[state.g].name + '」内）' : '') + (all.length > LIMIT ? '，显示前 ' + LIMIT + ' 条' : '');
+    }
+    countEl.innerHTML = cs;
+    clearEl.hidden = !state.q;
+  }
+
+  function renderGroups() {
+    var gc = [];
+    gc.push('<span class="a1-g' + (state.g < 0 ? ' on' : '') + '" data-g="-1">全部分组<span class="gc">' + D.length + '</span></span>');
+    for (var j = 0; j < G.length; j++) {
+      var n = 0;
+      for (var k = 0; k < D.length; k++) if (D[k].g === j) n++;
+      gc.push('<span class="a1-g' + (state.g === j ? ' on' : '') + '" data-g="' + j + '">' + G[j].name + '<span class="gc">' + n + '</span></span>');
+    }
+    groupsEl.innerHTML = gc.join('');
+  }
+
+  function foot() {
+    var withD = 0;
+    for (var j = 0; j < D.length; j++) if (D[j].d) withD++;
+    document.getElementById('foot').innerHTML =
+      '数据：<b>' + A.meta.src + '</b>（' + A.meta.corpus + ' 语料，§6.2.1–§11.2.2 十二组）· ' +
+      D.length + ' 条定义 · ' + withD + ' 条带官方引言 · 生成器 tools/gen_asn1_defs.py。<br>' +
+      '原文照录（含行内 Need M/S/R 条件注释与个别拼写笔误，如规范原文所示）；条款号即 TS 38.331 章节号。' +
+      '中文详解词条见 <a href="dict.html">信元词典</a>；课程讲解从 <a href="index.html">目录</a> 进。';
+  }
+
+  // 事件
+  var deb = null;
+  qEl.addEventListener('input', function () {
+    clearTimeout(deb);
+    deb = setTimeout(function () {
+      state.q = qEl.value;
+      render();
+      syncHash();
+    }, 120);
+  });
+  clearEl.addEventListener('click', function () {
+    qEl.value = '';
+    state.q = '';
+    render();
+    syncHash();
+  });
+  document.getElementById('chips').insertAdjacentHTML('beforeend',
+    ['RRCReconfiguration', 'physCellId', 'SetupRelease', 'maxNrof', 'failureType', 'SIB1']
+      .map(function (w) { return '<span class="a1-chip" data-q="' + w + '">' + w + '</span>'; }).join(''));
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (t.classList && t.classList.contains('a1-chip')) {
+      qEl.value = t.getAttribute('data-q');
+      state.q = t.getAttribute('data-q');
+      render(); syncHash();
+    } else if (t.classList && t.classList.contains('a1-g')) {
+      state.g = parseInt(t.getAttribute('data-g'), 10);
+      renderGroups(); render(); syncHash();
+    } else if (t.classList && t.classList.contains('a1-sec')) {
+      state.g = parseInt(t.getAttribute('data-g'), 10);
+      renderGroups(); render(); syncHash();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (t.classList && t.classList.contains('a1-tk')) {
+      qEl.value = t.getAttribute('data-tk');
+      state.q = t.getAttribute('data-tk');
+      render(); syncHash();
+    } else if (t.classList && t.classList.contains('a1-body') && !t.classList.contains('open')) {
+      t.classList.add('open');
+    }
+  });
+
+  function syncHash() {
+    var h = [];
+    if (state.q.trim()) h.push('q=' + encodeURIComponent(state.q.trim()));
+    if (state.g >= 0) h.push('g=' + state.g);
+    history.replaceState(null, '', h.length ? '#' + h.join('&') : location.pathname);
+  }
+  function fromHash() {
+    var m = location.hash.match(/q=([^&]+)/);
+    qEl.value = m ? decodeURIComponent(m[1]) : '';
+    state.q = qEl.value;
+    var g = location.hash.match(/g=(\d+)/);
+    state.g = g ? parseInt(g[1], 10) : -1;
+  }
+  window.addEventListener('hashchange', function () { fromHash(); renderGroups(); render(); });
+
+  fromHash(); renderGroups(); foot(); render();
+})();
+</script>
+</body>
+</html>
