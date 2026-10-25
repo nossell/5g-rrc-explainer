@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>接口 ASN.1 字典 · RRC 讲解器</title>
+<meta name="description" content="NGAP/XnAP/E1AP/F1AP 四接口规范全量 ASN.1 字典：消息 PDU、信元 IE、过程码常量——近八千条定义四规范切换速查，类型名可点击跳转。">
+<meta property="og:title" content="接口 ASN.1 字典 · RRC 讲解器">
+<meta property="og:description" content="NGAP/XnAP/E1AP/F1AP 四接口规范全量 ASN.1 字典：消息 PDU、信元 IE、过程码常量——近八千条定义四规范切换速查，类型名可点击跳转。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://nossell.github.io/5g-rrc-explainer/asn1-if.html">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+.ai-wrap{max-width:1080px;margin:0 auto;padding:34px 26px 70px}
+.ai-hero h1{font-size:26px;font-weight:800;letter-spacing:-.4px}
+.ai-hero .sub{color:var(--tx2);font-size:14px;margin-top:8px;line-height:1.75;max-width:780px}
+.ai-hero .sub b{color:var(--tx1)}
+.ai-specs{margin-top:20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.ai-spec{border:1.5px solid var(--bd);border-radius:12px;background:var(--panel);padding:12px 15px;cursor:pointer;transition:border-color .15s}
+.ai-spec:hover{border-color:var(--accent)}
+.ai-spec.on{border-color:var(--accent);background:var(--accent-bg);box-shadow:var(--shadow-card)}
+.ai-spec .sn{font:800 14px var(--mono);color:var(--tx1)}
+.ai-spec .st{font:600 11px var(--sans);color:var(--tx3);margin-top:2px}
+.ai-spec .sc{font:700 12px var(--mono);color:var(--accent-deep);margin-top:5px}
+.ai-searchbar{margin-top:20px;display:flex;gap:10px;align-items:center}
+.ai-searchbar input{flex:1;max-width:520px;font:600 15px var(--mono);padding:11px 16px;border:1.5px solid var(--bd);border-radius:12px;background:var(--panel);color:var(--tx1);outline:none}
+.ai-searchbar input:focus{border-color:var(--accent)}
+.ai-searchbar .ai-clear{font:700 12px var(--sans);color:var(--tx3);cursor:pointer;user-select:none;padding:6px 4px}
+.ai-searchbar .ai-clear:hover{color:var(--tx1)}
+.ai-chips{margin-top:12px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.ai-chips .lbl{font:600 12px var(--sans);color:var(--tx3)}
+.ai-chip{font:700 11.5px var(--mono);padding:4px 11px;border-radius:7px;background:var(--inset);color:var(--tx2);cursor:pointer;border:1px solid transparent}
+.ai-chip:hover{border-color:var(--accent);color:var(--tx1)}
+.ai-count{margin-top:14px;font:600 12.5px var(--mono);color:var(--tx3)}
+.ai-count b{color:var(--accent-deep)}
+.ai-legend{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;font:600 11.5px var(--sans);color:var(--tx3)}
+.ai-legend .k{font:800 10px var(--mono);padding:2px 8px;border-radius:5px}
+.k-q{background:#E7F6EC;color:#0E7C37}.k-e{background:#EEF2FF;color:#4338CA}
+.k-c{background:#FEF3C7;color:#B45309}.k-l{background:#FCE7F3;color:#BE185D}
+.k-s{background:#ECFDF5;color:#0F766E}.k-k{background:#F1F5F9;color:#334155}
+.ai-groups{margin-top:22px;display:flex;gap:8px;flex-wrap:wrap}
+.ai-g{font:700 12px var(--sans);padding:7px 14px;border-radius:10px;border:1px solid var(--bd);background:var(--panel);cursor:pointer;color:var(--tx2)}
+.ai-g:hover{border-color:var(--accent)}
+.ai-g.on{background:var(--accent-bg);border-color:var(--accent);color:var(--accent-deep)}
+.ai-g .gc{font:800 11px var(--mono);color:var(--tx3);margin-left:5px}
+.ai-g.on .gc{color:var(--accent-deep)}
+.ai-note{margin-top:16px;border:1px dashed var(--bd);border-radius:12px;padding:12px 18px;background:var(--inset);font-size:12.5px;color:var(--tx2);line-height:1.75}
+.ai-note b{color:var(--tx1)}
+.ai-list{margin-top:22px}
+.ai-more{margin:18px 0;font-size:13px;color:var(--tx3);text-align:center}
+.ai-card{margin-top:14px;border:1px solid var(--bd);border-radius:12px;background:var(--panel);padding:15px 18px}
+.ai-top{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.ai-name{font:800 15px var(--mono);color:var(--tx1);overflow-wrap:anywhere}
+.ai-sec{font:700 11px var(--mono);color:var(--tx3);background:var(--inset);border-radius:5px;padding:2px 8px;cursor:pointer}
+.ai-sec:hover{color:var(--accent-deep)}
+.ai-dr{font:700 11px var(--sans);color:#2563EB;background:#EFF6FF;border-radius:5px;padding:2px 8px}
+.ai-desc{margin-top:7px;font-size:12.5px;color:var(--tx2);line-height:1.7;font-style:italic}
+.ai-desc b{font-style:normal;font-weight:700;color:var(--tx1)}
+.ai-body{margin-top:10px;background:var(--inset);border:1px solid var(--bd);border-radius:9px;padding:12px 14px;font:500 12px/1.75 var(--mono);color:var(--tx1);white-space:pre-wrap;overflow-wrap:anywhere;max-height:290px;overflow:hidden;position:relative;cursor:pointer}
+.ai-body.open{max-height:none;overflow:visible;cursor:default}
+.ai-body:not(.open)::after{content:'… 点击展开全文';position:absolute;left:0;right:0;bottom:0;padding:26px 0 4px;background:linear-gradient(transparent,var(--inset));font:600 11px var(--sans);color:var(--tx3);text-align:center}
+.ai-tk{color:var(--nas);font-weight:700;cursor:pointer;border-bottom:1px dashed var(--nas)}
+.ai-tk:hover{color:#6D28D9}
+.ai-empty{margin-top:40px;text-align:center;color:var(--tx3);font-size:13.5px}
+.ai-foot{margin-top:34px;font-size:12.5px;color:var(--tx3);line-height:1.8;border-top:1px solid var(--bd);padding-top:16px}
+.ai-foot a{color:var(--accent-deep);font-weight:700;text-decoration:none}
+.ai-foot a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="ai-wrap">
+  <header class="top" style="margin:-34px -26px 0;padding:0 26px">
+  <a class="brand" href="index.html">
+    <svg class="logo" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 15 L7.5 15 L10 8 L13 18 L15.5 12 L17.5 15 L21 15" stroke="#18A34A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="21" cy="15" r="1.6" fill="#18A34A"/></svg>
+    RRC 讲解器
+  </a>
+  <nav class="topnav">
+    <a class="navlink" href="index.html">目录</a>
+    <a class="navlink" href="app.html">课程</a>
+    <a class="navlink" href="interview.html">面试</a>
+    <a class="navlink" href="dict.html">词典</a>
+    <a class="navlink" href="anim.html">动画</a>
+    <a class="navlink" href="timer-net.html">定时器网</a>
+    <a class="navlink" href="variables-map.html">变量地图</a>
+    <a class="navlink" href="log-detective.html">日志侦探</a>
+    <a class="navlink on" href="asn1-if.html">接口字典</a>
+    <a class="navlink" href="search.html">搜索</a>
+  </nav>
+  </header>
+
+  <section class="ai-hero">
+    <h1>接口 ASN.1 字典——四本接口规范的查表抽屉</h1>
+    <p class="sub">Uu 口有 ASN.1 速查表，接口侧（NG/Xn/E1/F1）现在也有同款：每本规范的<b>消息 PDU、信元 IE、过程码常量全量照录</b>，数据由生成器从语料直出。查「这条接口消息有哪些 IE」「这个 IE 字段树长什么样」「id-Reset 过程码是几」——切规范、搜名称，类型名（下划虚线紫字）可点击跳转。接口课（M20 讲模板）与信元词典负责讲设计，本表负责查原文。</p>
+    <div class="ai-specs" id="specs"></div>
+    <div class="ai-searchbar">
+      <input id="q" type="text" placeholder="先选规范，再搜名称或字段名，如 Reset / TransactionID / maxnoof…" autocomplete="off" spellcheck="false">
+      <span class="ai-clear" id="clear" hidden>清空 ✕</span>
+    </div>
+    <div class="ai-chips" id="chips"><span class="lbl">试搜：</span></div>
+    <div class="ai-count" id="count"></div>
+    <div class="ai-legend">
+      <span class="k k-q">SEQUENCE 结构</span><span class="k k-e">ENUMERATED 枚举</span><span class="k k-c">CHOICE 选择</span><span class="k k-l">SEQUENCE OF 列表</span><span class="k k-s">标量类型</span><span class="k k-k">过程码/常量</span>
+    </div>
+  </section>
+
+  <div class="ai-groups" id="groups"></div>
+  <div class="ai-note" id="note"></div>
+  <div class="ai-list" id="list"></div>
+  <div class="ai-foot" id="foot"></div>
+</div>
+<script src="assets/content/xn-defs.js"></script>
+<script src="assets/content/ng-defs.js"></script>
+<script src="assets/content/e1-defs.js"></script>
+<script src="assets/content/f1-defs.js"></script>
+<script>
+(function () {
+  'use strict';
+  var SPECS = [
+    { key: 'xn', label: 'XnAP', obj: 'IF_ASN1_XN', ts: 'TS 38.423', role: 'gNB ↔ gNB（NG-RAN 节点间）', chips: ['Reset', 'handoverPreparation', 'XnSetupRequest', 'Cause', 'maxnoof'] },
+    { key: 'ng', label: 'NGAP', obj: 'IF_ASN1_NG', ts: 'TS 38.413', role: 'AMF ↔ gNB（核心网与基站间）', chips: ['PDUSessionResourceSetupRequest', 'InitialUEMessage', 'TransactionID', 'id-Reset', 'AMF-UE-NGAP-ID'] },
+    { key: 'e1', label: 'E1AP', obj: 'IF_ASN1_E1', ts: 'TS 38.463', role: 'gNB-CU-CP ↔ gNB-CU-UP（控制面与用户面间）', chips: ['BearerContextSetupRequest', 'E1SetupRequest', 'gNB-CU-UP-UE-E1-AP-ID', 'Cause', 'id-Reset'] },
+    { key: 'f1', label: 'F1AP', obj: 'IF_ASN1_F1', ts: 'TS 38.473', role: 'gNB-CU ↔ gNB-DU（集中单元与分布单元间）', chips: ['F1SetupRequest', 'UEContextSetupRequest', 'ResetType', 'GNBDUConfigurationUpdate', 'maxnoof'] },
+  ];
+  var KIND = { q: 'SEQUENCE 结构', e: 'ENUMERATED 枚举', c: 'CHOICE 选择', l: 'SEQUENCE OF 列表', s: '标量类型', k: '过程码/常量' };
+  var LIMIT = 160;
+  var state = { s: 'f1', q: '', g: -1 };
+
+  var DATA = {};
+  SPECS.forEach(function (sp) {
+    var o = window[sp.obj];
+    if (!o || !o.defs) return;
+    DATA[sp.key] = o;
+  });
+  if (!DATA[state.s]) state.s = Object.keys(DATA)[0];
+
+  // 预索引（按规范惰性建：切到才建）
+  var IDX = {};
+  function idxOf(key) {
+    if (IDX[key]) return IDX[key];
+    var d = DATA[key].defs;
+    var names = {};
+    for (var i = 0; i < d.length; i++) {
+      d[i]._s = (d[i].n + '\n' + d[i].b).toLowerCase();
+      names[d[i].n.split(' { ')[0]] = i;
+    }
+    IDX[key] = { names: names };
+    return IDX[key];
+  }
+
+  var qEl = document.getElementById('q');
+  var clearEl = document.getElementById('clear');
+  var listEl = document.getElementById('list');
+  var countEl = document.getElementById('count');
+  var groupsEl = document.getElementById('groups');
+  var chipsEl = document.getElementById('chips');
+  var noteEl = document.getElementById('note');
+  var specsEl = document.getElementById('specs');
+
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function cur() { return DATA[state.s]; }
+  function idx() { return idxOf(state.s); }
+
+  function linkify(escaped) {
+    var names = idx().names;
+    return escaped.replace(/[A-Za-z][A-Za-z0-9-]*/g, function (w) {
+      if (Object.prototype.hasOwnProperty.call(names, w)) {
+        return '<span class="ai-tk" data-tk="' + w + '">' + w + '</span>';
+      }
+      return w;
+    });
+  }
+
+  function card(d) {
+    var h = '<div class="ai-card"><div class="ai-top"><span class="ai-name">' + esc(d.n) + '</span>';
+    h += '<span class="k k-' + d.k + '">' + KIND[d.k] + '</span>';
+    h += '<span class="ai-sec" data-g="' + d.g + '" title="只看该分组">§' + d.c + '</span>';
+    if (d.dr) h += '<span class="ai-dr">' + esc(d.dr) + '</span>';
+    h += '</div>';
+    if (d.d) h += '<div class="ai-desc">官方引言：This message is <b>' + esc(d.d) + '</b></div>';
+    h += '<pre class="ai-body">' + linkify(esc(d.b)) + '</pre></div>';
+    return h;
+  }
+
+  function render() {
+    var D = cur().defs;
+    var G = cur().groups;
+    var q = state.q.trim().toLowerCase();
+    var hits = [], nameHits = [];
+    for (var j = 0; j < D.length; j++) {
+      var d = D[j];
+      if (state.g >= 0 && d.g !== state.g) continue;
+      if (!q) { hits.push(d); continue; }
+      if (d.n.toLowerCase().indexOf(q) >= 0) nameHits.push(d);
+      else if (d._s.indexOf(q) >= 0) hits.push(d);
+    }
+    var all = nameHits.concat(hits);
+    var shown = Math.min(all.length, LIMIT);
+    var h = '';
+    for (var k = 0; k < shown; k++) h += card(all[k]);
+    if (all.length > LIMIT) h += '<div class="ai-more">命中 ' + all.length + ' 条，已显示前 ' + LIMIT + ' 条——输入更精确的名称收窄。</div>';
+    if (!all.length) {
+      h = '<div class="ai-empty">没有命中——试试短一点的词（如 Reset、TransactionID、Cause）。<br>搜索在当前规范内进行，注意左上角是否选对了规范。</div>';
+    }
+    listEl.innerHTML = h;
+    var sp = SPECS.filter(function (x) { return x.key === state.s; })[0];
+    var cs;
+    if (!q && state.g < 0) {
+      cs = sp.label + '（' + sp.ts + '）全表 <b>' + D.length + '</b> 个定义（语料 ' + cur().meta.corpus + '，生成于 ' + cur().meta.generated + '）';
+    } else if (!q) {
+      cs = sp.label + ' 分组「' + G[state.g].name + '」：<b>' + all.length + '</b> 个定义';
+    } else {
+      cs = sp.label + '「' + esc(state.q.trim()) + '」命中 <b>' + all.length + '</b> 个定义' + (state.g >= 0 ? '（组「' + G[state.g].name + '」内）' : '') + (all.length > LIMIT ? '，显示前 ' + LIMIT + ' 条' : '');
+    }
+    countEl.innerHTML = cs;
+    clearEl.hidden = !state.q;
+  }
+
+  function renderSpecs() {
+    var h = '';
+    SPECS.forEach(function (sp) {
+      if (!DATA[sp.key]) return;
+      h += '<div class="ai-spec' + (state.s === sp.key ? ' on' : '') + '" data-s="' + sp.key + '">' +
+        '<div class="sn">' + sp.label + '</div><div class="st">' + sp.ts + ' · ' + esc(sp.role) + '</div>' +
+        '<div class="sc">' + DATA[sp.key].defs.length + ' 定义</div></div>';
+    });
+    specsEl.innerHTML = h;
+  }
+
+  function renderGroups() {
+    var D = cur().defs, G = cur().groups;
+    var gc = ['<span class="ai-g' + (state.g < 0 ? ' on' : '') + '" data-g="-1">全部分组<span class="gc">' + D.length + '</span></span>'];
+    for (var j = 0; j < G.length; j++) {
+      var n = 0;
+      for (var k = 0; k < D.length; k++) if (D[k].g === j) n++;
+      gc.push('<span class="ai-g' + (state.g === j ? ' on' : '') + '" data-g="' + j + '">' + G[j].name + '<span class="gc">' + n + '</span></span>');
+    }
+    groupsEl.innerHTML = gc.join('');
+  }
+
+  function renderChips() {
+    var sp = SPECS.filter(function (x) { return x.key === state.s; })[0];
+    var extra = chipsEl.querySelector('.lbl') ? chipsEl.querySelector('.lbl').outerHTML : '<span class="lbl">试搜：</span>';
+    chipsEl.innerHTML = extra + sp.chips.map(function (w) {
+      return '<span class="ai-chip" data-q="' + esc(w) + '">' + esc(w) + '</span>';
+    }).join('');
+  }
+
+  function renderNote() {
+    var sp = SPECS.filter(function (x) { return x.key === state.s; })[0];
+    var withD = 0;
+    var D = cur().defs;
+    for (var j = 0; j < D.length; j++) if (D[j].d) withD++;
+    noteEl.innerHTML = '<b>' + sp.label + ' 的六组</b>：消息 PDU 怎么拼（含 *-IEs 容器）、信元字段树、过程码与常量、公共模板、容器。' +
+      (withD ? '带官方引言 ' + withD + ' 条（消息小节标题锚直取）。' : '本版语料无逐消息功能小节，引言从简——消息用途见接口课与规范 §9.2。') +
+      '与 <a href="asn1-ref.html" style="color:var(--accent-deep);font-weight:700">Uu 口 ASN.1 速查表</a> 同一套交互。';
+  }
+
+  function foot() {
+    var tot = 0, totD = 0;
+    SPECS.forEach(function (sp) {
+      if (!DATA[sp.key]) return;
+      tot += DATA[sp.key].defs.length;
+      totD += DATA[sp.key].meta.count ? DATA[sp.key].defs.length : 0;
+    });
+    document.getElementById('foot').innerHTML =
+      '数据：XnAP ' + (DATA.xn ? DATA.xn.defs.length : '-') + ' + NGAP ' + (DATA.ng ? DATA.ng.defs.length : '-') +
+      ' + E1AP ' + (DATA.e1 ? DATA.e1.defs.length : '-') + ' + F1AP ' + (DATA.f1 ? DATA.f1.defs.length : '-') +
+      ' = <b>' + tot + '</b> 条定义 · 生成器 tools/gen_if_defs.py（v50）· 语料 spec_cache（38423-j30 / 38413-j30 / 38463-g90 / 38473-j40）。<br>' +
+      '原文照录（含列对齐折叠与官方注释）；条款号即各规范章节号。接口设计讲解见课程 M20 与 <a href="dict.html">信元词典</a>；Uu 口定义见 <a href="asn1-ref.html">ASN.1 速查表</a>。';
+  }
+
+  var deb = null;
+  qEl.addEventListener('input', function () {
+    clearTimeout(deb);
+    deb = setTimeout(function () { state.q = qEl.value; render(); syncHash(); }, 120);
+  });
+  clearEl.addEventListener('click', function () { qEl.value = ''; state.q = ''; render(); syncHash(); });
+
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (t.classList && t.classList.contains('ai-chip')) {
+      qEl.value = t.getAttribute('data-q'); state.q = qEl.value; render(); syncHash();
+    } else if (t.classList && t.classList.contains('ai-spec')) {
+      state.s = t.getAttribute('data-s'); state.g = -1; state.q = ''; qEl.value = '';
+      renderSpecs(); renderGroups(); renderChips(); renderNote(); render(); syncHash();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (t.classList && t.classList.contains('ai-g')) {
+      state.g = parseInt(t.getAttribute('data-g'), 10);
+      renderGroups(); render(); syncHash();
+    } else if (t.classList && t.classList.contains('ai-sec')) {
+      state.g = parseInt(t.getAttribute('data-g'), 10);
+      renderGroups(); render(); syncHash();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (t.classList && t.classList.contains('ai-tk')) {
+      qEl.value = t.getAttribute('data-tk'); state.q = qEl.value; render(); syncHash();
+    } else if (t.classList && t.classList.contains('ai-body') && !t.classList.contains('open')) {
+      t.classList.add('open');
+    }
+  });
+
+  function syncHash() {
+    var h = ['s=' + state.s];
+    if (state.q.trim()) h.push('q=' + encodeURIComponent(state.q.trim()));
+    if (state.g >= 0) h.push('g=' + state.g);
+    history.replaceState(null, '', '#' + h.join('&'));
+  }
+  function fromHash() {
+    var m = location.hash.match(/s=([a-z0-9]+)/);
+    if (m && DATA[m[1]]) state.s = m[1];
+    m = location.hash.match(/q=([^&]+)/);
+    qEl.value = m ? decodeURIComponent(m[1]) : '';
+    state.q = qEl.value;
+    m = location.hash.match(/g=(\d+)/);
+    state.g = m ? parseInt(m[1], 10) : -1;
+  }
+  window.addEventListener('hashchange', function () { fromHash(); renderSpecs(); renderGroups(); renderChips(); renderNote(); render(); });
+
+  idxOf(state.s);
+  fromHash(); renderSpecs(); renderGroups(); renderChips(); renderNote(); foot(); render();
+})();
+</script>
+</body>
+</html>
