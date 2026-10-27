@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.62.0";
+const APP_VERSION = "1.64.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -11948,7 +11948,8 @@ async function ingestDocxZip(zipBytes, { spec, version }) {
 // ==== tools/nas_quirks.mjs ====
 // nas_quirks.mjs — BA 批（v1.58.0）：解剖器怪癖登记表（数据驱动收口）；BC 批（v1.59.0）
 // 扩第四类 VALUE_CANONICALIZE_ROWS；BE 批（v1.61.0）扩第五类 VALUE_DOMAIN_ROWS
-//（值域生成器，canonicalize 逐步退役通道）。
+//（值域生成器，canonicalize 逐步退役通道）；BG 批（v1.63.0）canonicalize 收敛：
+// 179/186 迁 VALUE_DOMAIN、178/142 裸退役、121/173/51 负结果留表（各条 reason 内记档）。
 //
 // 动机（v1.57.0 评审段 P2/P3）：tshark 侧怪癖处置散落在采样器/oracle 的 if 特判里
 //（29060 130/180/212、29244 327、322 伪影——327 已是第四个硬编码），每加一个都要动
@@ -11970,6 +11971,13 @@ async function ingestDocxZip(zipBytes, { spec, version }) {
 //   ③ TSHARK_ARTIFACTS 是 oracle「不预先豁免」立规以来的唯一例外通道：仅收
 //     tshark 显示字段 pos/size/value 互不相容且帧侧结构自洽的条目；命中记 report.artifacts
 //     如实计数（不冒充已核、不吞真不符），未登记的一律照旧 EXTRACT 失败。
+// BG 批（v1.63.0）退役台账：178/142 曾按矩阵证据裸退役（tmp/_bg_probe3.mjs：全宿主 ×
+// 长度 1-12 × 尾随机 × 首字节 8 值矩阵全 CLEAN），wide seed 2024 即复现 4 帧 malformed
+//（178 ×2 + 142 ×2，malformedDetails #4911/#4958/#7822/#7894）——**上下文敏感复合病**
+//（矩阵帧上下文 CLEAN ≠ 任意帧上下文 CLEAN；51 的 tmp/_bg_probe4.mjs 原值重放复现已示
+// 先例），撤回条款即时恢复登记（见两条目 reason）。
+// **BG 方法论定案：矩阵 CLEAN 不足以退役 canonicalize 条目，退役必须以全量 wide 0
+// malformed 为准；本批最终态 = CANON 5（173/121/178/142/51）+ DOMAIN 6（179/186 新迁）。**
 // 注意：本文件进 build.js 单作用域打包清单（nassample 依赖）——只允许顶层 const/function。
 
 // ---- SAMPLE_STOP_ROWS：采样器行守卫（停采） --------------------------------
@@ -12067,56 +12075,46 @@ function valueRemapHit(spec, iei, fmt, value) {
 // push 之前把值区整段平铺为 pattern 单字节（长度不变，TLV/TIV 长度域不动），rng 消耗
 // 不变，漂移局限采中登记行的帧；行覆盖保留（结构 + 跨度对拍照常核验，值域收窄入档）。
 // BE 批（v1.61.0）起：具备明确值域模型的条目迁 VALUE_DOMAIN_ROWS（值多样性保留），
-// 本表逐步退役——无简单值域模型者（容器内容/RAT 分支坐标/标志位自洽族）暂留。
+// 本表逐步退役。BG 批（v1.63.0）定案：179/186 迁 VALUE_DOMAIN（pfcList6/secondZero）；
+// 178/142 裸退役被 wide 撤回（上下文敏感复合病，见头注台账）；121/173/51 负结果留本表
+//——121 病在 RAN Information Relay 宿主深挖（多宿主分裂无单一域形）、173 值须常数
+//（L5 常数 CLEAN / L5 尾随机 MAL——无派生域形）、51 上下文敏感复合病（矩阵全 CLEAN
+// 但 seed 99 原帧原值 MAL 可复现——b64205/c649fc；唯平铺形全上下文 CLEAN）。
 const VALUE_CANONICALIZE_ROWS = [
-  {
-    id: 'GTPV1-179-SETUP-PFCS-DOMAIN',
-    spec: '29060', iei: 179, pattern: '00',
-    reason: 'IE 179 List of set-up PFCs：tshark 值域深挖遇采样随机字节恒判 malformed，全零平铺 CLEAN——2 帧（Forward Relocation Response f2904/f2952）单 IE 规范化即 CLEAN',
-    evidence: 'tmp/_bc1_redo.mjs + tmp/_bc1_redo_result.json（A 段 canonicalize 扫描）',
-    batch: 'BC（v1.59.0）',
-  },
   {
     id: 'GTPV1-173-BSS-CONTAINER-DOMAIN',
     spec: '29060', iei: 173, pattern: '00',
-    reason: 'IE 173 BSS Container：tshark 值域深挖遇采样随机字节恒判 malformed，全零平铺 CLEAN——1 帧（Forward Relocation Response f2972）单 IE 规范化即 CLEAN',
-    evidence: 'tmp/_bc1_redo.mjs + tmp/_bc1_redo_result.json（A 段 canonicalize 扫描）',
-    batch: 'BC（v1.59.0）',
+    reason: 'IE 173 BSS Container：tshark 值域深挖遇采样随机字节恒判 malformed，全零平铺 CLEAN——1 帧（Forward Relocation Response f2972）单 IE 规范化即 CLEAN。BG 复核：负结果留表——长度档 CLEAN={1,5,12,17} 但 L5 尾随机 MAL（仅常数 CLEAN），无自原值派生域形',
+    evidence: 'tmp/_bc1_redo.mjs + tmp/_bc1_redo_result.json（A 段）+ tmp/_bg_probe2.mjs/_bg_probe3.mjs（BG 长度档/全宿主矩阵）',
+    batch: 'BC（v1.59.0）；BG（v1.63.0）复核负结果',
   },
   {
     id: 'GTPV2-121-TARGET-ID-RATTYPE-BRANCH',
     spec: '29274', iei: 121, pattern: 'ff',
-    reason: 'IE 121 Target Identification：tshark 按 RAT Type 分支深挖（UTRAN/GERAN 等合法分支取 CGI/RAI 坐标）遇采样随机字节恒判 malformed，0xFF（未知 RAT → 浅解析分支）平铺 CLEAN——6 帧（Configuration Transfer Tunnel ×5 + RAN Information Relay ×1）单 IE 规范化即 CLEAN',
-    evidence: 'tmp/_bc1_canscan.mjs + tmp/_bc1_canscan_result_29274.json（size1 扫描）+ tmp/_bc1_pass_result_29274.json（值扫：ff 全长 CLEAN）',
-    batch: 'BC（v1.59.0）',
-  },
-  {
-    id: 'GTPV2-186-PAGING-SERVICE-INFO-DOMAIN',
-    spec: '29274', iei: 186, pattern: '00',
-    reason: 'IE 186 Paging and Service Information：tshark 按 PPI 标志位深挖遇采样随机字节恒判 malformed，全零平铺 CLEAN——5 帧（Downlink Data Notification）单 IE 规范化即 CLEAN',
-    evidence: 'tmp/_bc1_canscan.mjs + tmp/_bc1_canscan_result_29274.json（size1 扫描）+ tmp/_bc1_pass_result_29274.json（值扫：7/9 CLEAN 含全零）',
-    batch: 'BC（v1.59.0）',
+    reason: 'IE 121 Target Identification：tshark 按 RAT Type 分支深挖（UTRAN/GERAN 等合法分支取 CGI/RAI 坐标）遇采样随机字节恒判 malformed，0xFF（未知 RAT → 浅解析分支）平铺 CLEAN——6 帧（Configuration Transfer Tunnel ×5 + RAN Information Relay ×1）单 IE 规范化即 CLEAN。BG 复核：负结果留表——Forward Relocation Request/Configuration Transfer Tunnel 宿主全矩阵 CLEAN，但 RAN Information Relay 宿主 L3/L6/fb{00,01,04,05,06} MAL 病域在（RIM 深挖），多宿主分裂无单一域形',
+    evidence: 'tmp/_bc1_canscan_result_29274.json + tmp/_bc1_pass_result_29274.json（BC）+ tmp/_bg_probe3.mjs（BG 全宿主矩阵）',
+    batch: 'BC（v1.59.0）；BG（v1.63.0）复核负结果',
   },
   {
     id: 'GTPV2-178-PRA-INFORMATION-DOMAIN',
     spec: '29274', iei: 178, pattern: '00',
-    reason: 'IE 178 Presence Reporting Area Information：tshark 值域深挖遇采样随机字节恒判 malformed，全零平铺 CLEAN——1 帧（Change Notification Request f4929）单 IE 规范化即 CLEAN',
-    evidence: 'tmp/_bc1_canscan.mjs + tmp/_bc1_canscan_result_29274.json（size1 扫描）',
-    batch: 'BC（v1.59.0）',
+    reason: 'IE 178 Presence Reporting Area Information：tshark 值域深挖遇采样随机字节恒判 malformed，全零平铺 CLEAN——1 帧（Change Notification Request f4929）单 IE 规范化即 CLEAN。BG 撤回记档：曾按矩阵证据（全 5 宿主 × 尾随机全 CLEAN）裸退役，wide seed 2024 复现 2 帧 malformed（#4911 值 2400002600008f000005 / #4958 值 450000de0000c500000e）——上下文敏感复合病（与 IE 51 同定性：矩阵帧上下文 CLEAN ≠ 任意帧上下文 CLEAN），撤回条款即时恢复登记，平铺形全上下文 CLEAN 由 wide 0 malformed 坐实',
+    evidence: 'tmp/_bc1_canscan_result_29274.json（BC）+ tmp/_bg_probe3.mjs（BG 矩阵）+ BG 批 oracle_wide_29274_k00.json malformedDetails #4911/#4958（撤回依据）',
+    batch: 'BC（v1.59.0）；BG（v1.63.0）裸退役→撤回恢复',
   },
   {
     id: 'GTPV2-142-MBMS-IP-MCAST-DIST-DOMAIN',
     spec: '29274', iei: 142, pattern: '00',
-    reason: 'IE 142 MBMS IP Multicast Distribution：tshark 值域深挖遇采样随机字节恒判 malformed，全零平铺 CLEAN——1 帧（MBMS Session Start Request f7949）单 IE 规范化即 CLEAN',
-    evidence: 'tmp/_bc1_canscan.mjs + tmp/_bc1_canscan_result_29274.json（size1 扫描）',
-    batch: 'BC（v1.59.0）',
+    reason: 'IE 142 MBMS IP Multicast Distribution：tshark 值域深挖遇采样随机字节恒判 malformed，全零平铺 CLEAN——1 帧（MBMS Session Start Request f7949）单 IE 规范化即 CLEAN。BG 撤回记档：矩阵（单宿主 × 尾随机全 CLEAN）裸退役后 wide 复现 2 帧 malformed（#7822 值 21000000d00000000d000000 / #7894 值 610000001000000008000000）——上下文敏感复合病（同 178/51 定性），撤回条款即时恢复登记',
+    evidence: 'tmp/_bc1_canscan_result_29274.json（BC）+ tmp/_bg_probe3.mjs（BG 矩阵）+ BG 批 oracle_wide_29274_k00.json malformedDetails #7822/#7894（撤回依据）',
+    batch: 'BC（v1.59.0）；BG（v1.63.0）裸退役→撤回恢复',
   },
   {
     id: 'GTPV2-51-F-CONTAINER-E212-DOMAIN',
     spec: '29274', iei: 51, pattern: '00',
-    reason: 'IE 51 F-Container：tshark 容器内容按 e212.assoc.imsi 语义深挖遇采样随机字节恒判 malformed，全零/全ff 平铺 CLEAN——BC-3 多 seed 矩阵 seed 99 新暴露 2 帧（Forward Relocation Request f3419/f3493，原值 b64205/c649fc 炸、全零/全ff CLEAN、切除 CLEAN），canonicalize 批次外补登记',
-    evidence: 'tmp/_bc1_ie51_probe_result.json（两帧值域扫 + 切除对照）',
-    batch: 'BC（v1.59.0）',
+    reason: 'IE 51 F-Container：tshark 容器内容按 e212.assoc.imsi 语义深挖遇采样随机字节恒判 malformed，全零/全ff 平铺 CLEAN——BC-3 seed 99 帧 3419/3493（原值 b64205/c649fc）值扫/切除双证。BG 复核：负结果留表——上下文敏感复合病：全宿主 × 长度 1-12 × 尾随机 × 首字节 8 值矩阵全 CLEAN（seed 2024 上下文），但 seed 99 原帧写回原值 MAL 精确复现（tmp/_bg_probe4.mjs）——病由「帧上下文 × 值」联合触发（火移同类），唯平铺形全上下文 CLEAN 已由 wide 0 malformed 坐实',
+    evidence: 'tmp/_bc1_ie51_probe_result.json（BC）+ tmp/_bg_probe4.mjs（BG 原值重放复现）',
+    batch: 'BC（v1.59.0）；BG（v1.63.0）复核负结果（上下文敏感定性）',
   },
 ];
 
@@ -12166,6 +12164,20 @@ const VALUE_DOMAIN_ROWS = [
     reason: 'IE 91（SGW 地址族）：与 IE 90 同族——[首长度][次类型][尾地址]，次字节 04 深挖、长度不自洽即炸（BC 证据+BE 探针 probe1 三 MAL 形次字节全 04 定案）；派生形=首自洽+次定形 03+尾随机，四 seed 矩阵 CLEAN',
     evidence: 'tmp/_bc1_ie91_probe_result.json（病根证据）+ BE 批 oracle:wide/四 seed 重验',
     batch: 'BE（v1.61.0）',
+  },
+  {
+    id: 'GTPV1-179-SETUP-PFCS-LIST6',
+    spec: '29060', iei: 179, domain: 'pfcList6',
+    reason: 'IE 179 List of set-up PFCs：长度档病——值长 ∈ {1,6,11-20} CLEAN、{2-5,7-10} MAL（tshark 按 1+5n 条目结构解析），且 8B 形下首字节 {06,0a,0b}（声称条目数）MAL；派生形=[01][原值前 5B 不足补 00] 定长 6B（1+5n 最小非空形，条目数 1 与尾 5B 自洽），尾 5B 保留原值多样性，长度档/首字节 256 全扫矩阵 CLEAN。长度可能改变 ⇒ rng 流下游重排（帧序列漂移有因，wide 重验为权威）',
+    evidence: 'tmp/_bg_probe2.mjs（首字节 256 全扫+长度 1-20 档）+ tmp/_bg_probe3.mjs（全宿主尾随机矩阵）',
+    batch: 'BG（v1.63.0，自 VALUE_CANONICALIZE_ROWS 迁入）',
+  },
+  {
+    id: 'GTPV2-186-PAGING-SERVICE-INFO-SECONDZERO',
+    spec: '29274', iei: 186, domain: 'secondZero',
+    reason: 'IE 186 Paging and Service Information：长度档病——值长 ≥2 任意内容 CLEAN（含尾随机）、1B MAL（BC 5 帧病 = 采样 1B 形），另 2B [ff ff] 特例 MAL；派生形=1B 值补 [v0,00]、≥2B 值次字节定 00（其余字节保留原值多样性——次字节为 tshark 深挖敏感位），矩阵 CLEAN',
+    evidence: 'tmp/_bg_probe2.mjs（首字节 256 全扫+长度 1-20 档）+ tmp/_bg_probe3.mjs（全宿主尾随机矩阵）+ BC _bc1_canscan_result_29274.json（L1 病原始证据）',
+    batch: 'BG（v1.63.0，自 VALUE_CANONICALIZE_ROWS 迁入）',
   },
 ];
 
@@ -13026,6 +13038,27 @@ function domainDerive(domain, v) {
     out[0] = (v.length - 1) & 0xff; // 长度前缀自洽
     out[1] = 0x03;                  // 次字节定形（04 触发深挖）
     return out;
+  }
+  // BG 批（v1.63.0）两域（探针 tmp/_bg_probe2/3.mjs 定案）：
+  //   pfcList6   IE 179 List of set-up PFCs 长度档病（CLEAN 档 {1,6,11-20}，tshark 按
+  //              1+5n 条目解析）——定长 6B = [条目数 1][原值前 5B 不足补 00]，尾保留多样性；
+  //              长度可能改变 ⇒ 下游 rng 流重排（漂移有因，wide 重验为权威）；
+  //   secondZero IE 186 长度档病（≥2B 任意 CLEAN、1B MAL、[ff ff] 特例）——1B 补 [v0,00]、
+  //              ≥2B 次字节定 00（深挖敏感位），其余字节保留原值。
+  if (domain === 'pfcList6') {
+    const out = new Uint8Array(6);
+    out[0] = 0x01;
+    for (let i = 1; i < 6; i++) out[i] = i - 1 < v.length ? v[i - 1] : 0x00;
+    return out;
+  }
+  if (domain === 'secondZero') {
+    if (v.length === 1) return Uint8Array.from([v[0], 0x00]);
+    if (v.length >= 2) {
+      const out = Uint8Array.from(v);
+      out[1] = 0x00;
+      return out;
+    }
+    return v;
   }
   return v;
 }
