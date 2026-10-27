@@ -709,3 +709,7 @@ footer .flinks{display:flex;gap:14px;margin-bottom:8px;flex-wrap:wrap}
 .jobchip .jk-next{font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-bg);border-radius:4px;padding:1px 4px;line-height:1.4}
 .jobchip.done .jk{background:var(--accent);color:#FFFFFF}
 .jobchip.free .jk{border:1px solid var(--accent);color:var(--accent-deep);background:#FFFFFF}
+
+/* v55 R2 懒加载 CLS 治理：app 页 #view 在课程文件装载期间预留画布高度——
+   空壳(0 高)→播放器注入的整段位移是 app CLS 0.217 的主源（首档画像在案） */
+#view { min-height: calc(100vh - 200px); }

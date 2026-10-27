@@ -666,7 +666,19 @@
       opts = opts || {};
       store = store || R.Store();
       var href = opts.href || function (id) { return 'app.html#' + id; };
-      var mods = R.modules();
+      /* v55 R2 按需加载：课程墙可由目录元数据驱动（opts.metas，来自 course-catalog.js），
+         默认仍从全量注册表推导同一形状——e2e 与 unit 两测试页的默认路径行为不变。
+         metas 字段：{id,num,title,tagline,tech,minutes,free,steps,quizN}（steps/quizN
+         在默认路径由 paths.success.length / quiz.length 推导，目录路径由生成器预置）。 */
+      function metaOf(m) {
+        return { id: m.id, num: m.num, title: m.title, tagline: m.tagline, tech: m.tech,
+                 minutes: m.minutes, free: !!m.free,
+                 steps: m.paths && m.paths.success ? m.paths.success.length : 0,
+                 quizN: (m.quiz || []).length };
+      }
+      var mods = (opts.metas && opts.metas.length) ? opts.metas : R.modules().map(metaOf);
+      var byId = {};
+      mods.forEach(function (m) { byId[m.id] = m; });
       root.innerHTML = '';
 
       /* 岗位学习路径（卅八轮块 4）：三岗 × 4 周计划——建议顺序，可自由跳序。
@@ -710,7 +722,7 @@
         JOB_PATHS.forEach(function (jp) {
           var allMods = [];
           jp.weeks.forEach(function (w) { allMods = allMods.concat(w.mods); });
-          var doneN = allMods.filter(function (id) { var m = R.get(id); var p = m && store.progress(id); return p && p.done; }).length;
+          var doneN = allMods.filter(function (id) { var m = byId[id]; var p = m && store.progress(id); return p && p.done; }).length;
           /* 当前该学：按周序第一个未完成课 */
           var nextId = null;
           for (var wi = 0; wi < jp.weeks.length && !nextId; wi++) {
@@ -731,7 +743,7 @@
             wk.innerHTML = '<div class="jobweek-t"><b>' + w.label + '</b><span>' + wdone + '/' + w.mods.length + '</span></div>';
             var row = el('div', 'jobweek-row');
             w.mods.forEach(function (id) {
-              var m = R.get(id); if (!m) return;
+              var m = byId[id]; if (!m) return;
               var p = store.progress(id);
               var isNext = (id === nextId && !(p && p.done));
               var chip = el('a', 'jobchip' + (p && p.done ? ' done' : '') + (m.free ? ' free' : '') + (isNext ? ' next' : ''));
@@ -877,13 +889,15 @@
       var grid = el('div', 'mgrid');
       function cardHtml(m) {
         var p = store.progress(m.id), qs = store.quizScore(m.id);
-        var pct = p ? Math.round(p.steps / m.paths.success.length * 100) : 0;
+        var steps = m.steps != null ? m.steps : (m.paths && m.paths.success ? m.paths.success.length : 0);
+        var quizN = m.quizN != null ? m.quizN : (m.quiz || []).length;
+        var pct = p ? Math.round(p.steps / steps * 100) : 0;
         return '<div class="mtop"><span class="mnum">M' + m.num + ' · ' + m.tech + '</span>' +
           (m.free ? '<span class="badge free">免费样品</span>'
             : (lic.demo ? '<span class="badge">已解锁</span>' : '<span class="badge paid">' + LOCK_SVG + ' 付费</span>')) + '</div>' +
           '<div class="mname">' + m.title + '</div>' +
           '<div class="mdesc">' + m.tagline + '</div>' +
-          '<div class="mmeta">' + m.minutes + ' 分钟 / ' + m.paths.success.length + ' 步 / ' + m.quiz.length + ' 题</div>' +
+          '<div class="mmeta">' + m.minutes + ' 分钟 / ' + steps + ' 步 / ' + quizN + ' 题</div>' +
           '<div class="mprog"><i style="width:' + pct + '%"></i></div>' +
           '<div class="mfoot"><span>' + (p && p.done ? '<span class="done">✓ 已完成</span>' : pct > 0 ? '学到第 ' + p.steps + ' 步' : '未开始') + '</span>' +
           '<span>' + (qs ? '测验 ' + qs.got + '/' + qs.total : (m.free ? '免费开始 →' : '解锁学习 →')) + '</span></div>';

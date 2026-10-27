@@ -231,13 +231,11 @@
 <script src="assets/engine.js"></script>
 <script src="assets/player.js"></script>
 <script src="assets/flowanim.js"></script>
-<script src="assets/content/ma.js"></script>
-<script src="assets/content/core.js"></script>
-<script src="assets/content/m1.js"></script>
-<script src="assets/content/m2.js"></script>
-                <script src="assets/content/followups.js"></script>
+<script src="assets/content/course-catalog.js"></script>
 <script>
-RRC.Hub.render(document.getElementById('hub'), RRC.Store());
+/* v55 R2 按需加载：课程墙由目录元数据（course-catalog.js，81 门课 36K）驱动——
+   此前为渲染课程墙全量同步挂载 78 个内容脚本，首屏即拖全场字节。 */
+RRC.Hub.render(document.getElementById('hub'), RRC.Store(), { metas: window.RRC_CATALOG });
 RRC.FlowAnim.mount(document.getElementById('attach-anim'), 'attach', { autoplay: true, rate: 0.72 });
 /* 导读试答：单题交互 */
 (function () {

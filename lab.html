@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.61.0";
+const APP_VERSION = "1.62.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -6756,6 +6756,22 @@ const GTPU_EXT_TYPES = {
   0xC0: 'PDCP PDU Number',
 };
 
+// BF 批（v1.62.0）：消息 IE 几何常量表——29.281 §8.2-8.8 图形核实（docx 直读）：
+// TV 定长 = Type 八位组之外的值字节数；TLV 长度域宽度 = 值 Length 字段的八位组数。
+// 29.281 建库只吃 §5.2.1/§6.1/§8.1 三张类型表（位表不采），编解码器（gtpv1.js 同款
+// 行模型）所需的定长/长度域宽度以常量表登记，建库时按 §8.1 Format 列交叉核对——
+// 缺行或 TV/TLV 不符 → problems fatal（GTPU_EXT_TYPES 对拍同款「硬编码 ← → 规范表格
+// 互证」机制）。141 与 29.060 §7.7.40 同为全族唯一单八位组长度域例外。
+const GTPU_IE_GEOMETRY = {
+  14:  { format: 'TV',  fixed: 1 },     // §8.2 Recovery：octet 2 重启计数 1B
+  16:  { format: 'TV',  fixed: 4 },     // §8.3 Tunnel Endpoint Identifier Data I：octets 2-5
+  133: { format: 'TLV', lenBytes: 2 },  // §8.4 GTP-U Peer Address（Length 值域 {4,16}，采样语义定形）
+  141: { format: 'TLV', lenBytes: 1 },  // §8.5 Extension Header Type List：单八位组长度域
+  230: { format: 'TLV', lenBytes: 2 },  // §8.7 GTP-U Tunnel Status Information
+  231: { format: 'TLV', lenBytes: 2 },  // §8.8 Recovery Time Stamp
+  255: { format: 'TLV', lenBytes: 2 },  // §8.6 Private Extension
+};
+
 function gtpuHeader(u8) {
   if (!u8 || u8.length < 8) throw new Error('GTP-U 头截断');
   const flags = u8[0];
@@ -7379,7 +7395,9 @@ function decMsg(inst, bytes, spec = '24501', schema = null) {
   // GTPv2-C（29.274）：头与 IE 框架不同（TLIV/Instance），派发专用实现（src/nas/gtpc.js）
   if (spec === '29274') return decGtpcMsg(inst, u8, schema);
   // GTPv1-C（29.060）：头 8 八位组必配 + TV/TLV 主表驱动，派发专用实现（src/nas/gtpv1.js）
-  if (spec === '29060') return decGtpv1Msg(inst, u8, schema);
+  // BF 批（v1.62.0）：29.281 GTPv1-U 消息面同款行模型（同头形、同 §8.1 Format 语义，
+  // 几何经 GTPU_IE_GEOMETRY 标注进 schema）——同路派发。
+  if (spec === '29060' || spec === '29281') return decGtpv1Msg(inst, u8, schema);
   // PFCP（29.244）：Type(2)+Length(2) IE 框架，派发专用实现（src/nas/pfcp.js）
   if (spec === '29244') return decPfcpMsg(inst, u8, schema);
   // 歧义行：非头部的 C/O 定长 V 行
@@ -7582,7 +7600,7 @@ function decOnce(inst, u8, spec, force, notes = []) {
 function encMsg(inst, parts = [], spec = '24501', gtpcHdr = undefined) {
   // GTPv2-C：头（TEID/Seq 非表内 IE）经第 4 参还原，缺省 T=1/TEID=0/Seq=0（采样/回环零值）
   if (spec === '29274') return encGtpcMsg(inst, parts, gtpcHdr);
-  if (spec === '29060') return encGtpv1Msg(inst, parts, gtpcHdr);
+  if (spec === '29060' || spec === '29281') return encGtpv1Msg(inst, parts, gtpcHdr);
   if (spec === '29244') return encPfcpMsg(inst, parts, gtpcHdr);
   const byRow = new Map(parts.map((p) => [p.rowIdx, p.value]));
   const out = [];
@@ -11234,6 +11252,18 @@ function buildSchema29281(structured) {
     if (!e.ref) continue;
     ies[e.ref] = { name: e.name, layouts: [], ieType: e.value, format: e.format };
   }
+  // BF 批（v1.62.0）：IE 几何标注——gtpu.js GTPU_IE_GEOMETRY（§8.2-8.8 图形常量表）
+  // 按 ieType 注入 fixed/lenBytes，并与 §8.1 Format 列交叉核对（缺行/格式不符 = fatal，
+  // GTPU_EXT_TYPES 对拍同款互证机制）。无几何的 IE 无法定界——gtpv1 解码器不可用。
+  for (const ie of Object.values(ies)) {
+    const g = GTPU_IE_GEOMETRY[ie.ieType];
+    if (!g) { problems.push(`几何表对拍：IE ${ie.ieType}（${ie.name}）不在 GTPU_IE_GEOMETRY（无法定界）`); continue; }
+    if (String(g.format).toUpperCase() !== String(ie.format || '').toUpperCase()) {
+      problems.push(`几何表对拍：IE ${ie.ieType}（${ie.name}）§8.1 Format '${ie.format}' ≠ 几何表 '${g.format}'`);
+    }
+    if (g.fixed != null) ie.fixed = g.fixed;
+    if (g.lenBytes != null) ie.lenBytes = g.lenBytes;
+  }
   // 消息实例（§7.x）：行按名反查 §8.1（29.281 消息表 Reference 列实测为空）。
   // 'General' 小节表（§7.3.2.1——消息概览段）非消息内容表，跳过（29244 同款口径）。
   const out = {};
@@ -11242,13 +11272,17 @@ function buildSchema29281(structured) {
     if (/^general$/i.test(m.name || '')) continue;
     const rows = (m.rows || []).map((r) => {
       const e = ieTypes.byName.get(GTP_KEY(r.name || '')) || null;
+      const g = e ? GTPU_IE_GEOMETRY[e.value] : null; // TV 定长行 len 供编码器校验/采样器定形；
+      // TLV 行 lenBytes 同步下行（encGtpv1Msg 读行级 lenBytes——141 单八位组长度域；
+      // 缺席时编码器按缺省 2B 写、解码器按 ies 标注 1B 读，回环即失配，BF 探针实证）
       return {
         iei: e ? String(e.value) : null,
         name: r.name,
         presence: r.presence || 'O',
         cond: null,
         format: e ? e.format : null,
-        len: null,
+        len: g && g.fixed != null ? String(g.fixed) : null,
+        lenBytes: g && g.lenBytes != null ? g.lenBytes : null,
         ins: null,
         ref: e ? e.ref : null,
         def: e ? e.ref : null,
@@ -11983,6 +12017,13 @@ const SAMPLE_STOP_ROWS = [
     evidence: 'tmp/_bc1_pass.mjs + tmp/_bc1_pass_result_29274.json（值扫）',
     batch: 'BC（v1.59.0）',
   },
+  {
+    id: 'GTPU-231-RECOVERY-TIMESTAMP-NOT-DISSECTED',
+    spec: '29281', ieis: [231], msgTypes: null, fmt: null,
+    reason: 'IE 231 Recovery Time Stamp（29.281 §8.8）不在 tshark 4.6.8 GTPv1 IE 解剖表（Rel-17 新 IE 未实现）——PDML 只产无名 Unknown extension header 字段 [pos,+1]，无框架/长度域证据，TLV 框架恒不可核；帧 CLEAN 无 malformed 且与值无关（deadbeef/全零同形），属无证据路径类而非恒炸类。行全为 Optional（Echo Request/Response、Error Indication），按缺席采样（BC 期 29060 内容无关停采同款处置）',
+    evidence: 'tmp/_bf_29281_probe2.mjs（值无关两形 + 消息三形态矩阵）',
+    batch: 'BF（v1.62.0）',
+  },
 ];
 
 function sampleStopHit(spec, iei, msgType = null) {
@@ -12290,11 +12331,12 @@ function semanticGtpValueImpl(name, rng, spec) {
     // （length-prefix 与剩余字节不配）。精确等值匹配防误吃 'UTRAN TRANSPARENT CONTAINER'。
     return Uint8Array.from([0x00]);
   }
-  if (n === 'PRIVATE EXTENSION' && spec === '29060') {
+  if (n === 'PRIVATE EXTENSION' && (spec === '29060' || spec === '29281')) {
     // 7.7.46（iei 255 消息尾行）：Extension Code(1) + Extension Length(1) + Value——
     // 随机值使 tshark 副解构越界（MBMS Session Start 系停 gtp.ext_length ×4/版）；
     // 空扩展 [00 00] 最小形态（与 node 219 的 D5 探针结论同构）。限 29060：29274 侧
     // §8.69 尾行随机值当前未致病（剩余 30 帧无 255 类），不动保零漂移。
+    // BF 批（v1.62.0）扩 29281：§8.6 同型（Ext Id 2B + Ext Value），同族溢读风险。
     return Uint8Array.from([0x00, 0x00]);
   }
   if (n === 'SGSN NUMBER' && spec === '29060') {
@@ -12307,9 +12349,12 @@ function semanticGtpValueImpl(name, rng, spec) {
   // Extension Length 前缀 + 内容」解剖（停点字段 gtp.ggsn_address_length / gtp.ext_length），
   // 而 schema 布局只摄取内容部——前缀缺席时逐 IE 错位连环溢读，到帧尾字节耗尽才判违
   // （真帧 lastIe 往往是下一个 IE，多因叠加帧「火移」表象的根源）。逐 IE 隔离探针定形。
-  if (/^(GSN|SGSN|GGSN) ADDRESS/.test(n) && spec === '29060') {
+  if (/^(GSN|SGSN|GGSN) ADDRESS/.test(n) && (spec === '29060' || spec === '29281')) {
     // 7.7.32：2B 长度(=4) + IPv4 4B——[00 04+4B] 隔离 CLEAN；行名跨消息别名
     // （GGSN/SGSN Address for …）由 ie.name 'GSN Address' + 行名兜底双路命中。
+    // BF 批（v1.62.0）扩 29281：§8.4 GTP-U Peer Address 即 29.060 IE 133 同型
+    //（§8.1 NOTE 1 别名），tshark 同解剖器同「2B 内前缀 + 地址」副解构形态；
+    // §8.4 Length 值域 {4,16} 由本语义形天然满足。
     return Uint8Array.from([0x00, 0x04, ...ipv4(rng)]);
   }
   if (/^ACCESS POINT NAME/.test(n) && spec === '29060') {
@@ -12836,6 +12881,10 @@ function lenRangeOf(lenStr, fmt) {
 function sampleSchema(schema, N, seed, msgRe = null) {
   if (schema.spec === '29274') return sampleGtpcSchema(schema, N, seed, msgRe);
   if (schema.spec === '29060') return sampleGtpv1Schema(schema, N, seed, msgRe);
+  // BF 批（v1.62.0）：29.281 GTPv1-U 与 29.060 同头形（PT=1）同行模型——此前走通用
+  // 路径产空载荷（消息表只含 IE 行、无头行），oracle/gate 无对象。路由进 gtpv1 采样：
+  // 头 0x32（v1|PT|S）+ Length=帧长−8 + consults 按 spec 查表（29281 零登记 = 无操作）。
+  if (schema.spec === '29281') return sampleGtpv1Schema(schema, N, seed, msgRe);
   if (schema.spec === '29244') return samplePfcpSchema(schema, N, seed, msgRe);
   const rng = rng32(seed);
   const rnd = (n) => Math.floor(rng() * n);
@@ -13379,7 +13428,7 @@ function gtpuKvLine(obj, skip) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, valueRemapHit, canonicalizeHit, domainValueHit, tsharkArtifactMatch, SAMPLE_STOP_ROWS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, VALUE_DOMAIN_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, GTPU_IE_GEOMETRY, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, valueRemapHit, canonicalizeHit, domainValueHit, tsharkArtifactMatch, SAMPLE_STOP_ROWS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, VALUE_DOMAIN_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
