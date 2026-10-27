@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.60.0";
+const APP_VERSION = "1.61.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -11913,16 +11913,19 @@ async function ingestDocxZip(zipBytes, { spec, version }) {
 
 // ==== tools/nas_quirks.mjs ====
 // nas_quirks.mjs — BA 批（v1.58.0）：解剖器怪癖登记表（数据驱动收口）；BC 批（v1.59.0）
-// 扩第四类 VALUE_CANONICALIZE_ROWS。
+// 扩第四类 VALUE_CANONICALIZE_ROWS；BE 批（v1.61.0）扩第五类 VALUE_DOMAIN_ROWS
+//（值域生成器，canonicalize 逐步退役通道）。
 //
 // 动机（v1.57.0 评审段 P2/P3）：tshark 侧怪癖处置散落在采样器/oracle 的 if 特判里
 //（29060 130/180/212、29244 327、322 伪影——327 已是第四个硬编码），每加一个都要动
 // 代码路径；本表收口为「数据登记 + 纯函数匹配器」，新增怪癖 = 加一条目、零代码改动。
-// 四类：
+// 五类：
 //   SAMPLE_STOP_ROWS   采样器行守卫（停采）——tshark 恒炸/内容无关类，缺席采样；
 //   VALUE_REMAP_ROWS   采样后值字节重映射——值特定证据空洞，rng 消耗不变仅改登记值；
 //   VALUE_CANONICALIZE_ROWS 采样后值区规范化平铺——值域敏感类（tshark 对该 IE 值域
 //     深挖遇采样随机字节恒炸、规范值 CLEAN），整值平铺为登记 pattern，保行覆盖；
+//   VALUE_DOMAIN_ROWS  采样后值域派生——自原采样值确定性派生合法值域字节（无额外
+//     rng 消耗、值多样性保留），具备明确值域模型的条目优先入本表（canonicalize 退役通道）；
 //   TSHARK_ARTIFACTS   oracle L3 显示伪影豁免——tshark 字段自证矛盾且帧侧自洽。
 // 纪律：
 //   ① 每条目必带 id/reason（病根一句话）/evidence（探针与报告留档路径）/batch（入表批次），
@@ -12022,21 +12025,9 @@ function valueRemapHit(spec, iei, fmt, value) {
 // malformed），而登记 pattern 平铺值经 tshark 实证 CLEAN。处置 = 采样器在正常取值之后、
 // push 之前把值区整段平铺为 pattern 单字节（长度不变，TLV/TIV 长度域不动），rng 消耗
 // 不变，漂移局限采中登记行的帧；行覆盖保留（结构 + 跨度对拍照常核验，值域收窄入档）。
+// BE 批（v1.61.0）起：具备明确值域模型的条目迁 VALUE_DOMAIN_ROWS（值多样性保留），
+// 本表逐步退役——无简单值域模型者（容器内容/RAT 分支坐标/标志位自洽族）暂留。
 const VALUE_CANONICALIZE_ROWS = [
-  {
-    id: 'GTPV1-134-PDP-CONTEXT-MSISDN-DOMAIN',
-    spec: '29060', iei: 134, pattern: '00',
-    reason: 'IE 134 PDP Context/MSISDN 行：tshark 4.6.8 按值域语义深挖（数字域/e212 子结构）遇采样随机字节恒判 malformed，全零平铺 CLEAN——全消息面 48 帧分诊 9 帧（Create PDP Context Request ×5 + Create MBMS Context Request ×4）单 IE 规范化即 CLEAN（canonicalize 扫描 size1 定案）',
-    evidence: 'tmp/_bc1_redo.mjs + tmp/_bc1_redo_result.json（A 段 canonicalize 扫描）',
-    batch: 'BC（v1.59.0）',
-  },
-  {
-    id: 'GTPV1-147-SGSN-NUMBER-DOMAIN',
-    spec: '29060', iei: 147, pattern: '00',
-    reason: 'IE 147 SGSN Number：tshark 按号码域深挖遇采样随机字节恒判 malformed，全零平铺 CLEAN——5 帧（SGSN Context Request / SGSN Context Acknowledge ×2 / Forward Relocation Response ×2）单 IE 规范化即 CLEAN',
-    evidence: 'tmp/_bc1_redo.mjs + tmp/_bc1_redo_result.json（A 段 canonicalize 扫描）+ tmp/_bc1_pass_result_29060.json（f2524 值扫：仅原值炸全零 CLEAN）',
-    batch: 'BC（v1.59.0）',
-  },
   {
     id: 'GTPV1-179-SETUP-PFCS-DOMAIN',
     spec: '29060', iei: 179, pattern: '00',
@@ -12080,30 +12071,65 @@ const VALUE_CANONICALIZE_ROWS = [
     batch: 'BC（v1.59.0）',
   },
   {
-    id: 'GTPV2-90-HSGW-ADDR-DOMAIN',
-    spec: '29274', iei: 90, pattern: '00',
-    reason: 'IE 90（HSGW 地址族）：tshark 按地址长度前缀语义深挖（hsgw_addr_f_len）遇采样短值/随机字节恒判 malformed，全零平铺 CLEAN——BC 收口迭代重采样语料新暴露 1 帧（Create Forwarding Tunnel Request f6756，vlen=2 值 04ae 炸、0000/ffff CLEAN、切除 CLEAN），canonicalize 扫描批次外补登记',
-    evidence: 'tmp/_bc1_ie90_probe_result.json（值域扫 + 切除对照）',
-    batch: 'BC（v1.59.0）',
-  },
-  {
     id: 'GTPV2-51-F-CONTAINER-E212-DOMAIN',
     spec: '29274', iei: 51, pattern: '00',
     reason: 'IE 51 F-Container：tshark 容器内容按 e212.assoc.imsi 语义深挖遇采样随机字节恒判 malformed，全零/全ff 平铺 CLEAN——BC-3 多 seed 矩阵 seed 99 新暴露 2 帧（Forward Relocation Request f3419/f3493，原值 b64205/c649fc 炸、全零/全ff CLEAN、切除 CLEAN），canonicalize 批次外补登记',
     evidence: 'tmp/_bc1_ie51_probe_result.json（两帧值域扫 + 切除对照）',
     batch: 'BC（v1.59.0）',
   },
-  {
-    id: 'GTPV2-91-SGW-ADDR-DOMAIN',
-    spec: '29274', iei: 91, pattern: '00',
-    reason: 'IE 91（SGW 地址族）：tshark 按地址长度前缀语义深挖（serving_gw_address_length）遇采样随机字节恒判 malformed，全零/全ff 平铺 CLEAN——BC-3 多 seed 矩阵 seed 1（IE 51 值变更后重采样）新暴露 2 帧（Create Forwarding Tunnel Response f6803/f6866，原值 05048e/08107c 炸、全零/全ff CLEAN、切除 CLEAN），与 IE 90 同为地址族语义深挖，canonicalize 批次外补登记',
-    evidence: 'tmp/_bc1_ie91_probe_result.json（两帧值域扫 + 切除对照）',
-    batch: 'BC（v1.59.0）',
-  },
 ];
 
 function canonicalizeHit(spec, iei) {
   for (const q of VALUE_CANONICALIZE_ROWS) {
+    if (q.spec === spec && q.iei === iei) return q;
+  }
+  return null;
+}
+
+// ---- VALUE_DOMAIN_ROWS：采样后值域派生（BE 批 v1.61.0，canonicalize 退役通道）--
+// 处置 = 采样器在正常取值之后、push 之前把原采样值**确定性派生**为合法值域字节：
+//   tbcdDigits    TBCD 电话号码域——每半八位组收敛到数字 0-9（nibble % 10），
+//                 长度/布局不变；tshark 按数字域解码即合法（全零=全 '0' 数字为
+//                 BC 期 CLEAN 的特例，本类是其多样化推广）；
+//   addrLenPrefix 地址长度前缀自洽——首字节改写为「值内其余字节数」，尾随字节
+//                 保持原采样随机性（任意字节皆合法地址）；BC 期证据（90 vlen=2
+//                 值 04ae 炸 = len 声明 4 而实余 1 字节）即长度前缀不一致病。
+// 派生自原值 ⇒ 零额外 rng 消耗（下游采样流与替换前同序），值多样性保留（对拍面
+// 比 canonicalize 平铺强一档）。自本批起 134/147/90/91 自 VALUE_CANONICALIZE_ROWS
+// 退役迁入本表；oracle:wide + 四 seed 矩阵全量重验为本表条目的入表证据。
+const VALUE_DOMAIN_ROWS = [
+  {
+    id: 'GTPV1-134-PDP-CONTEXT-MSISDN-TBCD',
+    spec: '29060', iei: 134, domain: 'tbcdDigits',
+    reason: 'IE 134 PDP Context/MSISDN 行：值=首字节计数域+尾数字域——计数非零小于尾容量触发深挖异常（BC 分诊 9 帧定案），派生形=首 00（计数 0 尾随容忍）+尾 nibble 收敛数字 0-9，多样性保留在尾部，探针+全量 oracle CLEAN',
+    evidence: 'tmp/_bc1_redo_result.json（A 段 canonicalize 扫描=病根证据）+ BE 批 oracle:wide/四 seed 重验（tbcdDigits 形全零 malformed）',
+    batch: 'BE（v1.61.0）',
+  },
+  {
+    id: 'GTPV1-147-SGSN-NUMBER-TBCD',
+    spec: '29060', iei: 147, domain: 'tbcdDigits',
+    reason: 'IE 147 SGSN Number：值=首字节计数域+尾数字域（同 134 族），派生形=首 00+尾数字收敛，探针（首00+尾0..7 全 CLEAN）+全量 oracle CLEAN',
+    evidence: 'tmp/_bc1_redo_result.json + tmp/_bc1_pass_result_29060.json（病根证据）+ BE 批 oracle:wide/四 seed 重验',
+    batch: 'BE（v1.61.0）',
+  },
+  {
+    id: 'GTPV2-90-HSGW-ADDR-LENPREFIX',
+    spec: '29274', iei: 90, domain: 'addrLenPrefix',
+    reason: 'IE 90（HSGW 地址族）：值=[首长度][次类型][尾地址]——次字节 04 触发子类型深挖、长度声明与实余不一致即炸（BC 证据 04ae/BE 探针 02048e 定案）；派生形=首字节自洽+次字节定形 03+尾随机，全量 oracle CLEAN',
+    evidence: 'tmp/_bc1_ie90_probe_result.json（病根证据）+ BE 批 oracle:wide/四 seed 重验',
+    batch: 'BE（v1.61.0）',
+  },
+  {
+    id: 'GTPV2-91-SGW-ADDR-LENPREFIX',
+    spec: '29274', iei: 91, domain: 'addrLenPrefix',
+    reason: 'IE 91（SGW 地址族）：与 IE 90 同族——[首长度][次类型][尾地址]，次字节 04 深挖、长度不自洽即炸（BC 证据+BE 探针 probe1 三 MAL 形次字节全 04 定案）；派生形=首自洽+次定形 03+尾随机，四 seed 矩阵 CLEAN',
+    evidence: 'tmp/_bc1_ie91_probe_result.json（病根证据）+ BE 批 oracle:wide/四 seed 重验',
+    batch: 'BE（v1.61.0）',
+  },
+];
+
+function domainValueHit(spec, iei) {
+  for (const q of VALUE_DOMAIN_ROWS) {
     if (q.spec === spec && q.iei === iei) return q;
   }
   return null;
@@ -12926,6 +12952,41 @@ function sampleSchema(schema, N, seed, msgRe = null) {
 // ---- GTPv2-C（29.274）采样：头 T=1/TEID=0/Seq=0（encGtpcMsg 缺省零值，回环确定性）；
 // 行序 TLIV；分组 IE（Bearer Context/PDN Connection）按子行表递归构值（M 必采、C/CO/O p=0.4）；
 // 值来源优先级：分组递归 > IE 位布局（layoutSample）> 定长随机 > 2-9 字节随机。
+
+// BE 批（v1.61.0）C-②：值域生成器（nas_quirks.mjs VALUE_DOMAIN_ROWS）——自原采样值
+// **确定性派生**合法值域字节，不消耗额外 rng（下游采样流与派生前同序）。形态由隔离
+// 探针矩阵定案（tmp/_be_c2_probe.mjs + _be_c2_probe2.mjs，最小帧 × 值矩阵直喂 tshark）：
+//   tbcdDigits    电话号码族：首字节是**计数域**（数字 nibble 直接放首字节必炸——计数
+//                 大于尾容量触发深挖异常；首00+尾0..7 全 CLEAN），故首字节定 00，尾随
+//                 字节半八位组收敛数字 0-9（BC 期「全零平铺 CLEAN」的多样化推广——
+//                 多样性保留在尾部）；
+//   addrLenPrefix 地址族：[首][次][尾] 三段——首字节=尾随字节数（自洽）、**次字节定形
+//                 03**（探针定案：次字节 04 触发子类型深挖——probe1 三 MAL 形
+//                 02048e/0004020304/ff048e 次字节全 04；次字节 01/02/03 矩阵全 CLEAN），
+//                 其余尾字节保留原采样随机性。
+function domainDerive(domain, v) {
+  if (domain === 'tbcdDigits') {
+    const out = Uint8Array.from(v);
+    if (out.length) out[0] = 0x00; // 首字节=计数域，0 = 不声明数字（尾随被容忍）
+    for (let i = 1; i < out.length; i++) out[i] = (out[i] & 0x0f) % 10 | (((out[i] >> 4) % 10) << 4);
+    return out;
+  }
+  if (domain === 'addrLenPrefix') {
+    if (v.length < 2) return v;
+    const out = Uint8Array.from(v);
+    out[0] = (v.length - 1) & 0xff; // 长度前缀自洽
+    out[1] = 0x03;                  // 次字节定形（04 触发深挖）
+    return out;
+  }
+  return v;
+}
+
+function applyDomainHit(spec, iei, value) {
+  const q = domainValueHit(spec, iei);
+  if (!q) return value;
+  return domainDerive(q.domain, value);
+}
+
 function gtpcSampleValue(r, schema, rng, depth = 0) {
   const ref = r.def || (r.ref && schema.ies[r.ref] ? r.ref : null);
   if (ref && depth < 4) {
@@ -12942,7 +13003,24 @@ function gtpcSampleValue(r, schema, rng, depth = 0) {
           continue;
         }
         if (!/^M$/i.test((cr.presence || '').trim()) && rng() > 0.4) continue;
-        body.push(...gtpcTli(parseInt(cr.iei, 10), cr.ins != null ? cr.ins : 0, gtpcSampleValue(cr, schema, rng, depth + 1)));
+        // BE 批（v1.61.0）C-①：组内行 consult 对称化（BC 审核段 P3-1 收口）——停采/
+        // 重映射/规范化与顶层行同规。msgTypes 限定条目组内不生效（组上下文无宿主消息
+        // 类型可门，保守只放行 null 门条目）；命中必配行 ⇒ 该组不可构造，抛错交重试
+        // （与顶层「整实例退网」同语义的组内形态）。探针实证（tmp/_be_c1_probe 内联）：
+        // 当前登记面唯一组内重叠 = 29244 IE 327（AZ 组内守卫先例，presence C），gtpc/
+        // gtpv1 侧零重叠——本对称化对现行采样流零漂移。
+        const stopQ = sampleStopHit(schema.spec, parseInt(cr.iei, 10), null);
+        if (stopQ) {
+          if (/^M$/i.test((cr.presence || '').trim())) throw new Error(`分组必配行停采退网: ${cr.name}`);
+          continue;
+        }
+        let cv = gtpcSampleValue(cr, schema, rng, depth + 1);
+        const remapped = valueRemapHit(schema.spec, parseInt(cr.iei, 10), cr.format, cv);
+        if (remapped) cv = remapped;
+        const canonQ = canonicalizeHit(schema.spec, parseInt(cr.iei, 10));
+        if (canonQ) cv = Uint8Array.from({ length: cv.length }, () => parseInt(canonQ.pattern, 16));
+        cv = applyDomainHit(schema.spec, parseInt(cr.iei, 10), cv);
+        body.push(...gtpcTli(parseInt(cr.iei, 10), cr.ins != null ? cr.ins : 0, cv));
       }
       return Uint8Array.from(body);
     }
@@ -13003,6 +13081,7 @@ function sampleGtpcSchema(schema, N, seed, msgRe) {
             // 登记行整值平铺为 pattern（长度不变），rng 消耗不变，漂移局限采中登记行的帧。
             const canonQ = canonicalizeHit(schema.spec, parseInt(r.iei, 10));
             if (canonQ) gtpcValue = Uint8Array.from({ length: gtpcValue.length }, () => parseInt(canonQ.pattern, 16));
+            gtpcValue = applyDomainHit(schema.spec, parseInt(r.iei, 10), gtpcValue);
             parts.push({ rowIdx: ri, value: gtpcValue });
           }
           if (!ok) { skipped[instKey] = skipped[instKey] || (stopRetired ? '停采必配行退网' : '必配行无类型值'); continue; }
@@ -13042,8 +13121,20 @@ function pfcpSampleValue(r, schema, rng, depth = 0) {
         // 未采中 327 的帧 rng 消耗序列零漂移（AW 行守卫同款）。
         // BA 起（v1.58.0）迁 nas_quirks.mjs SAMPLE_STOP_ROWS 登记表——匹配条件与原硬编码
         // 逐字等价（spec 29244 + iei 327 + 任意消息），落点不变，采样流零漂移。
-        if (sampleStopHit(schema.spec, parseInt(cr.iei, 10), null)) continue;
-        body.push(...pfcpIe(parseInt(cr.iei, 10), pfcpSampleValue(cr, schema, rng, depth + 1)));
+        // BE 批（v1.61.0）C-①：并入统一组内 consult 路径（msgTypes 限定条目组内不生效
+        // ——null 门保守放行；必配行命中 ⇒ 抛错退网）。327 presence=C，行为不变。
+        const stopQ = sampleStopHit(schema.spec, parseInt(cr.iei, 10), null);
+        if (stopQ) {
+          if (/^M$/i.test((cr.presence || '').trim())) throw new Error(`分组必配行停采退网: ${cr.name}`);
+          continue;
+        }
+        let cv = pfcpSampleValue(cr, schema, rng, depth + 1);
+        const remapped = valueRemapHit(schema.spec, parseInt(cr.iei, 10), cr.format, cv);
+        if (remapped) cv = remapped;
+        const canonQ = canonicalizeHit(schema.spec, parseInt(cr.iei, 10));
+        if (canonQ) cv = Uint8Array.from({ length: cv.length }, () => parseInt(canonQ.pattern, 16));
+        cv = applyDomainHit(schema.spec, parseInt(cr.iei, 10), cv);
+        body.push(...pfcpIe(parseInt(cr.iei, 10), cv));
       }
       return Uint8Array.from(body);
     }
@@ -13093,6 +13184,7 @@ function samplePfcpSchema(schema, N, seed, msgRe) {
             if (remapped) pfcpValue = remapped;
             const canonQ = canonicalizeHit(schema.spec, parseInt(r.iei, 10));
             if (canonQ) pfcpValue = Uint8Array.from({ length: pfcpValue.length }, () => parseInt(canonQ.pattern, 16));
+            pfcpValue = applyDomainHit(schema.spec, parseInt(r.iei, 10), pfcpValue);
             parts.push({ rowIdx: ri, value: pfcpValue });
           }
           if (!ok) { skipped[instKey] = skipped[instKey] || '必配行无类型值'; continue; }
@@ -13191,6 +13283,7 @@ function sampleGtpv1Schema(schema, N, seed, msgRe) {
             if (remapped) gtpv1Value = remapped;
             const canonQ = canonicalizeHit(schema.spec, parseInt(r.iei, 10));
             if (canonQ) gtpv1Value = Uint8Array.from({ length: gtpv1Value.length }, () => parseInt(canonQ.pattern, 16));
+            gtpv1Value = applyDomainHit(schema.spec, parseInt(r.iei, 10), gtpv1Value);
             parts.push({ rowIdx: ri, value: gtpv1Value });
           }
           if (!ok) { skipped[instKey] = skipped[instKey] || (stopRetired ? '停采必配行退网' : '必配行无类型值'); continue; }
@@ -13286,7 +13379,7 @@ function gtpuKvLine(obj, skip) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, valueRemapHit, canonicalizeHit, tsharkArtifactMatch, SAMPLE_STOP_ROWS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, valueRemapHit, canonicalizeHit, domainValueHit, tsharkArtifactMatch, SAMPLE_STOP_ROWS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, VALUE_DOMAIN_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
