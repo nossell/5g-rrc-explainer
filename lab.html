@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.64.0";
+const APP_VERSION = "1.66.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -7350,7 +7350,8 @@ function rowIei(r) {
 const EPD = { 24501: 0x7e, 24301: null }; // 24301：半八位组 PD，按消息族取值（见 nasPD）
 
 // 24.301 半八位组 protocol discriminator：EMM 消息=7、ESM 消息=5（按规范 §8.2/§8.3 节前缀）；
-// 24.008：建库时按 §9.x 族写入 inst.pd（RR=6/MM=5/CC=3/GMM=8/SM=9）；
+// 24.008：建库时按 §9.x 族写入 inst.pd（RR=6/MM=5/CC=3/GMM=8/SM=10——§9.5 实测 pd=10，
+// 独立审核段〔2026-10-28〕勘正旧注「SM=9」笔误）；
 // 44.018（RR=6）/24.080（SS=11）：同样建库写入。24080 的 inst.pd 覆盖 8.3 前缀猜测——
 // 24080 消息节是 2.x，会误判 7，故 inst.pd 必须先命中。
 function nasPD(inst) {
@@ -7685,6 +7686,64 @@ function encMsg(inst, parts = [], spec = '24501', gtpcHdr = undefined) {
     throw new Error(`行 ${r.name}: 未知格式 ${f}`);
   }
   return Uint8Array.from(out);
+}
+
+// BI 批（v1.65.0）：24008 GSMTAP 真机 oracle 配套——行级字节布局计算器。
+// 与 encMsg 同一游标算术（分支逐一对齐：头 V 行恒 1B、VH run 恒 runBytes、TLV=2+值、
+// TLV-E=3+值、LV=1+值、LV-E=2+值、TV=1+值、TV1/T=1、ADDR/VP=值原样），只记跨度不产字节。
+// 每条在 parts 里在场的行（及恒在场的头行/VH run 全部半八位组位）得到
+// { rowIdx, row, pos, size, half?, kind }（pos 相对消息起点；VH 行两半共享同一字节跨度，
+// half 标记归属）；headerEnd = 'Message type/identity' 行末（无该行的消息回退到首个 VH
+// run 末）。oracle ourFrame 以此构建本构建侧 IE 跨度做包含/覆盖对拍；spare/缺席行无跨度。
+function layoutRows(inst, parts, spec = '24501') {
+  const byRow = new Map(parts.map((p) => [p.rowIdx, p.value]));
+  const spans = [];
+  let cur = 0;
+  let headerEnd = null;
+  let leadVhEnd = null;
+  for (let ri = 0; ri < inst.rows.length; ri++) {
+    const r = inst.rows[ri];
+    const f = rowFormat(r);
+    const name = (r.name || '').toLowerCase();
+    if (f === 'VH') {
+      let j = ri;
+      while (j < inst.rows.length && rowFormat(inst.rows[j]) === 'VH') j++;
+      const runRows = inst.rows.slice(ri, j).map((rr, k) => ({ r: rr, idx: ri + k }));
+      const { positions, runBytes } = planVhRun(runRows);
+      for (const p of positions) spans.push({ rowIdx: p.rowIdx, row: p.row, pos: cur + p.oct, size: 1, half: p.half, kind: 'VH' });
+      cur += runBytes;
+      if (leadVhEnd == null) leadVhEnd = cur;
+      ri = j - 1;
+      continue;
+    }
+    const flen = fixedLen(r.len);
+    const has = byRow.has(ri);
+    const val = byRow.get(ri);
+    if (f === 'V') {
+      // 头三件恒在场（编码缺省值）；IE 区 V 行以 parts 在场性为准
+      const isHdr = /extended protocol discriminator|security header type|message (identity|type)/.test(name);
+      const size = isHdr ? 1 : has ? (flen == null ? val.length : flen) : 0;
+      if (size > 0) {
+        spans.push({ rowIdx: ri, row: r, pos: cur, size, kind: 'V' });
+        cur += size;
+      }
+      if (isHdr && /message (identity|type)/.test(name) && headerEnd == null) headerEnd = cur;
+      continue;
+    }
+    const sizeOf = (f === 'T' || f === 'TV1') ? (has ? 1 : 0)
+      : f === 'TV' ? (has ? 1 + val.length : 0)
+      : f === 'TLV' ? (has ? 2 + val.length : 0)
+      : f === 'TLV-E' ? (has ? 3 + val.length : 0)
+      : f === 'LV' ? (has ? 1 + val.length : 0)
+      : f === 'LV-E' ? (has ? 2 + val.length : 0)
+      : f === 'ADDR' || f === 'VP' ? (has ? val.length : 0)
+      : 0; // UNK：零字节
+    if (sizeOf > 0) {
+      spans.push({ rowIdx: ri, row: r, pos: cur, size: sizeOf, kind: f });
+      cur += sizeOf;
+    }
+  }
+  return { spans, headerEnd: headerEnd != null ? headerEnd : (leadVhEnd != null ? leadVhEnd : 0), total: cur };
 }
 
 // ==== src/nas/values.js ====
@@ -11950,6 +12009,9 @@ async function ingestDocxZip(zipBytes, { spec, version }) {
 // 扩第四类 VALUE_CANONICALIZE_ROWS；BE 批（v1.61.0）扩第五类 VALUE_DOMAIN_ROWS
 //（值域生成器，canonicalize 逐步退役通道）；BG 批（v1.63.0）canonicalize 收敛：
 // 179/186 迁 VALUE_DOMAIN、178/142 裸退役、121/173/51 负结果留表（各条 reason 内记档）。
+// BJ 批（v1.66.0）扩**行名键**：24008 的 IE 行大多无 IEI（V/LV/TV1 行、GMM/SM 容器行），
+// (spec,iei) 键不适配（BI 记档挂档项）——条目可选 `row` 字段（小写行名全等匹配），
+// row* 匹配器族配套；(spec,iei) 匹配器对 row 条目显式跳过（两键空间互不串扰）。
 //
 // 动机（v1.57.0 评审段 P2/P3）：tshark 侧怪癖处置散落在采样器/oracle 的 if 特判里
 //（29060 130/180/212、29244 327、322 伪影——327 已是第四个硬编码），每加一个都要动
@@ -12032,12 +12094,60 @@ const SAMPLE_STOP_ROWS = [
     evidence: 'tmp/_bf_29281_probe2.mjs（值无关两形 + 消息三形态矩阵）',
     batch: 'BF（v1.62.0）',
   },
+  // ---- BJ 批（v1.66.0）：24008 行名键条目（自 nassample 硬编码 continue 迁登记表，
+  //      采样流零漂移：continue 落点与 BI 硬编码同位——行 rng 判定前）----
+  {
+    id: 'DTAP-SKIP-INDICATOR-ZERO',
+    spec: '24008', row: 'skip indicator',
+    reason: 'Skip Indicator 半组 §10.3.1 规范形恒 \'0000\'（全消息）——不采该行即得（编码器 VH 缺省 0）；BH 探针实证随机 skip tshark 照收不致病，此为构造帧规范形修正 + L1 可对拍',
+    evidence: 'tmp/_bh_gsmtap_probe.mjs（随机 skip CLEAN）+ BI 24008 oracle 首基线零漂移',
+    batch: 'BI 硬编码立例（v1.65.0）；BJ 迁登记表（v1.66.0）',
+  },
+  {
+    id: 'DTAP-EMERGENCY-NUMBER-LIST-STOP',
+    spec: '24008', row: 'emergency number list',
+    reason: '条目 [len][svc][BCD] 零值形在隔离帧 CLEAN、在帧内（前置 Mobile identity/GMM cause/TV1 族后）恒 exception（上下文敏感复合病同 51/178 定性）——值形/长度形均不可收口，行按缺席采样（O 行缺席合法）',
+    evidence: 'tmp/_bi_probe14/20.mjs（隔离帧对照 + 帧内恒炸）',
+    batch: 'BI 硬编码立例（v1.65.0）；BJ 迁登记表（v1.66.0）',
+  },
+  {
+    id: 'DTAP-ADDITIONAL-UPDATE-TYPE-STOP',
+    spec: '24008', row: 'additional update type',
+    reason: 'TV1 tF——tshark GMM 表无此类型值，Extraneous data 根因（字段无路径=证据空洞同 29281 IE 231 定性）；O 行缺席合法',
+    evidence: 'BI 全量普查 mismatch 归因（帧级 Extraneous 复现）',
+    batch: 'BI 硬编码立例（v1.65.0）；BJ 迁登记表（v1.66.0）',
+  },
+  {
+    id: 'DTAP-INTEGRITY-ALGORITHM-STOP',
+    spec: '24008', row: 'integrity algorithm',
+    reason: 'TV1 t9——tshark 无字段路径（证据空洞同上）；O 行缺席合法',
+    evidence: 'BI 全量普查 mismatch 归因',
+    batch: 'BI 硬编码立例（v1.65.0）；BJ 迁登记表（v1.66.0）',
+  },
 ];
 
 function sampleStopHit(spec, iei, msgType = null) {
   for (const q of SAMPLE_STOP_ROWS) {
-    if (q.spec !== spec || !q.ieis.includes(iei)) continue;
+    if (q.spec !== spec || !q.ieis) continue; // BJ：row 条目（行名键）不经 iei 匹配器
+    if (!q.ieis.includes(iei)) continue;
     if (q.msgTypes && !q.msgTypes.includes(msgType)) continue;
+    return q;
+  }
+  return null;
+}
+
+// ---- BJ 批（v1.66.0）：行名键匹配器族 --------------------------------------
+// 行名归一口径与 BI semanticDtapValue 同：trim + 去「(n.n)」节号注记 + lowercase
+//（采样循环 name 已 lowercase，归一幂等）。row 条目必带 spec+row，id/reason/
+// evidence/batch 台账字段与 (spec,iei) 条目同规（nas_quirks.test.js 台账卫生钉）。
+function quirkRowKey(name) {
+  return String(name || '').trim().replace(/\s*\(\d+(?:\.\d+)*\)\s*$/, '').toLowerCase();
+}
+
+function rowStopHit(spec, name) {
+  const k = quirkRowKey(name);
+  for (const q of SAMPLE_STOP_ROWS) {
+    if (q.spec !== spec || !q.row || q.row !== k) continue;
     return q;
   }
   return null;
@@ -12120,7 +12230,17 @@ const VALUE_CANONICALIZE_ROWS = [
 
 function canonicalizeHit(spec, iei) {
   for (const q of VALUE_CANONICALIZE_ROWS) {
+    if (!q.iei) continue; // BJ：row 条目不经 iei 匹配器
     if (q.spec === spec && q.iei === iei) return q;
+  }
+  return null;
+}
+
+function rowCanonicalizeHit(spec, name) {
+  const k = quirkRowKey(name);
+  for (const q of VALUE_CANONICALIZE_ROWS) {
+    if (q.spec !== spec || !q.row || q.row !== k) continue;
+    return q;
   }
   return null;
 }
@@ -12179,11 +12299,165 @@ const VALUE_DOMAIN_ROWS = [
     evidence: 'tmp/_bg_probe2.mjs（首字节 256 全扫+长度 1-20 档）+ tmp/_bg_probe3.mjs（全宿主尾随机矩阵）+ BC _bc1_canscan_result_29274.json（L1 病原始证据）',
     batch: 'BG（v1.63.0，自 VALUE_CANONICALIZE_ROWS 迁入）',
   },
+  // ---- BJ 批（v1.66.0）：24008 行名键 dtapFixed 条目（BI semanticDtapValue 语义形
+  //      迁域形生成器，值多样性恢复挂档项落地）——len = 探针 CLEAN 档定形值长
+  //      （tmp/_bi_probe15.mjs 行×值长矩阵）；content='random' = 原值循环填充（零额外
+  //      rng，值多样性保留在内容字节）；wide 4 seed 0/0 绿线为入表证据权威。
+  {
+    id: 'DTAP-EUTRAN-INTER-RAT-CONTAINER-FIX7',
+    spec: '24008', row: 'e-utran inter rat information container', domain: 'dtapFixed', len: 7, content: 'zero',
+    reason: '值长 1-6 MAL、≥7 CLEAN——内层 [len][…] 结构（tshark 按容器内长度前缀解析）',
+    evidence: 'tmp/_bi_probe15.mjs（行×值长矩阵 2272 帧）+ BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-SUPPORTED-CODEC-LIST-FIX4',
+    spec: '24008', row: 'supported codec list', domain: 'dtapFixed', len: 4, content: 'zero',
+    reason: '奇数长 MAL、偶数 CLEAN（元素 2B 对齐）→ 4',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-NBIFOM-CONTAINER-FIX2',
+    spec: '24008', row: 'nbifom container', domain: 'dtapFixed', len: 2, content: 'zero',
+    reason: '奇数长 MAL、偶数 CLEAN → 2',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-LSA-IDENTIFIER-FIX3',
+    spec: '24008', row: 'lsa identifier', domain: 'dtapFixed', len: 3, content: 'zero',
+    reason: '值长 0-2 MAL、≥3 CLEAN → 3',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-PTMSI-SIGNATURE-FIX3',
+    spec: '24008', row: 'p-tmsi signature', domain: 'dtapFixed', len: 3, content: 'random',
+    reason: 'tshark 按规范定长 3B 深挖，长度档外值 L=1 → exception（防御性钉形）',
+    evidence: 'tmp/_bi_probe15.mjs + BI 普查（P-TMSI signature 2 值长 1 实证）',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-PTMSI-SIGNATURE2-FIX3',
+    spec: '24008', row: 'p-tmsi signature 2', domain: 'dtapFixed', len: 3, content: 'random',
+    reason: '同 P-TMSI signature（规范定长 3B）',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-RAI2-FIX6',
+    spec: '24008', row: 'routing area identification 2', domain: 'dtapFixed', len: 6, content: 'zero',
+    reason: 'RAI 规范定长 6B（MCC/MNC/LAC）——tshark e212 深挖按定长取字段',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-LAI2-FIX5',
+    spec: '24008', row: 'location area identification 2', domain: 'dtapFixed', len: 5, content: 'zero',
+    reason: 'LAI 规范定长 5B（MCC/MNC/LAC）——tshark e212 深挖按定长取字段',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-MAC-FIX4',
+    spec: '24008', row: 'message authentication code', domain: 'dtapFixed', len: 4, content: 'random',
+    reason: 'AKA MAC 规范定长 4B（32 位消息认证码）',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-NRI-CONTAINER-FIX2',
+    spec: '24008', row: 'network resource identifier container', domain: 'dtapFixed', len: 2, content: 'random',
+    reason: 'NRI 容器规范定长 2B',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-DCN-ID-FIX2',
+    spec: '24008', row: 'dcn-id', domain: 'dtapFixed', len: 2, content: 'random',
+    reason: 'DCN-ID 规范定长 2B（16 位域）',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-PLMN-CN-OPERATOR-FIX3',
+    spec: '24008', row: 'plmn identity of the cn operator', domain: 'dtapFixed', len: 3, content: 'zero',
+    reason: 'PLMN 规范定长 3B（MCC/MNC 半八位组编码）',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-PDP-CONTEXT-STATUS-FIX2',
+    spec: '24008', row: 'pdp context status', domain: 'dtapFixed', len: 2, content: 'random',
+    reason: '状态位图规范定长 2B',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-UPLINK-DATA-STATUS-FIX2',
+    spec: '24008', row: 'uplink data status', domain: 'dtapFixed', len: 2, content: 'random',
+    reason: '状态位图规范定长 2B',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-MBMS-CONTEXT-STATUS-FIX2',
+    spec: '24008', row: 'mbms context status', domain: 'dtapFixed', len: 2, content: 'random',
+    reason: '状态位图规范定长 2B',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-RAND-FIX16',
+    spec: '24008', row: 'authentication parameter rand', domain: 'dtapFixed', len: 16, content: 'random',
+    reason: 'RAND 规范定长 16B（128 位认证随机数）',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-AUTN-LEGACY-FIX16',
+    spec: '24008', row: 'auth. parameter autn', domain: 'dtapFixed', len: 16, content: 'random',
+    reason: 'AUTN 规范定长 16B（双行名变体之一——schema 版本间行名 Auth. parameter AUTN 与 Authentication parameter AUTN 并存）',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-AUTN-FIX16',
+    spec: '24008', row: 'authentication parameter autn', domain: 'dtapFixed', len: 16, content: 'random',
+    reason: 'AUTN 规范定长 16B（双行名变体之二）',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-DRX-PARAMETER-FIX2',
+    spec: '24008', row: 'drx parameter', domain: 'dtapFixed', len: 2, content: 'random',
+    reason: 'DRX 参数规范定长 2B',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
+  {
+    id: 'DTAP-TIME-ZONE-AND-TIME-FIX7',
+    spec: '24008', row: 'time zone and time', domain: 'dtapFixed', len: 7, content: 'zero',
+    reason: 'Time zone and time 规范定长 7B（年月日时分秒+时区半八位组）',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+  },
 ];
 
 function domainValueHit(spec, iei) {
   for (const q of VALUE_DOMAIN_ROWS) {
+    if (!q.iei) continue; // BJ：row 条目不经 iei 匹配器
     if (q.spec === spec && q.iei === iei) return q;
+  }
+  return null;
+}
+
+function rowDomainHit(spec, name) {
+  const k = quirkRowKey(name);
+  for (const q of VALUE_DOMAIN_ROWS) {
+    if (q.spec !== spec || !q.row || q.row !== k) continue;
+    return q;
   }
   return null;
 }
@@ -12282,6 +12556,11 @@ function semanticPfcpValue(name, rng) {
   if (v) recordSemanticHit('pfcp', name, null);
   return v;
 }
+
+// BI 批（v1.65.0）24008 病行语义形 semanticDtapValue 已于 BJ 批（v1.66.0）退役：
+// 16 形迁 nas_quirks.mjs VALUE_DOMAIN_ROWS 行名键（dtapFixed 域形，len 同 BI 探针
+// CLEAN 档、content='random' 原值循环填充升级）；停采三行迁 SAMPLE_STOP_ROWS 行名键。
+// 行名归一口径（trim + 去「(n.n)」注记 + lowercase）由 quirks.rowKey 承接。
 
 function semanticGtpValueImpl(name, rng, spec) {
   const n = String(name || '').trim().replace(/\s*\(\d+(?:\.\d+)*\)\s*$/, '').toUpperCase();
@@ -12973,12 +13252,27 @@ function sampleSchema(schema, N, seed, msgRe = null) {
             const mandatory = /^M$/i.test((r.presence || '').trim());
             if (/extended protocol discriminator|security header type|message (identity|type)/.test(name)) continue; // 头行自动
             if (/^spare half octet$/.test(name) || /^protocol discriminator$/.test(name)) continue; // spare/PD 自动
+            // BJ 批（v1.66.0）：行守卫 consult 迁 nas_quirks.mjs SAMPLE_STOP_ROWS 行名键
+            //（rowStopHit）——BI 期 24008 四行硬编码 continue（skip indicator 钉 0 §10.3.1 /
+            // Emergency Number List 上下文敏感停采 / Additional update type TV1-tF 证据空洞 /
+            // Integrity algorithm TV1-t9 证据空洞）迁登记表，continue 落点与硬编码同位
+            //（行 rng 判定前，采样流零漂移；条目见 nas_quirks.mjs DTAP-* 四条）。
+            if (rowStopHit(spec, name)) continue;
             if (iei && r.iei.includes('TBD')) continue; // 规范 TBD 占位行不可编码
             if (fmt === 'UNK') { if (!mandatory) continue; ok = false; break; } // NOTE 行跳过；FFS 必配行不可采样
             if (!mandatory && rng() > (fmt === 'T' ? 0.3 : 0.4)) continue; // 可选行随机缺席
             if (fmt === 'VP') continue; // TP-VP 长度随 octet1 的 VPF 位：自动 MTI 行写 msgType（VPF=0）→ 恒缺席
             let value;
-            if (fmt === 'VH' || fmt === 'TV1') { value = rnd(16); }
+            // BI 批（v1.65.0）：24008 事务标识半组（CC/SM 首八位组 bit8=TI flag、bit7-5=TI）
+            // ——TI nibble ∈ 8-f 置位 TI flag ⇒ tshark 吃掉第二八位组作 TI 扩展（tie 字段），
+            // 消息类型移位第三八位组整帧错位（HDR/NO_EVIDENCE 级联 + 短帧不接管；全量普查
+            // HDR 729 起单一根因，tmp/_bi_probe11.mjs 帧 2249 定案）。
+            if (fmt === 'VH' || fmt === 'TV1') {
+              // 限 rnd(7)：TI 0-6 合法域（24.007 §11.2.2.1 TI=7 保留——tshark 对 TI=7 也走
+              // 移位解析：msg type 读到第三八位组，tmp/_bi 4/11/16 号帧定案）；flag 恒 0
+              //（schema 模型的唯一头形态），TI 值多样性保留；其余行 0-f。
+              value = (schema.spec === '24008' && fmt === 'VH' && /^transaction identifier$/.test(name)) ? rnd(7) : rnd(16);
+            }
             else if (fmt === 'T') { value = null; }
             else if (fmt === 'ADDR') {
               const n = rnd(7) * 2; // 偶数个有效半八位组（免半字节填充）
@@ -12989,6 +13283,28 @@ function sampleSchema(schema, N, seed, msgRe = null) {
             else {
               value = sampleRowValue(r, fmt, flen);
               if (value == null) { ok = false; break; }
+            }
+            // BJ 批（v1.66.0）：24008 值域 consult 链（nas_quirks.mjs 行名键）——BI 硬编码
+            // 零平铺政策进 consult 链架构：**默认零平铺**（BI 绿线基线保持——DTAP 深语义
+            // 解剖面对随机字节大面积病〔BI 普查 94%〕，全域随机步幅过大；零平铺是 GTP 族
+            // BC 期全域政策的对应物）；DOMAIN 行名键命中 → dtapFixed 派生形（q.len 探针
+            // CLEAN 档定长 + 原值循环填充，零额外 rng、值多样性保留在内容字节——值域化
+            // 开域通道，病行 wide 归因降级 content='zero'）；CANON 行名键命中 → pattern
+            // 平铺（长度不变）。BI 16 语义形（semanticDtapValue）迁 DOMAIN dtapFixed 条目
+            //（len 不变、content=random 升级）。后续批次逐行开域（每行 wide 证据为准）。
+            if (schema.spec === '24008' && value != null) {
+              const dq = rowDomainHit(spec, name);
+              if (dq) value = domainDerive(dq.domain, value, dq);
+              else {
+                const cq = rowCanonicalizeHit(spec, name);
+                if (cq) {
+                  value = typeof value === 'number'
+                    ? parseInt(cq.pattern, 16)
+                    : Uint8Array.from({ length: value.length }, () => parseInt(cq.pattern, 16));
+                } else {
+                  value = typeof value === 'number' ? 0 : new Uint8Array(value.length);
+                }
+              }
             }
             parts.push({ rowIdx: ri, value });
           }
@@ -13025,7 +13341,7 @@ function sampleSchema(schema, N, seed, msgRe = null) {
 //                 03**（探针定案：次字节 04 触发子类型深挖——probe1 三 MAL 形
 //                 02048e/0004020304/ff048e 次字节全 04；次字节 01/02/03 矩阵全 CLEAN），
 //                 其余尾字节保留原采样随机性。
-function domainDerive(domain, v) {
+function domainDerive(domain, v, q = null) {
   if (domain === 'tbcdDigits') {
     const out = Uint8Array.from(v);
     if (out.length) out[0] = 0x00; // 首字节=计数域，0 = 不声明数字（尾随被容忍）
@@ -13060,13 +13376,25 @@ function domainDerive(domain, v) {
     }
     return v;
   }
+  // BJ 批（v1.66.0）：24008 dtapFixed 域形（BI semanticDtapValue 迁 nas_quirks 行名键
+  // 条目）——q.len = 探针 CLEAN 档定形值长（tmp/_bi_probe15.mjs 行×值长矩阵）；
+  // content='random' 原值循环填充（零额外 rng，值多样性保留在内容字节——BI 全零形的
+  // 多样化推广）；content='zero' 全零定形（内容敏感行降级档）。
+  if (domain === 'dtapFixed') {
+    const n = q && q.len ? q.len : v.length;
+    const out = new Uint8Array(n);
+    if (q && q.content !== 'zero' && v.length) {
+      for (let i = 0; i < n; i++) out[i] = v[i % v.length];
+    }
+    return out;
+  }
   return v;
 }
 
 function applyDomainHit(spec, iei, value) {
   const q = domainValueHit(spec, iei);
   if (!q) return value;
-  return domainDerive(q.domain, value);
+  return domainDerive(q.domain, value, q);
 }
 
 function gtpcSampleValue(r, schema, rng, depth = 0) {
@@ -13461,7 +13789,7 @@ function gtpuKvLine(obj, skip) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, GTPU_IE_GEOMETRY, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, valueRemapHit, canonicalizeHit, domainValueHit, tsharkArtifactMatch, SAMPLE_STOP_ROWS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, VALUE_DOMAIN_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, GTPU_IE_GEOMETRY, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutRows, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, quirkRowKey, rowStopHit, valueRemapHit, canonicalizeHit, rowCanonicalizeHit, domainValueHit, rowDomainHit, tsharkArtifactMatch, SAMPLE_STOP_ROWS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, VALUE_DOMAIN_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。

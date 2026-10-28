@@ -783,7 +783,7 @@
   "minutes": 23,
   "free": false,
   "file": "",
-  "steps": 5,
+  "steps": 6,
   "quizN": 5,
   "prereq": [
    "mk",
