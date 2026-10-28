@@ -92,11 +92,9 @@
     seen[id] = true;
     var c = BY[id];
     if (!c || !c.file) return Promise.reject(new Error('该模块不在免费层: ' + id));
-    var pre = Promise.resolve();
-    (c.prereq || []).forEach(function (p) {
-      pre = pre.then(function () { return ensure(p, seen); });
-    });
-    return pre.then(function () { return loadFile(c.file); });
+    /* v55.1 R7：prereq 分支并行装载（注册互不依赖），file 本体等闭包齐后再装 */
+    return Promise.all((c.prereq || []).map(function (p) { return ensure(p, seen); }))
+      .then(function () { return loadFile(c.file); });
   }
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
   function currentId() {
@@ -117,7 +115,7 @@
       '<h2>' + esc(label) + '</h2>' +
       '<p class="g-sub">本站为免费层：M0 接入全流程、M1 连接建立、M2 系统消息、M3 寻呼与 DRX 四课与全部工具页开放体验</p>' +
       '<ul><li>✓ 本模块含原表全量字段树 / 失败分支全集 / 决策点 / 结课测验</li>' +
-      '<li>✓ 条款引用全程 §徽章直连 3GPP 原文短引' + '（1987 锚点），复核台账见站内《复核台账》页 audit.html</li>' +
+      '<li>✓ 条款引用全程 §徽章直连 3GPP 原文短引' + '（1999 锚点），复核台账见站内《复核台账》页 audit.html</li>' +
       '<li>✓ 买断后浏览器本地永久离线可用</li></ul>' +
       '<div class="g-price">完整版（77 个模块）· 内测期全套 <b>¥99</b> / 单模块 <b>¥12</b></div>' +
       '<div class="g-actions"><a class="btn primary" href="README.md#获取完整版">获取完整版</a>' +
@@ -146,7 +144,24 @@
   }
   window.addEventListener('hashchange', render);
   render();
-  loadFile('spec-quotes.js');
+  /* v55.1 R7：spec-quotes 延后装载期间 §徽章点击给轻提示；装载后自带委托接管、本处理器静默 */
+  document.addEventListener('click', function (e) {
+    if (window.RRC && window.RRC.SpecQuotes) return;
+    var b = e.target && e.target.closest ? e.target.closest('.ref-badge') : null;
+    if (!b) return;
+    var sib = b.nextElementSibling;
+    if (sib && sib.classList && sib.classList.contains('ref-pop')) { sib.parentNode.removeChild(sib); return; }
+    var d = document.createElement('div');
+    d.className = 'ref-pop';
+    d.textContent = '短引数据装载中……（首帧后延后装载，稍候片刻即可点开原文短引）';
+    b.parentNode.insertBefore(d, b.nextSibling);
+  });
+  loadFile('spec-quotes.js').then(function () {
+    var n;
+    while ((n = document.querySelector('.ref-pop'))) {
+      if (n.parentNode) n.parentNode.removeChild(n);
+    }
+  }).catch(function () {});
 })();
 </script>
 <script>
