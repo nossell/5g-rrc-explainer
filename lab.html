@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.73.0";
+const APP_VERSION = "1.74.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -8405,10 +8405,15 @@ function diffGtpSchema(left, right) {
   return { findings, counts };
 }
 
-// BQ（v1.73.0）：IE 定义节行级 diff——dtap 版本演进热点在 10.5.x 节增删/改名/行变化
+// BQ（v1.73.0）：IE 定义节 diff——dtap 版本演进热点在 10.5.x 节增删/改名
 //（24008 g40→k10 新增 10.5.4.21.x/10.5.6.3.1x 六节实证，消息表层反而稳定），为
-// diffGtpSchema 的 gtp-ie-* 的 dtap 对应物。行级复用 diffMessageRows（nas-row-* kind，
-// msg 字段 = 节引用名）；ies[].grouped 子结构 diff 挂后续（GTP 侧 gtp-grouped-* 对应物）。
+// diffGtpSchema 的 gtp-ie-* 的 dtap 对应物。
+// 勘正（BR 批 v1.74.0，独立审计 2026-10-30 实证）：24 系 ies 键并集 = name/layouts
+//(,csn1,fillFrom)——无 rows 无 grouped。BQ 期「行级复用 diffMessageRows」在
+// 生产 schema 上恒空转（rows 双侧 undefined→[]），实际产出止于节级。行级职责
+// 重述：消息表行级 = messages[].rows（diffMessageRows 仍用）；IE 节行级 =
+// layouts[].octets[].fields 位表（diffNasIeLayouts，本批接入）。grouped 对应物
+// 在 24 系不存在（挂案收案，gtp-grouped-* 仅 GTP 族适用）。
 function diffNasIes(left, right, findings) {
   const li = left.ies || {};
   const ri = right.ies || {};
@@ -8423,9 +8428,57 @@ function diffNasIes(left, right, findings) {
       findings.push({ severity: 'info', kind: 'nas-ie-name', msg: `IE 定义节 ${ref} 名称变更「${l.name || ''}」→「${r.name || ''}」`, loc: { msg: ref, ref } });
     }
     diffMessageRows(ref, { rows: l.rows || [] }, { rows: r.rows || [] }, findings);
+    diffNasIeLayouts(ref, l, r, findings);
   }
   for (const ref of Object.keys(li)) {
     if (!ri[ref]) findings.push({ severity: 'info', kind: 'nas-ie-del', msg: `删除 IE 定义节 ${ref}（${li[ref].name || ''}）`, loc: { msg: ref, ref } });
+  }
+}
+
+// BR（v1.74.0）：24 系 IE 节位表 diff（对齐 GTP 侧 diffGtpIeLayout 语义，kind 用
+// nas-ie-* 命名空间分离）。只比 layouts[0]（多图为同 IE 变体图——图数变化单列
+// nas-ie-figs 留痕）；全 info 档：位表/文法是建库呈现层，线缆破坏由消息表行
+// nas-row-format 承担，且 dtap IE 节自身无 format 键、framed 未判不升档。
+function diffNasIeLayouts(ref, lie, rie, findings) {
+  const L = { msg: ref, ref };
+  const ll = (lie.layouts || [])[0], rl = (rie.layouts || [])[0];
+  // 图数变化只在双侧都有布局时报（单侧缺失走 nolayout——0↔n 与覆盖差异同义，不双计）
+  if (ll && rl && (lie.layouts || []).length !== (rie.layouts || []).length) {
+    findings.push({ severity: 'info', kind: 'nas-ie-figs', msg: `${ref}：位布局图数变化 ${(lie.layouts || []).length} → ${(rie.layouts || []).length}`, loc: L });
+  }
+  if (ll && rl) {
+    const lmap = mapWithOrdinal(ll.octets || [], (r) => String(r.octet));
+    const rmap = mapWithOrdinal(rl.octets || [], (r) => String(r.octet));
+    for (const [k, rr] of rmap) {
+      const lr = lmap.get(k);
+      if (!lr) { findings.push({ severity: 'info', kind: 'nas-ie-layout', msg: `${ref}：布局新增八位组行「${rr.octet}」（IE 总长变化——框架自界性未判，宿主行框架变化见 nas-row-format）`, loc: L }); continue; }
+      const fkey = (f) => (String(f.name).split('\n')[0] || f.name).trim(); // 主名（换行脚注句不算字段变更）
+      const lf2 = mapWithOrdinal(lr.fields || [], fkey);
+      const rf2 = mapWithOrdinal(rr.fields || [], fkey);
+      for (const [nm, f] of rf2) {
+        const g = lf2.get(nm);
+        if (!g) { findings.push({ severity: 'info', kind: 'nas-ie-field', msg: `${ref}：行「${rr.octet}」新增字段 ${nm}（bit ${f.hi}-${f.lo}）`, loc: L }); continue; }
+        if (g.bits !== f.bits || g.hi !== f.hi || g.lo !== f.lo) {
+          findings.push({ severity: 'info', kind: 'nas-ie-field', msg: `${ref}：行「${rr.octet}」字段 ${nm} 位区间变化（bit ${g.hi}-${g.lo} → ${f.hi}-${f.lo}）`, loc: L });
+        }
+      }
+      for (const [nm, g] of lf2) {
+        if (!rf2.has(nm)) findings.push({ severity: 'info', kind: 'nas-ie-field', msg: `${ref}：行「${rr.octet}」删除字段 ${nm}（bit ${g.hi}-${g.lo}）`, loc: L });
+      }
+    }
+    for (const [k, lr] of lmap) {
+      if (!rmap.has(k)) findings.push({ severity: 'info', kind: 'nas-ie-layout', msg: `${ref}：布局删除八位组行「${lr.octet}」（IE 总长变化——同上未判）`, loc: L });
+    }
+  } else if (rl && !ll) {
+    findings.push({ severity: 'info', kind: 'nas-ie-nolayout', msg: `${ref}：旧版本无位布局（建库覆盖差异，非规范变更）`, loc: L });
+  } else if (ll && !rl) {
+    findings.push({ severity: 'info', kind: 'nas-ie-nolayout', msg: `${ref}：新版本无位布局（建库覆盖差异，非规范变更）`, loc: L });
+  }
+  if (lie.csn1 || rie.csn1) {
+    if (JSON.stringify(lie.csn1 ?? null) !== JSON.stringify(rie.csn1 ?? null)) {
+      const how = lie.csn1 ? (rie.csn1 ? '文法内容变更' : '旧有新无') : '旧无新有';
+      findings.push({ severity: 'info', kind: 'nas-ie-csn1', msg: `${ref}：CSN.1 文法源变化（${how}）`, loc: L });
+    }
   }
 }
 
@@ -12071,6 +12124,12 @@ async function ingestDocxZip(zipBytes, { spec, version }) {
 // nas_tshark_oracle dtapFamily 三处字面量的唯一权威源（审计发现加族需 5+ 处手改的结构债）。
 const DTAP_SPECS = ['24008', '24011', '24080', '44018'];
 
+// BS 批（v1.75.0）：diff 内核选择名单——「消息表走 diffNasSchema」的 spec 全集
+//（= dtap 四族 + EPS/5GS NAS 两族）。与 DTAP_SPECS 分立：DTAP_SPECS 还被采样器
+// dtapSpec / nasgate ORACLE_DTAP / oracle dtapFamily 消费（GSMTAP dtap 面 TI 半组
+// 特判等），24301/24501 采样走 gate:nasrt 既有路径，不得混入。
+const MSG_TABLE_SPECS = [...DTAP_SPECS, '24301', '24501'];
+
 // ---- SAMPLE_STOP_ROWS：采样器行守卫（停采） --------------------------------
 // 匹配条件全 AND：spec / ieis / msgTypes（null = 任意消息）/ fmt（null = 任意格式）。
 const SAMPLE_STOP_ROWS = [
@@ -14155,7 +14214,7 @@ function gtpuKvLine(obj, skip) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, GTPU_IE_GEOMETRY, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutRows, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, quirkRowKey, rowStopHit, valueRemapHit, canonicalizeHit, rowCanonicalizeHit, domainValueHit, rowDomainHit, tsharkArtifactMatch, DTAP_SPECS, SAMPLE_STOP_ROWS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, VALUE_DOMAIN_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, GTPU_IE_GEOMETRY, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutRows, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, quirkRowKey, rowStopHit, valueRemapHit, canonicalizeHit, rowCanonicalizeHit, domainValueHit, rowDomainHit, tsharkArtifactMatch, DTAP_SPECS, MSG_TABLE_SPECS, SAMPLE_STOP_ROWS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, VALUE_DOMAIN_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
