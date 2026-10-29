@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.70.0";
+const APP_VERSION = "1.73.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -8405,6 +8405,30 @@ function diffGtpSchema(left, right) {
   return { findings, counts };
 }
 
+// BQ（v1.73.0）：IE 定义节行级 diff——dtap 版本演进热点在 10.5.x 节增删/改名/行变化
+//（24008 g40→k10 新增 10.5.4.21.x/10.5.6.3.1x 六节实证，消息表层反而稳定），为
+// diffGtpSchema 的 gtp-ie-* 的 dtap 对应物。行级复用 diffMessageRows（nas-row-* kind，
+// msg 字段 = 节引用名）；ies[].grouped 子结构 diff 挂后续（GTP 侧 gtp-grouped-* 对应物）。
+function diffNasIes(left, right, findings) {
+  const li = left.ies || {};
+  const ri = right.ies || {};
+  for (const ref of Object.keys(ri)) {
+    const r = ri[ref];
+    const l = li[ref];
+    if (!l) {
+      findings.push({ severity: 'info', kind: 'nas-ie-add', msg: `新增 IE 定义节 ${ref}（${r.name || ''}）`, loc: { msg: ref, ref } });
+      continue;
+    }
+    if ((l.name || '') !== (r.name || '')) {
+      findings.push({ severity: 'info', kind: 'nas-ie-name', msg: `IE 定义节 ${ref} 名称变更「${l.name || ''}」→「${r.name || ''}」`, loc: { msg: ref, ref } });
+    }
+    diffMessageRows(ref, { rows: l.rows || [] }, { rows: r.rows || [] }, findings);
+  }
+  for (const ref of Object.keys(li)) {
+    if (!ri[ref]) findings.push({ severity: 'info', kind: 'nas-ie-del', msg: `删除 IE 定义节 ${ref}（${li[ref].name || ''}）`, loc: { msg: ref, ref } });
+  }
+}
+
 function diffNasSchema(left, right) {
   const findings = [];
   const lmsg = left.messages || {};
@@ -8440,6 +8464,7 @@ function diffNasSchema(left, right) {
       findings.push({ severity: 'info', kind: 'nas-msg-del', msg: `删除消息 ${name}`, loc: { msg: name } });
     }
   }
+  diffNasIes(left, right, findings);
   const sevRank = { break: 0, warn: 1, info: 2, ok: 3 };
   findings.sort((a, b) => sevRank[a.severity] - sevRank[b.severity]);
   const counts = { break: 0, warn: 0, info: 0, ok: 0 };
@@ -12481,10 +12506,10 @@ const VALUE_DOMAIN_ROWS = [
   //      rng，值多样性保留在内容字节）；wide 4 seed 0/0 绿线为入表证据权威。
   {
     id: 'DTAP-EUTRAN-INTER-RAT-CONTAINER-FIX7',
-    spec: '24008', row: 'e-utran inter rat information container', domain: 'dtapFixed', len: 7, content: 'zero',
-    reason: '值长 1-6 MAL、≥7 CLEAN——内层 [len][…] 结构（tshark 按容器内长度前缀解析）；BM 复核负结果（v1.69.0）：bcdAll/lenPrefix/lenPrefix0/bcdHead3 全 MAL 12/12——容器内容为嵌入 NAS 消息语义深挖（非长度前缀病），零值外全域病，合成合法嵌入 NAS 不在域形能力内 → 保持 zero',
-    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed + tmp/_bm_probe.mjs（四形全 MAL 负结果）',
-    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）；BM 负结果复核（v1.69.0）',
+    spec: '24008', row: 'e-utran inter rat information container', domain: 'eutranCap',
+    reason: '10.5.5.27 值 = 36.331 UE-EUTRA-Capability APER（tshark 走 lte-rrc 解剖器——BM「嵌入 NAS 消息」方向误判勘正，BO PDML 定位 rrc/lte-rrc 字段路由）；BI 期值长 1-6 MAL、≥7 CLEAN（零模板）；BO 开域：零模板 + 安全位掩码（单位矩阵 SAFE 25/56、首字节全扫 SAFE 0-31；组合形 run50 双宿主双上下文全 CLEAN）——b0&1f/b1&1f/b2&fc/b3&0f/b4&e0/b5=0（全 UNSAFE）/b6&80，24 位多样性。同宿主 UTRAN 容器（inter rat information container）开域尝试撤回：rrc.start_CS 位域重组呈现性质（tshark 重组值 ≠ 帧切片，零值恒等非零即差）四 seed 实证 26 不符全归因，非值域可修——回默认零平铺',
+    evidence: 'tmp/_bi_probe15.mjs + tmp/_bo_probe.mjs（PDML 诊断 lte-rrc 路由）+ tmp/_bo_probe2.mjs（位矩阵/首字节扫描）+ tmp/_bo_probe3.mjs（组合形 run50）+ tmp/_bo_probe4.mjs（UTRAN 撤回实证）',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）；BM 负结果复核（v1.69.0，后证候选形方向误判）；BO 开域 eutranCap（v1.71.0）；UTRAN 同宿主行撤回记档（v1.71.0）',
   },
   {
     id: 'DTAP-SUPPORTED-CODEC-LIST-FIX4',
@@ -12495,10 +12520,10 @@ const VALUE_DOMAIN_ROWS = [
   },
   {
     id: 'DTAP-NBIFOM-CONTAINER-FIX2',
-    spec: '24008', row: 'nbifom container', domain: 'dtapFixed', len: 2, content: 'zero',
-    reason: '奇数长 MAL、偶数 CLEAN → 2；BM 复核负结果（v1.69.0）：hdr00/hdr01/bcdAll 全 MAL 12/12——[header][payload] 两形均病（容器内容语义深挖）→ 保持 zero',
-    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed + tmp/_bm_probe.mjs（三形全 MAL 负结果）',
-    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）；BM 负结果复核（v1.69.0）',
+    spec: '24008', row: 'nbifom container', domain: 'nbifomElem',
+    reason: '10.5.6.21 值 = 24.161 NBIFOM 参数列表（tshark nbifom.param_id/param_contents.len 字段实证 [param_id][len][contents] 重复列）；BM 负结果勘正：hdr01/hdr00 系 [code][rand] 无载荷体自相矛盾形（len 声称 N 不给 N 字节必 MAL）非全域病，BI 期偶长 CLEAN/奇长 MAL 系零值元素列自洽性；BO 开域：单元素正形 [c][n][n B 内容]（n 2-5 深挖码 {1,2,3,7,8} 拒空载荷；内容 v 循环 rand/zero 双档全 CLEAN）——毒码 {4,5} zero/任意内容全 MAL（八形抢救负结果）映射出域（4→6、5→7）',
+    evidence: 'tmp/_bi_probe15.mjs + tmp/_bo_probe.mjs（256 码扫 + PDML 诊断）+ tmp/_bo_probe2.mjs（码×长矩阵/多元素）+ tmp/_bo_probe3.mjs（域形 run50 双宿主全 CLEAN）',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）；BM 负结果复核（v1.69.0，后证候选形误判）；BO 开域 nbifomElem（v1.71.0）',
   },
   {
     id: 'DTAP-LSA-IDENTIFIER-FIX3',
@@ -13696,6 +13721,38 @@ function domainDerive(domain, v, q = null) {
     const out = Uint8Array.from(v);
     out[0] = v[0] | 0x08;
     return out;
+  }
+  // BO 批（v1.71.0）：24008 容器行开域（BM 负结果两处勘正在案——hdr01/hdr00 系 [code][rand]
+  // 无载荷体自相矛盾形、E-UTRAN「嵌入 NAS」方向误判；探针 tmp/_bo_probe1-4.mjs）：
+  //   nbifomElem  NBIFOM container（10.5.6.21 值 = 24.161 NBIFOM 参数列表，tshark
+  //               nbifom.param_id/param_contents.len 字段实证 [param_id][len][contents]
+  //               重复列）——单元素正形 [c][n][n B 内容]：n 2-5（深挖码 {1,2,3,7,8} 拒空
+  //               载荷），内容 v 循环保留多样性（rand/zero 双档 CLEAN）；毒码 {4,5}
+  //               zero/任意内容全 MAL（八形抢救负结果）映射出域（4→6、5→7）；
+  //   eutranCap   E-UTRAN inter RAT information container（10.5.5.27 值 = 36.331
+  //               UE-EUTRA-Capability APER——tshark 走 lte-rrc 解剖器，非 NAS 面）——
+  //               零模板 + 安全位掩码（单位矩阵 SAFE 25/56、首字节全扫 SAFE 0-31；
+  //               组合形 run50 双宿主双上下文全 CLEAN）：b0&1f b1&1f b2&fc b3&0f
+  //               b4&e0 b5=0（全 UNSAFE）b6&80，24 位多样性。
+  //   撤回记档（同批）：同宿主 UTRAN 容器（inter rat information container，10.5.5.24，
+  //   rrc 解剖器）首字节单域形探针 100/100 CLEAN 后 wide 撤回——tshark 对 START-CS
+  //   位域做重组呈现（rrc.start_CS 重组值 ≠ 帧切片，零值恒等、非零即差），四 seed
+  //   26 不符全归因此（tmp/_bo_probe4.mjs + sweep 实证）；位域呈现性质非值域可修，
+  //   回默认零平铺。教训：值域探针判定面须含 oracle compare（单查 malformed 对
+  //   位域/重组呈现字段失明——BG 178/142「矩阵 CLEAN 不足以退役」的呈现面升维）。
+  if (domain === 'nbifomElem') {
+    let c = v.length ? v[0] : 0;
+    if (c === 4) c = 6; else if (c === 5) c = 7;
+    const n = 2 + (v.length > 1 ? v[1] % 4 : 0);
+    const out = new Uint8Array(2 + n);
+    out[0] = c;
+    out[1] = n;
+    for (let i = 0; i < n; i++) out[2 + i] = v.length ? v[(i + 2) % v.length] : 0;
+    return out;
+  }
+  if (domain === 'eutranCap') {
+    const g = (i) => (i < v.length ? v[i] : 0);
+    return Uint8Array.from([g(0) & 0x1f, g(1) & 0x1f, g(2) & 0xfc, g(3) & 0x0f, g(4) & 0xe0, 0x00, g(6) & 0x80]);
   }
   return v;
 }
