@@ -814,7 +814,7 @@
   "minutes": 22,
   "free": false,
   "file": "",
-  "steps": 6,
+  "steps": 7,
   "quizN": 5,
   "prereq": [
    "m41"
@@ -1189,7 +1189,7 @@
   "minutes": 26,
   "free": false,
   "file": "",
-  "steps": 5,
+  "steps": 9,
   "quizN": 5,
   "prereq": [
    "m1",

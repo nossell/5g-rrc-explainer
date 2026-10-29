@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.66.0";
+const APP_VERSION = "1.70.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -12042,6 +12042,10 @@ async function ingestDocxZip(zipBytes, { spec, version }) {
 // malformed 为准；本批最终态 = CANON 5（173/121/178/142/51）+ DOMAIN 6（179/186 新迁）。**
 // 注意：本文件进 build.js 单作用域打包清单（nassample 依赖）——只允许顶层 const/function。
 
+// BL 批（v1.68.0）：dtap 族集合共享导出——nassample dtapSpec / nasgate ORACLE_DTAP /
+// nas_tshark_oracle dtapFamily 三处字面量的唯一权威源（审计发现加族需 5+ 处手改的结构债）。
+const DTAP_SPECS = ['24008', '24011', '24080', '44018'];
+
 // ---- SAMPLE_STOP_ROWS：采样器行守卫（停采） --------------------------------
 // 匹配条件全 AND：spec / ieis / msgTypes（null = 任意消息）/ fmt（null = 任意格式）。
 const SAMPLE_STOP_ROWS = [
@@ -12104,6 +12108,97 @@ const SAMPLE_STOP_ROWS = [
     batch: 'BI 硬编码立例（v1.65.0）；BJ 迁登记表（v1.66.0）',
   },
   {
+    id: 'DTAP-RR-SKIP-INDICATOR-ZERO',
+    spec: '44018', row: 'skip indicator',
+    reason: '44018 RR DCCH 形（mtOff==1）octet1 高半组随机值触发 tshark RR 头分支错位——msg_rr_type 显示 octet1 原值（BK wide seed 2024 帧 #19 msg_type 0xe6 = skip e|PD6 实证）；skip 钉 0 规范形（24.007 §11.3.1 skip indicator 恒 0000 的 RR 侧同构），与 24008 DTAP-SKIP-INDICATOR-ZERO 同款处置（编码器 VH 缺省 0）',
+    evidence: 'tmp/_bk_probe2.mjs（skip 9/10 帧 CLEAN 的窄域）+ 44018 wide 归因（skip 随机大面积错位）',
+    batch: 'BK（v1.67.0）',
+  },
+  {
+    id: 'DTAP-RR-EXTENDED-TSC-SET-STOP',
+    spec: '44018', row: 'extended tsc set',
+    reason: 'Extended TSC Set（10.5.2.91a，Rel-18 新 IE，TV 6D/6E）——tshark 4.6.8 RR 表无此 IEI：ASSIGNMENT COMMAND 解析到该行即停止并产 gsm_a.rr.extraneous_data（dissector bug 注记）覆盖其后字节（wide 帧 #101-#107 实证；单帧 _bk18_tsc.mjs 去 t109/t110 仍系 extraneous 前段病——根因=未知 IEI 停解析）——tshark 无字段路径类（BI TV1 tF/t9 同定性），O 行缺席合法停采',
+    evidence: 'tmp/_bk18_tsc.mjs（对照）+ 44018 wide 归因（STRUCT 证据不落跨度 + 行无证据）',
+    batch: 'BK（v1.67.0）',
+  },
+  {
+    id: 'DTAP-RR-GROUP-CHANNEL-DESCRIPTION-STOP',
+    spec: '44018', row: 'group channel description',
+    reason: 'Group Channel Description（TV 0x16（10.5.2.63））——tshark 4.6.8 gsm_a.rr 剖面无该 IEI 路径：解析到该行即停止并产 extraneous_data（dissector bug 注记）覆盖其后字节，行自身与后续行全无证据（wide 触发行对齐归因 tmp/_bk18_diag 系）——tshark 无字段路径类（BI TV1 tF/t9 同定性），O 行缺席合法停采',
+    evidence: '44018 wide seed 2024 extraneous 起点对齐归因（触发行频次在案）',
+    batch: 'BK（v1.67.0）',
+  },
+  {
+    id: 'DTAP-RR-MBMS-SESSION-IDENTITY-STOP',
+    spec: '44018', row: 'mbms session identity',
+    reason: 'MBMS Session Identity（TV1 0x9_（10.5.2.71a））——tshark 4.6.8 gsm_a.rr 剖面无该 IEI 路径：解析到该行即停止并产 extraneous_data（dissector bug 注记）覆盖其后字节，行自身与后续行全无证据（wide 触发行对齐归因 tmp/_bk18_diag 系）——tshark 无字段路径类（BI TV1 tF/t9 同定性），O 行缺席合法停采',
+    evidence: '44018 wide seed 2024 extraneous 起点对齐归因（触发行频次在案）',
+    batch: 'BK（v1.67.0）',
+  },
+  {
+    id: 'DTAP-RR-GROUP-CIPHER-KEY-NUMBER-STOP',
+    spec: '44018', row: 'group cipher key number',
+    reason: 'Group Cipher Key Number（TV1 0x8_（10.5.2.63b））——tshark 4.6.8 gsm_a.rr 剖面无该 IEI 路径：解析到该行即停止并产 extraneous_data（dissector bug 注记）覆盖其后字节，行自身与后续行全无证据（wide 触发行对齐归因 tmp/_bk18_diag 系）——tshark 无字段路径类（BI TV1 tF/t9 同定性），O 行缺席合法停采',
+    evidence: '44018 wide seed 2024 extraneous 起点对齐归因（触发行频次在案）',
+    batch: 'BK（v1.67.0）',
+  },
+  {
+    id: 'DTAP-RR-MPRACH-DESCRIPTION-STOP',
+    spec: '44018', row: 'mprach description',
+    reason: 'MPRACH Description（TLV 0x23（10.5.2.39a））——tshark 4.6.8 gsm_a.rr 剖面无该 IEI 路径：解析到该行即停止并产 extraneous_data（dissector bug 注记）覆盖其后字节，行自身与后续行全无证据（wide 触发行对齐归因 tmp/_bk18_diag 系）——tshark 无字段路径类（BI TV1 tF/t9 同定性），O 行缺席合法停采',
+    evidence: '44018 wide seed 2024 extraneous 起点对齐归因（触发行频次在案）',
+    batch: 'BK（v1.67.0）',
+  },
+  {
+    id: 'DTAP-RR-ENHANCED-DTM-CS-RELEASE-INDICATION-STOP',
+    spec: '44018', row: 'enhanced dtm cs release indication',
+    reason: 'Enhanced DTM CS Release Indication（TV1 0xB_（10.5.2.46a））——tshark 4.6.8 gsm_a.rr 剖面无该 IEI 路径：解析到该行即停止并产 extraneous_data（dissector bug 注记）覆盖其后字节，行自身与后续行全无证据（wide 触发行对齐归因 tmp/_bk18_diag 系）——tshark 无字段路径类（BI TV1 tF/t9 同定性），O 行缺席合法停采',
+    evidence: '44018 wide seed 2024 extraneous 起点对齐归因（触发行频次在案）',
+    batch: 'BK（v1.67.0）',
+  },
+  {
+    id: 'DTAP-RR-MBMS-P-T-M-CHANNEL-DESCRIPTION-STOP',
+    spec: '44018', row: 'mbms p-t-m channel description',
+    reason: 'MBMS p-t-m Channel Description（TLV 0x24（10.5.2.71c））——tshark 4.6.8 gsm_a.rr 剖面无该 IEI 路径：解析到该行即停止并产 extraneous_data（dissector bug 注记）覆盖其后字节，行自身与后续行全无证据（wide 触发行对齐归因 tmp/_bk18_diag 系）——tshark 无字段路径类（BI TV1 tF/t9 同定性），O 行缺席合法停采',
+    evidence: '44018 wide seed 2024 extraneous 起点对齐归因（触发行频次在案）',
+    batch: 'BK（v1.67.0）',
+  },
+  {
+    id: 'DTAP-RR-GROUP-CHANNEL-DESCRIPTION-2-STOP',
+    spec: '44018', row: 'group channel description 2',
+    reason: 'Group Channel Description 2（TLV 0x78（10.5.2.63d））——tshark 4.6.8 gsm_a.rr 剖面无该 IEI 路径：解析到该行即停止并产 extraneous_data（dissector bug 注记）覆盖其后字节，行自身与后续行全无证据（wide 触发行对齐归因 tmp/_bk18_diag 系）——tshark 无字段路径类（BI TV1 tF/t9 同定性），O 行缺席合法停采',
+    evidence: '44018 wide seed 2024 extraneous 起点对齐归因（触发行频次在案）',
+    batch: 'BK（v1.67.0）',
+  },
+  {
+    id: 'DTAP-RR-VGCS-CIPHERING-PARAMETERS-STOP',
+    spec: '44018', row: 'vgcs ciphering parameters',
+    reason: 'VGCS Ciphering Parameters（TLV 0x04（10.5.2.43a））——tshark 4.6.8 gsm_a.rr 剖面无该 IEI 路径：解析到该行即停止并产 extraneous_data（dissector bug 注记）覆盖其后字节，行自身与后续行全无证据（wide 触发行对齐归因 tmp/_bk18_diag 系）——tshark 无字段路径类（BI TV1 tF/t9 同定性），O 行缺席合法停采',
+    evidence: '44018 wide seed 2024 extraneous 起点对齐归因（触发行频次在案）',
+    batch: 'BK（v1.67.0）',
+  },
+  {
+    id: 'DTAP-RR-MBMS-SESSION-PARAMETERS-LIST-STOP',
+    spec: '44018', row: 'mbms session parameters list',
+    reason: 'MBMS Session Parameters List（TLV 0x2A（10.5.2.71b））——tshark 4.6.8 gsm_a.rr 剖面无该 IEI 路径：解析到该行即停止并产 extraneous_data（dissector bug 注记）覆盖其后字节，行自身与后续行全无证据（wide 触发行对齐归因 tmp/_bk18_diag 系）——tshark 无字段路径类（BI TV1 tF/t9 同定性），O 行缺席合法停采',
+    evidence: '44018 wide seed 2024 extraneous 起点对齐归因（触发行频次在案）',
+    batch: 'BK（v1.67.0）',
+  },
+  {
+    id: 'DTAP-RR-TALKER-IDENTITY-STOP',
+    spec: '44018', row: 'talker identity',
+    reason: 'Talker Identity（TLV 0x2B（10.5.2.63c））——tshark 4.6.8 gsm_a.rr 剖面无该 IEI 路径：解析到该行即停止并产 extraneous_data（dissector bug 注记）覆盖其后字节，行自身与后续行全无证据（wide 触发行对齐归因 tmp/_bk18_diag 系）——tshark 无字段路径类（BI TV1 tF/t9 同定性），O 行缺席合法停采',
+    evidence: '44018 wide seed 2024 extraneous 起点对齐归因（触发行频次在案）',
+    batch: 'BK（v1.67.0）',
+  },
+  {
+    id: 'DTAP-RR-TALKER-PRIORITY-STATUS-STOP',
+    spec: '44018', row: 'talker priority status',
+    reason: 'Talker Priority Status（TLV 0x2C（10.5.2.63f））——tshark 4.6.8 gsm_a.rr 剖面无该 IEI 路径：解析到该行即停止并产 extraneous_data（dissector bug 注记）覆盖其后字节，行自身与后续行全无证据（wide 触发行对齐归因 tmp/_bk18_diag 系）——tshark 无字段路径类（BI TV1 tF/t9 同定性），O 行缺席合法停采',
+    evidence: '44018 wide seed 2024 extraneous 起点对齐归因（触发行频次在案）',
+    batch: 'BK（v1.67.0）',
+  },
+  {
     id: 'DTAP-EMERGENCY-NUMBER-LIST-STOP',
     spec: '24008', row: 'emergency number list',
     reason: '条目 [len][svc][BCD] 零值形在隔离帧 CLEAN、在帧内（前置 Mobile identity/GMM cause/TV1 族后）恒 exception（上下文敏感复合病同 51/178 定性）——值形/长度形均不可收口，行按缺席采样（O 行缺席合法）',
@@ -12123,6 +12218,71 @@ const SAMPLE_STOP_ROWS = [
     reason: 'TV1 t9——tshark 无字段路径（证据空洞同上）；O 行缺席合法',
     evidence: 'BI 全量普查 mismatch 归因',
     batch: 'BI 硬编码立例（v1.65.0）；BJ 迁登记表（v1.66.0）',
+  },
+  // ---- BL 批（v1.68.0）：44018 病族收口 STOP（msgs 消息域限定——tshark RR 解剖表
+  //      消息特定，同名行在他消息有路径门内 CLEAN 的 msgs 隔离；全部 O/C 行缺席合法）----
+  {
+    id: 'DTAP-RR-VGCS-AMR-CONFIG-STOP',
+    spec: '44018', row: 'vgcs amr configuration', msgs: 'CHANNEL RELEASE',
+    reason: 'tshark 4.6.8 RR 表对 IEI 0x7B（VGCS AMR Configuration）无解剖路径——解析到该行即停（隔离帧 0x7b 在场零字段/无 dtap 后续实证 tmp/_bl_pdml.mjs），帧内以 extraneous_data（dissector bug 注记）覆盖其后字节 → 行与后续行全无证据（wide seed 2024 20 帧实证）',
+    evidence: 'tmp/_bl_iso.mjs（隔离）+ tmp/_bl_pdml.mjs（0x7b 停解析）+ tmp/_bl_ctx2.mjs（失败行聚合）',
+    batch: 'BL（v1.68.0）',
+  },
+  {
+    id: 'DTAP-RR-INDIVIDUAL-PRIORITIES-STOP',
+    spec: '44018', row: 'individual priorities', msgs: 'CHANNEL RELEASE',
+    reason: 'IEI 0x7C（Individual priorities）tshark 无解剖路径（同 VGCS AMR 0x7B 类）——wide 20 帧与 0x7B 成对 STRUCT；O 行缺席合法',
+    evidence: 'tmp/_bl_ctx2.mjs（失败行聚合 20x）',
+    batch: 'BL（v1.68.0）',
+  },
+  {
+    id: 'DTAP-RR-TIME-DIFFERENCE-STOP',
+    spec: '44018', row: 'time difference', msgs: 'HANDOVER COMMAND',
+    reason: 'IEI 0x7B（Time Difference）——tshark 产 elem_id+time_diff 字段但无长度域证据行（gsm_a.len 缺席，PDML 实证）→ TLV 框架不可核（wide 20 帧 STRUCT）；C 行缺席合法',
+    evidence: 'tmp/_bl_ctx2.mjs（失败行聚合 20x）+ tmp/_bl_diag2.mjs（PDML 无 len）',
+    batch: 'BL（v1.68.0）',
+  },
+  {
+    id: 'DTAP-RR-FREQ-LIST-STOP',
+    spec: '44018', row: 'frequency list', msgs: 'HANDOVER COMMAND',
+    reason: '上下文敏感病——隔离全值长 CLEAN 但帧内组合 tshark 展开无长度域证据（wide 9 帧 STRUCT）；门内 ASSIGNMENT COMMAND 同名行 CLEAN 证明 tshark 路径消息特定，msgs 限定隔离不伤门内面',
+    evidence: 'tmp/_bl_ctx2.mjs（失败行聚合 9x）+ tmp/_bl_iso.mjs（隔离 CLEAN）',
+    batch: 'BL（v1.68.0）',
+  },
+  {
+    id: 'DTAP-RR-MULTIRATE-CONFIG-STOP',
+    spec: '44018', row: 'multirate configuration 10.5.2.21aa', msgs: 'HANDOVER COMMAND',
+    reason: '上下文敏感病（同 frequency list 定性）——隔离 CLEAN、帧内组合 STRUCT（wide 10 帧）；门内 ASSIGNMENT COMMAND/CHANNEL MODE MODIFY 同名行 CLEAN → msgs 限定',
+    evidence: 'tmp/_bl_ctx2.mjs（失败行聚合 10x）+ tmp/_bl_iso.mjs（隔离 CLEAN）',
+    batch: 'BL（v1.68.0）',
+  },
+  {
+    id: 'DTAP-RR-DYNAMIC-ARFCN-MAPPING-STOP',
+    spec: '44018', row: 'dynamic arfcn mapping', msgs: 'HANDOVER COMMAND',
+    reason: '上下文敏感病（同 frequency list 定性）——隔离 CLEAN、帧内组合 STRUCT（wide 9 帧）；O 行缺席合法',
+    evidence: 'tmp/_bl_ctx2.mjs（失败行聚合 9x）',
+    batch: 'BL（v1.68.0）',
+  },
+  {
+    id: 'DTAP-RR-MOBILE-ALLOC-TLV-STOP',
+    spec: '44018', row: 'mobile allocation', msgs: 'HANDOVER COMMAND|FREQUENCY REDEFINITION', fmt: 'TLV',
+    reason: 'TLV 形 Mobile Allocation（HC 0x21/FR 0x11）tshark 展开无长度域证据（FR 20 帧/HC 6 帧 STRUCT）——行名与 M 行 LV（Channel Description 后必配 Mobile Allocation）同名，msgs+fmt 限定只停两消息的 TLV 形采样、M 行 LV 不受影响',
+    evidence: 'tmp/_bl_ctx2.mjs（失败行聚合）+ 门内 ADDITIONAL ASSIGNMENT/ASSIGNMENT COMMAND 同名行 CLEAN 对照 + BL 首修 FR 整消息退网勘正（M 行误停）',
+    batch: 'BL（v1.68.0）',
+  },
+  {
+    id: 'DTAP-RR-VGCS-TARGET-MODE-STOP',
+    spec: '44018', row: 'vgcs target mode indication', msgs: 'HANDOVER COMMAND',
+    reason: '上下文敏感病（同 frequency list 定性）——隔离 CLEAN、帧内组合 STRUCT（wide 5 帧）；门内 ASSIGNMENT COMMAND/CHANNEL MODE MODIFY 同名行 CLEAN → msgs 限定',
+    evidence: 'tmp/_bl_ctx2.mjs（失败行聚合 5x）',
+    batch: 'BL（v1.68.0）',
+  },
+  {
+    id: 'DTAP-RR-CKSN-TALKER-STOP',
+    spec: '44018', row: 'ciphering key sequence number', msgs: 'TALKER INDICATION',
+    reason: 'TV1 t11——tshark RR 表在该消息上下文无路径（隔离帧 dtap 层缺席 + NO_EVIDENCE 20 帧实证）；PAGING RESPONSE 门内同名行有路径 CLEAN → 消息特定，msgs 限定',
+    evidence: 'tmp/_bl_iso.mjs（隔离 ERR）+ tmp/_bl_ctx2.mjs（NO_EVIDENCE 20x）',
+    batch: 'BL（v1.68.0）',
   },
 ];
 
@@ -12144,10 +12304,15 @@ function quirkRowKey(name) {
   return String(name || '').trim().replace(/\s*\(\d+(?:\.\d+)*\)\s*$/, '').toLowerCase();
 }
 
-function rowStopHit(spec, name) {
+function rowStopHit(spec, name, msgName = null, fmt = null) {
   const k = quirkRowKey(name);
   for (const q of SAMPLE_STOP_ROWS) {
     if (q.spec !== spec || !q.row || q.row !== k) continue;
+    // BL（v1.68.0）：tshark RR 解剖表消息特定——同一行名在 A 消息有路径、B 消息无路径
+    //（CKSN：PAGING RESPONSE 有路径门内 CLEAN / TALKER INDICATION 无路径恒病实证）。
+    // 条目可选 msgs（正则源串，对消息名 test）与 fmt（行格式全等）——命中才停采，缺省全消息。
+    if (q.msgs && !(msgName && new RegExp(q.msgs).test(msgName))) continue;
+    if (q.fmt && q.fmt !== fmt) continue;
     return q;
   }
   return null;
@@ -12226,6 +12391,13 @@ const VALUE_CANONICALIZE_ROWS = [
     evidence: 'tmp/_bc1_ie51_probe_result.json（BC）+ tmp/_bg_probe4.mjs（BG 原值重放复现）',
     batch: 'BC（v1.59.0）；BG（v1.63.0）复核负结果（上下文敏感定性）',
   },
+  {
+    id: 'DTAP-SS-CAUSE-EXT1',
+    spec: '24080', row: 'cause', pattern: '80',
+    reason: 'Cause（iei 0x08，RELEASE COMPLETE O 行）——cause 编码首字节 ext 位（bit8）=0 时 tshark 续读 recommendation 直到帧耗尽 Exception（单帧最小复现 tmp/_bk80_min.mjs：08020000 → location/recommendation 后帧耗尽 MAL）；ext=1 形（0x80=ext1+coding00+loc0、次字节=cause value）CLEAN（tmp/_bk80_cause.mjs 8181/8081 CLEAN；a1 形〔coding standard=01〕MAL 负结果在案）——pattern 0x80 平铺（值域收窄入档，域形恢复多样性挂后续）',
+    evidence: 'tmp/_bk80_diag.mjs（行构成）+ 24080 wide 归因',
+    batch: 'BK（v1.67.0）',
+  },
 ];
 
 function canonicalizeHit(spec, iei) {
@@ -12235,6 +12407,10 @@ function canonicalizeHit(spec, iei) {
   }
   return null;
 }
+
+// ---- BK 批（v1.67.0）：24080 行名键 CANON 条目（DTAP-SS-CAUSE-ZERO 入 VALUE_CANONICALIZE_ROWS）——
+// 24080 Cause（iei 0x08，RELEASE COMPLETE O 行）：tshark cause 位域深挖遇随机 2B 即
+// Exception（wide seed 2024 帧 #318 0802ff6f 实证）——零值平铺 CLEAN（BI 24008 同构）。
 
 function rowCanonicalizeHit(spec, name) {
   const k = quirkRowKey(name);
@@ -12306,30 +12482,30 @@ const VALUE_DOMAIN_ROWS = [
   {
     id: 'DTAP-EUTRAN-INTER-RAT-CONTAINER-FIX7',
     spec: '24008', row: 'e-utran inter rat information container', domain: 'dtapFixed', len: 7, content: 'zero',
-    reason: '值长 1-6 MAL、≥7 CLEAN——内层 [len][…] 结构（tshark 按容器内长度前缀解析）',
-    evidence: 'tmp/_bi_probe15.mjs（行×值长矩阵 2272 帧）+ BJ oracle wide 四 seed',
-    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+    reason: '值长 1-6 MAL、≥7 CLEAN——内层 [len][…] 结构（tshark 按容器内长度前缀解析）；BM 复核负结果（v1.69.0）：bcdAll/lenPrefix/lenPrefix0/bcdHead3 全 MAL 12/12——容器内容为嵌入 NAS 消息语义深挖（非长度前缀病），零值外全域病，合成合法嵌入 NAS 不在域形能力内 → 保持 zero',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed + tmp/_bm_probe.mjs（四形全 MAL 负结果）',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）；BM 负结果复核（v1.69.0）',
   },
   {
     id: 'DTAP-SUPPORTED-CODEC-LIST-FIX4',
-    spec: '24008', row: 'supported codec list', domain: 'dtapFixed', len: 4, content: 'zero',
-    reason: '奇数长 MAL、偶数 CLEAN（元素 2B 对齐）→ 4',
-    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
-    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+    spec: '24008', row: 'supported codec list', domain: 'codecSid', len: 4,
+    reason: '奇数长 MAL、偶数 CLEAN（元素 2B 对齐）→ 4；BM 开域（v1.69.0）：多宿主分裂定案——sid+随机尾在 CALL CONFIRMED/CC-ESTABLISHMENT CONFIRMED MAL、其余四宿主 CLEAN（tmp/_bm_probe2.mjs），唯全域 CLEAN 形 = 首字节 system identification ∈ 0-15（保原值低半组多样性）+ 零尾',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed + tmp/_bm_probe2.mjs（六宿主 × 三尾形矩阵）',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）；BM 开域 codecSid（v1.69.0）',
   },
   {
     id: 'DTAP-NBIFOM-CONTAINER-FIX2',
     spec: '24008', row: 'nbifom container', domain: 'dtapFixed', len: 2, content: 'zero',
-    reason: '奇数长 MAL、偶数 CLEAN → 2',
-    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
-    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+    reason: '奇数长 MAL、偶数 CLEAN → 2；BM 复核负结果（v1.69.0）：hdr00/hdr01/bcdAll 全 MAL 12/12——[header][payload] 两形均病（容器内容语义深挖）→ 保持 zero',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed + tmp/_bm_probe.mjs（三形全 MAL 负结果）',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）；BM 负结果复核（v1.69.0）',
   },
   {
     id: 'DTAP-LSA-IDENTIFIER-FIX3',
-    spec: '24008', row: 'lsa identifier', domain: 'dtapFixed', len: 3, content: 'zero',
-    reason: '值长 0-2 MAL、≥3 CLEAN → 3',
-    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
-    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+    spec: '24008', row: 'lsa identifier', domain: 'dtapBcd', len: 3,
+    reason: '值长 0-2 MAL、≥3 CLEAN → 3；BM 开域（v1.69.0）：数字半八位组全域 CLEAN（双宿主 MM/GMM INFORMATION 各 10/10）——LSA ID = PLMN 数字域',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed + tmp/_bm_probe2.mjs（双宿主 bcdAll）',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）；BM 开域 dtapBcd（v1.69.0）',
   },
   {
     id: 'DTAP-PTMSI-SIGNATURE-FIX3',
@@ -12347,17 +12523,17 @@ const VALUE_DOMAIN_ROWS = [
   },
   {
     id: 'DTAP-RAI2-FIX6',
-    spec: '24008', row: 'routing area identification 2', domain: 'dtapFixed', len: 6, content: 'zero',
-    reason: 'RAI 规范定长 6B（MCC/MNC/LAC）——tshark e212 深挖按定长取字段',
-    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
-    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+    spec: '24008', row: 'routing area identification 2', domain: 'dtapBcd', len: 6,
+    reason: 'RAI 规范定长 6B（MCC/MNC/LAC）——tshark e212 深挖按定长取字段；BM 开域（v1.69.0）：全数字半八位组全域 CLEAN（三宿主各 10/10）——MCC/MNC 数字域合法',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed + tmp/_bm_probe2.mjs（三宿主 bcdAll）',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）；BM 开域 dtapBcd（v1.69.0）',
   },
   {
     id: 'DTAP-LAI2-FIX5',
-    spec: '24008', row: 'location area identification 2', domain: 'dtapFixed', len: 5, content: 'zero',
-    reason: 'LAI 规范定长 5B（MCC/MNC/LAC）——tshark e212 深挖按定长取字段',
-    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
-    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+    spec: '24008', row: 'location area identification 2', domain: 'dtapBcd', len: 5,
+    reason: 'LAI 规范定长 5B（MCC/MNC/LAC）——tshark e212 深挖按定长取字段；BM 开域（v1.69.0）：全数字半八位组 CLEAN（探针 12/12）——MCC/MNC 数字域合法',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed + tmp/_bm_probe.mjs（bcdAll 12/12）',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）；BM 开域 dtapBcd（v1.69.0）',
   },
   {
     id: 'DTAP-MAC-FIX4',
@@ -12382,10 +12558,10 @@ const VALUE_DOMAIN_ROWS = [
   },
   {
     id: 'DTAP-PLMN-CN-OPERATOR-FIX3',
-    spec: '24008', row: 'plmn identity of the cn operator', domain: 'dtapFixed', len: 3, content: 'zero',
-    reason: 'PLMN 规范定长 3B（MCC/MNC 半八位组编码）',
-    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
-    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+    spec: '24008', row: 'plmn identity of the cn operator', domain: 'dtapBcd', len: 3,
+    reason: 'PLMN 规范定长 3B（MCC/MNC 半八位组编码）；BM 开域（v1.69.0）：全数字半八位组 CLEAN（探针 12/12，六数字无 filler）',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed + tmp/_bm_probe.mjs（bcdAll 12/12）',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）；BM 开域 dtapBcd（v1.69.0）',
   },
   {
     id: 'DTAP-PDP-CONTEXT-STATUS-FIX2',
@@ -12436,12 +12612,64 @@ const VALUE_DOMAIN_ROWS = [
     evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
     batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
   },
+  // ---- BK 批（v1.67.0）：24011/24080 行名键条目（tshark oracle 接入值域收口）----
+  {
+    id: 'DTAP-SS-FACILITY-REJECT-FORM',
+    spec: '24080', row: 'facility', domain: 'dtapSsComponent',
+    reason: 'Facility IE 内容 = 组件协议（BER-TLV component）——tshark 调 BER 分解器深挖，BK 期定案 reject 形 A4 03 80 01 <p> 单形 CLEAN；BN 细扫推翻「A1/A2/A3 全 MAL」——invoke 最小模板 [A1][06][02 01 id][02 01 op]、returnResult 无 op 形 [A2][03][02 01 id]、returnError 形 [A3][06][02 01 id][02 01 err] 双宿主各 8/8 CLEAN（tmp/_bn_probe/_bn_probe2.mjs）——dtapSsComponent 四态域形（形态 %4 轮转 + id/op 字节保原值多样性），problem 字节多样性保留在 reject 态（LV/TLV 双行名异格式同域形）',
+    evidence: 'tmp/_bk_probe3.mjs（10 形×2 格式）+ tmp/_bk_probe4.mjs（reject problem 0-255 全扫）+ tmp/_bn_probe.mjs/_bn_probe2.mjs（BN 四态双宿主 8/8）',
+    batch: 'BK（v1.67.0）；BN 四态域形（v1.70.0）',
+  },
+  {
+    id: 'DTAP-SS-EXTENDED-FACILITY-REJECT-FORM',
+    spec: '24080', row: 'extendedfacility', domain: 'dtapSsComponent',
+    reason: 'ExtendedFacility（TLV 0x1C）= Facility 的 TLV 形——同 BER 深挖同四态域形（行名跨消息：FACILITY 的 Facility 为 LV、REGISTER/RELEASE COMPLETE 为 TLV 0x1C，归一后两行名各一条目覆盖）',
+    evidence: 'tmp/_bk_probe3.mjs REGISTER-TLV 形域扫描 + tmp/_bn_probe2.mjs RELEASE COMPLETE 四态 8/8',
+    batch: 'BK（v1.67.0）；BN 四态域形（v1.70.0）',
+  },
+  {
+    id: 'DTAP-SMS-RP-FIRST-BYTE-SAFE',
+    spec: '24011', row: 'cp-user data', domain: 'dtapSmsRpFirst',
+    reason: 'CP-User data LV 值 = RPDU——首字节是 RP 消息类型，识别值 {0,1,4,5}（RP-DATA/RP-ERROR）触发 tshark RP IE/TPDU 深挖（ADDR 数字域 + 23.040 TPDU 结构）Exception；域形 = 首字节 <7 则 |0x08（落 8-0xe 非识别值浅解析域，低位多样性保留；0x07-0xff 原样）',
+    evidence: 'tmp/_bk_probe3.mjs（rpdu 首字节 0x00-0xff 全扫，MAL={0,1,4,5}）',
+    batch: 'BK（v1.67.0）',
+  },
   {
     id: 'DTAP-TIME-ZONE-AND-TIME-FIX7',
-    spec: '24008', row: 'time zone and time', domain: 'dtapFixed', len: 7, content: 'zero',
-    reason: 'Time zone and time 规范定长 7B（年月日时分秒+时区半八位组）',
-    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed',
-    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）',
+    spec: '24008', row: 'time zone and time', domain: 'dtapBcd', len: 7,
+    reason: 'Time zone and time 规范定长 7B（年月日时分秒+时区半八位组）；BM 开域（v1.69.0）：全数字半八位组全域 CLEAN（双宿主各 10/10）——BCD 时间域数字形合法（含时区尾字节）',
+    evidence: 'tmp/_bi_probe15.mjs + BJ oracle wide 四 seed + tmp/_bm_probe2.mjs（双宿主 bcdAll）',
+    batch: 'BI 立例（v1.65.0）；BJ 迁域形（v1.66.0）；BM 开域 dtapBcd（v1.69.0）',
+  },
+  // ---- BL 批（v1.68.0）：44018 长度档病域形条目（lenRangeOf 不解析 'n' 尾形/def 布局
+  //      值长不足 → tshark 长度档 Exception；dtapFixed 定形到隔离探针 CLEAN 档）----
+  {
+    id: 'DTAP-RR-CRD2-FIX4',
+    spec: '44018', row: 'channel request description 2', domain: 'dtapFixed', len: 4, content: 'zero',
+    reason: '行 def 布局仅 1 octet → 布局路径恒产 1B 值，tshark 需 ≥4B（隔离 L1-3 MAL、L≥4 CLEAN，tmp/_bl_iso.mjs）——DTM Request 100/100 malformed 根因，定形 4B 零值',
+    evidence: 'tmp/_bl_iso.mjs（长度档）+ tmp/_bl_ctx2.mjs（wide 100/100 mal）',
+    batch: 'BL（v1.68.0）',
+  },
+  {
+    id: 'DTAP-RR-GPRS-BROADCAST-INFO-FIX6',
+    spec: '44018', row: 'gprs broadcast information', domain: 'dtapFixed', len: 6, content: 'zero',
+    reason: "len 列 '7 - n'（'n' 尾）lenRangeOf 不解析落随机长度回退，L≤4 值 tshark Exception（隔离 L1-4 MAL、L≥5 CLEAN）→ 定形 6B（规范总长下限 7 的值域）",
+    evidence: 'tmp/_bl_iso.mjs（长度档）+ PACKET ASSIGNMENT wide 4/100 mal 归因',
+    batch: 'BL（v1.68.0）',
+  },
+  {
+    id: 'DTAP-RR-PKT-UL-ASSIGN-FIX3',
+    spec: '44018', row: 'rr packet uplink assignment', domain: 'dtapFixed', len: 3, content: 'zero',
+    reason: "len 列 '3 - n' 越界档病（同 gprs broadcast information）——L1-2 值 MAL、L≥3 CLEAN → 定形 3B",
+    evidence: 'tmp/_bl_iso.mjs（长度档）',
+    batch: 'BL（v1.68.0）',
+  },
+  {
+    id: 'DTAP-RR-PKT-DL-ASSIGN-FIX3',
+    spec: '44018', row: 'rr packet downlink assignment', domain: 'dtapFixed', len: 3, content: 'zero',
+    reason: "len 列 '3 - n' 越界档病（同上）——L1-2 值 MAL、L≥3 CLEAN → 定形 3B",
+    evidence: 'tmp/_bl_iso.mjs（长度档）',
+    batch: 'BL（v1.68.0）',
   },
 ];
 
@@ -13162,9 +13390,19 @@ function fixedLenOf(lenStr) {
 
 // 'a-b' 区间 → 值字节数区间（len 列含框架字节：TLV 减 2、LV 减 1、E 类减 2）
 function lenRangeOf(lenStr, fmt) {
-  const m = /^(\d+)\s*-\s*(\d+)$/.exec((lenStr || '').trim());
-  if (!m) return null;
+  const s = (lenStr || '').trim();
+  const m = /^(\d+)\s*-\s*(\d+)$/.exec(s);
   const hdr = fmt === 'LV' ? 1 : 2;
+  // BK 批（v1.67.0）：固定单值 len（如 44.018 VGCS target mode '3'）——此前仅识别区间形，
+  // 单值行落到 TLV/LV 随机 1-24B 长度回退 → 规范定长 TLV 值长随机（44018 ASSIGNMENT
+  // COMMAND 实证：L=5 触发 tshark RR 解剖器读穿自爆 extraneous_data dissector bug）。
+  // 固定单值 = [L-hdr, L-hdr] 定长档（值多样性在内容字节，长度合规优先）。
+  if (!m) {
+    const one = /^\d+$/.exec(s);
+    if (!one) return null;
+    const v = Math.max(1, parseInt(one[0], 10) - hdr);
+    return [v, v];
+  }
   return [Math.max(1, parseInt(m[1], 10) - hdr), Math.max(1, parseInt(m[2], 10) - hdr)];
 }
 
@@ -13181,6 +13419,9 @@ function sampleSchema(schema, N, seed, msgRe = null) {
   const rnd = (n) => Math.floor(rng() * n);
   const rbytes = (n) => Uint8Array.from({ length: n }, () => rnd(256));
   const spec = schema.spec;
+  // BK 批（v1.67.0）：dtap 族（GSMTAP ABIS oracle 接入面）——TI 半组特判的族集合；
+  // BL（v1.68.0）族集合改 nas_quirks.mjs DTAP_SPECS 共享导出（加族单点改）。
+  const dtapSpec = DTAP_SPECS.includes(spec);
   const lines = [];
   const skipped = {};
   let okMsgs = 0;
@@ -13195,7 +13436,15 @@ function sampleSchema(schema, N, seed, msgRe = null) {
         const framed = fmt === 'TV' || fmt === 'TLV' || fmt === 'TLV-E' || fmt === 'LV' || fmt === 'LV-E';
         const { bytes } = layoutSample(lay.octets, rng, framed);
         const expect = fmt === 'V' ? flen : fmt === 'TV' ? (flen != null ? flen - 1 : null) : null;
-        if (expect == null || bytes.length === expect) {
+        // BK 批（v1.67.0）：TLV/LV-E/LV 族布局路径长度合规校验——此前 expect=null 直接
+        // 采纳布局长度，行 len 列声明的值域（lenRangeOf）被旁路（44018 VGCS target mode
+        // 固定 '3' 行采出 4B 值 → tshark RR 解剖器读穿自爆）。布局产出值长 ∉ 行声明值域
+        // → 回退不透明路径（rg 档内采样）。
+        const rgFramed = framed && fmt !== 'TV' ? lenRangeOf(r.len, fmt) : null;
+        const okLen = expect != null ? bytes.length === expect
+          : rgFramed ? (bytes.length >= rgFramed[0] && bytes.length <= rgFramed[1])
+          : true;
+        if (okLen) {
           if (bytes.length) return bytes;
         }
         // 定长不符 → 落到不透明回退（线缆级合法，内部语义可能被 oracle 拒：单列计）
@@ -13257,7 +13506,7 @@ function sampleSchema(schema, N, seed, msgRe = null) {
             // Emergency Number List 上下文敏感停采 / Additional update type TV1-tF 证据空洞 /
             // Integrity algorithm TV1-t9 证据空洞）迁登记表，continue 落点与硬编码同位
             //（行 rng 判定前，采样流零漂移；条目见 nas_quirks.mjs DTAP-* 四条）。
-            if (rowStopHit(spec, name)) continue;
+            if (rowStopHit(spec, name, msgName, fmt)) continue;
             if (iei && r.iei.includes('TBD')) continue; // 规范 TBD 占位行不可编码
             if (fmt === 'UNK') { if (!mandatory) continue; ok = false; break; } // NOTE 行跳过；FFS 必配行不可采样
             if (!mandatory && rng() > (fmt === 'T' ? 0.3 : 0.4)) continue; // 可选行随机缺席
@@ -13267,11 +13516,15 @@ function sampleSchema(schema, N, seed, msgRe = null) {
             // ——TI nibble ∈ 8-f 置位 TI flag ⇒ tshark 吃掉第二八位组作 TI 扩展（tie 字段），
             // 消息类型移位第三八位组整帧错位（HDR/NO_EVIDENCE 级联 + 短帧不接管；全量普查
             // HDR 729 起单一根因，tmp/_bi_probe11.mjs 帧 2249 定案）。
+            // BI 批（v1.65.0）：dtap 族事务标识半组（CC/SM/SS 首八位组 bit8=TI flag、bit7-5=TI）
+            // ——TI 半组 ∈ 8-f 置位 TI flag、TIO=7 保留值 ⇒ tshark 吃 tie 扩展全帧错位
+            //（BK 批扩 24080 实证：FACILITY/REGISTER 仅 ti=7/f 移位、flag1+tio3〔0xbb〕CLEAN
+            //——tmp/_bk80_ti.mjs 16 半组 × 3 消息穷举；24011 CP 头 flag 置位合法但保守域同收）。
             if (fmt === 'VH' || fmt === 'TV1') {
               // 限 rnd(7)：TI 0-6 合法域（24.007 §11.2.2.1 TI=7 保留——tshark 对 TI=7 也走
               // 移位解析：msg type 读到第三八位组，tmp/_bi 4/11/16 号帧定案）；flag 恒 0
               //（schema 模型的唯一头形态），TI 值多样性保留；其余行 0-f。
-              value = (schema.spec === '24008' && fmt === 'VH' && /^transaction identifier$/.test(name)) ? rnd(7) : rnd(16);
+              value = (dtapSpec && fmt === 'VH' && /^transaction identifier$/.test(name)) ? rnd(7) : rnd(16);
             }
             else if (fmt === 'T') { value = null; }
             else if (fmt === 'ADDR') {
@@ -13292,7 +13545,7 @@ function sampleSchema(schema, N, seed, msgRe = null) {
             // 开域通道，病行 wide 归因降级 content='zero'）；CANON 行名键命中 → pattern
             // 平铺（长度不变）。BI 16 语义形（semanticDtapValue）迁 DOMAIN dtapFixed 条目
             //（len 不变、content=random 升级）。后续批次逐行开域（每行 wide 证据为准）。
-            if (schema.spec === '24008' && value != null) {
+            if (dtapSpec && value != null) {
               const dq = rowDomainHit(spec, name);
               if (dq) value = domainDerive(dq.domain, value, dq);
               else {
@@ -13301,9 +13554,17 @@ function sampleSchema(schema, N, seed, msgRe = null) {
                   value = typeof value === 'number'
                     ? parseInt(cq.pattern, 16)
                     : Uint8Array.from({ length: value.length }, () => parseInt(cq.pattern, 16));
-                } else {
+                } else if (spec === '24008' || spec === '44018') {
+                  // 24008（BI 绿线基线）/44018（BK）默认零平铺——DTAP/RR IE 值深语义解剖面
+                  //（RR 的 Rest Octets CSN.1/容器位域）对随机字节大面积病（BK wide seed
+                  // 2024：ASSIGNMENT COMMAND Extraneous dissector bug 面等）；病行语义形/
+                  // 停采经登记表逐行开域（与 BI 弧线同构）。BL（v1.68.0）记档：此默认零平铺
+                  // 是 44018 族级政策（未登记行一律零值），24011/24080 为默认保留随机值。
                   value = typeof value === 'number' ? 0 : new Uint8Array(value.length);
                 }
+                // 24011/24080（BK）默认保留采样随机值——两族探针实证 CLEAN 面大
+                //（24011 CP 面/24080 非 Facility 行），病行 wide 归因进登记表
+                //（与 GTP 弧线收敛路径同构）。
               }
             }
             parts.push({ rowIdx: ri, value });
@@ -13386,6 +13647,54 @@ function domainDerive(domain, v, q = null) {
     if (q && q.content !== 'zero' && v.length) {
       for (let i = 0; i < n; i++) out[i] = v[i % v.length];
     }
+    return out;
+  }
+  // BM 批（v1.69.0）：24008 内容深挖行细域形（zero 降级行的逐行开域）——
+  //   dtapBcd   e212/BCD 数字域（RAI2/LAI2/PLMN/LSA/TZT）：dtapFixed 同款定形（q.len
+  //             原值循环填充）后每半八位组收敛数字 0-9——tshark e212/BCD 解码对数字
+  //             半组合法（BM 隔离探针全宿主 10/10 CLEAN，tmp/_bm_probe/_bm_probe2.mjs）；
+  //   codecSid  Supported Codec List：多宿主分裂定案（sid+rawTail 在 CALL CONFIRMED/
+  //             CC-ESTABLISHMENT CONFIRMED MAL、其余宿主 CLEAN）——唯全域 CLEAN 形 =
+  //             首字节 system identification ∈ 0-15（保原值低半组多样性）+ 零尾。
+  if (domain === 'dtapBcd') {
+    const n = q && q.len ? q.len : v.length;
+    const out = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = v.length ? v[i % v.length] : 0;
+      out[i] = ((x >> 4) % 10) << 4 | ((x & 0x0f) % 10);
+    }
+    return out;
+  }
+  if (domain === 'codecSid') {
+    const n = q && q.len ? q.len : (v.length || 4);
+    const out = new Uint8Array(n);
+    if (v.length) out[0] = v[0] & 0x0f;
+    return out;
+  }
+  // BK 批（v1.67.0）：24080 SS reject 形——A4 03 80 01 <p>（BN 起并入 dtapSsComponent 四态）。
+  // BN 批（v1.70.0）：24080 BER 组件四态（nas_quirks DTAP-SS-*-REJECT-FORM 换域）——BK「A1/
+  // A2/A3 形全 MAL」被模板细扫推翻（是模板结构要求而非全域病）：invoke 最小模板
+  // [A1][06][02 01 id][02 01 op]、returnResult 无 op 形 [A2][03][02 01 id]、returnError 形
+  // [A3][06][02 01 id][02 01 err] 双宿主（REGISTER/RELEASE COMPLETE）各 8/8 CLEAN
+  //（tmp/_bn_probe/_bn_probe2.mjs）；组件形态由原值首字节 %4 确定性轮转（reject/invoke/
+  // returnResult/returnError），id 与 op/err 字节保原值多样性——值域多样性较 reject 单形
+  // 大幅恢复。长度随形态 4-8B 变化 ⇒ 帧长由 wide 重验为权威。
+  if (domain === 'dtapSsComponent') {
+    const pick = v.length ? v[0] % 4 : 0;
+    const b1 = v.length > 1 ? v[1] : 0; // invokeID
+    const b2 = v.length > 2 ? v[2] : 0; // op / error code
+    if (pick === 1) return Uint8Array.from([0xa1, 0x06, 0x02, 0x01, b1, 0x02, 0x01, b2]); // invoke
+    if (pick === 2) return Uint8Array.from([0xa2, 0x03, 0x02, 0x01, b1]);                 // returnResult（无 op 形）
+    if (pick === 3) return Uint8Array.from([0xa3, 0x06, 0x02, 0x01, b1, 0x02, 0x01, b2]); // returnError
+    return Uint8Array.from([0xa4, 0x03, 0x80, 0x01, b1]);                                 // reject（BK 形）
+  }
+  // BK 批（v1.67.0）：24011 RPDU 首字节安全域（nas_quirks DTAP-SMS-RP-FIRST-BYTE-SAFE）——
+  // RP 消息类型识别值 {0,1,4,5}（RP-DATA/RP-ERROR）触发 tshark RP IE/TPDU 深挖 Exception；
+  // 首字节 <7 时 |0x08（落 8-0xe 浅解析域），0x07-0xff 原样——低位多样性保留、其余字节不动。
+  if (domain === 'dtapSmsRpFirst') {
+    if (!v.length || v[0] >= 0x07) return v;
+    const out = Uint8Array.from(v);
+    out[0] = v[0] | 0x08;
     return out;
   }
   return v;
@@ -13789,7 +14098,7 @@ function gtpuKvLine(obj, skip) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, GTPU_IE_GEOMETRY, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutRows, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, quirkRowKey, rowStopHit, valueRemapHit, canonicalizeHit, rowCanonicalizeHit, domainValueHit, rowDomainHit, tsharkArtifactMatch, SAMPLE_STOP_ROWS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, VALUE_DOMAIN_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, GTPU_IE_GEOMETRY, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutRows, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, quirkRowKey, rowStopHit, valueRemapHit, canonicalizeHit, rowCanonicalizeHit, domainValueHit, rowDomainHit, tsharkArtifactMatch, DTAP_SPECS, SAMPLE_STOP_ROWS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, VALUE_DOMAIN_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
