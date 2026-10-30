@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.76.0";
+const APP_VERSION = "1.82.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -7349,14 +7349,27 @@ function rowIei(r) {
 
 const EPD = { 24501: 0x7e, 24301: null }; // 24301：半八位组 PD，按消息族取值（见 nasPD）
 
-// 24.301 半八位组 protocol discriminator：EMM 消息=7、ESM 消息=5（按规范 §8.2/§8.3 节前缀）；
+// 24501 头八位组：5GMM（非 8.3 节）=0x7e、5GSM（8.3 节）=0x2e——24.501 Table 9.2
+// EPD 5GS MM=7 / 5GS SM=2（低半 0xe 为 24.501 头八位组模型的固定半填充，pycrate oracle
+// SHT=1 帧 = 7e01 同构）。BV 批（v1.78.0）勘正：旧值全族同写 0x7e，tshark 对 SM 形
+// 明文拒绝（「Not a NAS 5GS PD」）；0x2e 形完整解出消息名（tmp/_bv_probe1）。
+// 编码（encMsg）与解码（decOnce）双侧共用本函数——EPD 期望值单点。
+function epdOf(spec, inst) {
+  if (spec === '24501') return /^8\.3/.test(inst.section || '') ? 0x2e : 0x7e;
+  return EPD[spec] || 0;
+}
+
+// 24.301 半八位组 protocol discriminator：EMM 消息=7、ESM 消息=2（24.301 Table 9.1：
+// EPS session management messages = 2——v1.77.0 BU 勘正：旧值 5 系 §8.2/§8.3 节前缀误读，
+// tshark 探针实证 PD5 被 nas-eps 解剖器拒绝（「Not a NAS EPS PD 5」）、PD2 帧按
+// [PD|SHT][EBI][TYPE] 头模型正确解出 ESM type（tmp/_bu_esm_probe/_bu_esm2）；
 // 24.008：建库时按 §9.x 族写入 inst.pd（RR=6/MM=5/CC=3/GMM=8/SM=10——§9.5 实测 pd=10，
 // 独立审核段〔2026-10-28〕勘正旧注「SM=9」笔误）；
 // 44.018（RR=6）/24.080（SS=11）：同样建库写入。24080 的 inst.pd 覆盖 8.3 前缀猜测——
 // 24080 消息节是 2.x，会误判 7，故 inst.pd 必须先命中。
 function nasPD(inst) {
   if (inst.pd != null) return inst.pd;
-  return /^8\.3/.test(inst.section || '') ? 5 : 7;
+  return /^8\.3/.test(inst.section || '') ? 2 : 7;
 }
 // 半八位组行名是否为 protocol discriminator（24.301 表头行）
 const isPDRow = (name) => /^protocol discriminator$/.test(name);
@@ -7430,7 +7443,7 @@ function decMsg(inst, bytes, spec = '24501', schema = null) {
 function decOnce(inst, u8, spec, force, notes = []) {
   let off = 0;
   const parts = [];
-  const epd = EPD[spec];
+  const epd = epdOf(spec, inst);
   for (let ri = 0; ri < inst.rows.length; ri++) {
     const r = inst.rows[ri];
     const f = rowFormat(r);
@@ -7612,7 +7625,7 @@ function encMsg(inst, parts = [], spec = '24501', gtpcHdr = undefined) {
     const has = byRow.has(ri);
     const val = byRow.get(ri);
     if (f === 'V' && /extended protocol discriminator/.test(name)) {
-      out.push(has ? val[0] : (EPD[spec] || 0));
+      out.push(has ? val[0] : epdOf(spec, inst));
       continue;
     }
     if (f === 'V' && /security header type/.test(name)) {
@@ -8474,11 +8487,61 @@ function diffNasIeLayouts(ref, lie, rie, findings) {
   } else if (ll && !rl) {
     findings.push({ severity: 'info', kind: 'nas-ie-nolayout', msg: `${ref}：新版本无位布局（建库覆盖差异，非规范变更）`, loc: L });
   }
-  if (lie.csn1 || rie.csn1) {
+  diffNasCsn1(ref, lie, rie, findings);
+}
+
+// BW 批（v1.79.0）：csn1 文法结构级 diff——csn1 JSON 形态 {root, defs{名→AST 节点}}：
+//   def 键面增删/改名 → nas-ie-csn1-def；root 指向变化 → nas-ie-csn1-root；
+//   单侧无 csn1 / 结构同形仅序列化差异 → 维持 nas-ie-csn1 二值留痕（全 info 档不变——
+//   文法源是建库呈现层，线缆破坏由消息表行 nas-row-format 承担）。
+// BZ 批（v1.82.0）：items 级语义对拍——AST 节点先经 csn1Canon 规范化（对象键序无关、
+//   数组序语义保留）再对比：同名 def 真语义差 → nas-ie-csn1-items（BW 期「内容变化」
+//   从 def kind 迁移，键面留 def）；语义等价仅序列化差异 → nas-ie-csn1（BW 回退分支
+//   收窄到真等价面——键序假阳性防御）。探针实证（2026-10-31）：44018 的 16 条内容
+//   变化 def 归一化后 0 条降级（全部真语义差）——本批零基线漂移，kind 迁移为主。
+function csn1Canon(x) {
+  if (Array.isArray(x)) return x.map(csn1Canon);
+  if (x && typeof x === 'object') {
+    const o = {};
+    for (const k of Object.keys(x).sort()) o[k] = csn1Canon(x[k]);
+    return o;
+  }
+  return x;
+}
+function diffNasCsn1(ref, lie, rie, findings) {
+  const L = { msg: ref, ref };
+  if (!lie.csn1 || !rie.csn1) {
     if (JSON.stringify(lie.csn1 ?? null) !== JSON.stringify(rie.csn1 ?? null)) {
-      const how = lie.csn1 ? (rie.csn1 ? '文法内容变更' : '旧有新无') : '旧无新有';
+      const how = lie.csn1 ? '旧有新无' : '旧无新有';
       findings.push({ severity: 'info', kind: 'nas-ie-csn1', msg: `${ref}：CSN.1 文法源变化（${how}）`, loc: L });
     }
+    return;
+  }
+  if (JSON.stringify(csn1Canon(lie.csn1)) === JSON.stringify(csn1Canon(rie.csn1))) {
+    if (JSON.stringify(lie.csn1) !== JSON.stringify(rie.csn1)) {
+      findings.push({ severity: 'info', kind: 'nas-ie-csn1', msg: `${ref}：CSN.1 文法源变化（语义等价，序列化差异）`, loc: L });
+    }
+    return;
+  }
+  const ld = lie.csn1.defs || {}, rd = rie.csn1.defs || {};
+  const lk = Object.keys(ld), rk = Object.keys(rd);
+  const added = rk.filter((k) => !(k in ld));
+  const removed = lk.filter((k) => !(k in rd));
+  const changed = lk.filter((k) => k in rd && JSON.stringify(csn1Canon(ld[k])) !== JSON.stringify(csn1Canon(rd[k])));
+  if (added.length || removed.length) {
+    const parts = [];
+    if (added.length) parts.push(`新增 ${added.join('、')}`);
+    if (removed.length) parts.push(`移除 ${removed.join('、')}`);
+    findings.push({ severity: 'info', kind: 'nas-ie-csn1-def', msg: `${ref}：CSN.1 def 键面变化（${parts.join('；')}）`, loc: L });
+  }
+  if (changed.length) {
+    findings.push({ severity: 'info', kind: 'nas-ie-csn1-items', msg: `${ref}：CSN.1 items 语义变化 ×${changed.length}（${changed.slice(0, 3).join('、')}${changed.length > 3 ? ' 等' : ''}）`, loc: L });
+  }
+  if ((lie.csn1.root ?? null) !== (rie.csn1.root ?? null)) {
+    findings.push({ severity: 'info', kind: 'nas-ie-csn1-root', msg: `${ref}：CSN.1 root 指向变化「${lie.csn1.root ?? ''}」→「${rie.csn1.root ?? ''}」`, loc: L });
+  }
+  if (!added.length && !removed.length && !changed.length && (lie.csn1.root ?? null) === (rie.csn1.root ?? null)) {
+    findings.push({ severity: 'info', kind: 'nas-ie-csn1', msg: `${ref}：CSN.1 文法源变化（结构面同形，序列化差异）`, loc: L });
   }
 }
 
@@ -12402,6 +12465,41 @@ function rowStopHit(spec, name, msgName = null, fmt = null) {
   return null;
 }
 
+// ---- BY 批（v1.81.0）：SAMPLE_STOP_MSGS 形态面消息采样级停采 -----------------
+// SECURITY PROTECTED 容器消息的 SHT=0 明文采样形与线缆语义不符（线缆要求 SHT∈1-4
+// 安全壳，tshark 不产 emm/esm type / 消息名）——BU/BV 载体侧 KNOWN_FORM_NOTES 跳采
+// 收口过分诊面，本表从采样根因消除（消息名键，quirkRowKey 归一同规；台账四要素与
+// SAMPLE_STOP_ROWS 同规、id 全局唯一并入围栏卫生钉）。nassample --allow-stopped 1
+// 保留旧采样行为（回退/诊断通道）。停采即消息整体不产帧——gate:nas24301/nas24501/
+// nasrt 回环与双载体基线随采样面变化如实重算（BY-2，数字下降=停采语义非回归）。
+const SAMPLE_STOP_MSGS = [
+  {
+    id: 'NAS24301-SECURITY-PROTECTED-PLAINFORM',
+    spec: '24301',
+    msg: 'security protected nas message',
+    reason: 'SECURITY PROTECTED NAS MESSAGE（容器消息，msgType=null）SHT=0 明文采样形与线缆语义不符——线缆要求 SHT∈1-4 安全壳，tshark 明文形不产 emm/esm type（BT 期形态面 1、BU 期载体侧默认跳采收口分诊面；本条从采样根因消除）',
+    evidence: 'tmp/_bt_probe4（SHT=0 形态面）/ D 侧 s1ap_carrier_24301_wide.json（分诊档记录）',
+    batch: 'BY（v1.81.0）',
+  },
+  {
+    id: 'NAS24501-SECURITY-PROTECTED-PLAINFORM',
+    spec: '24501',
+    msg: 'security protected 5gs nas message',
+    reason: 'SECURITY PROTECTED 5GS NAS MESSAGE（8.2.28 容器消息，msgType=null）同上——SHT=0 明文采样形 tshark 不产消息名（BV 期载体侧默认跳采收口分诊面；本条从采样根因消除）',
+    evidence: 'D 侧 ngap_carrier_24501.json（分诊档记录）',
+    batch: 'BY（v1.81.0）',
+  },
+];
+
+function msgStopHit(spec, msgName) {
+  const k = quirkRowKey(msgName);
+  for (const q of SAMPLE_STOP_MSGS) {
+    if (q.spec !== spec || q.msg !== k) continue;
+    return q;
+  }
+  return null;
+}
+
 // ---- VALUE_REMAP_ROWS：采样后值字节重映射 ----------------------------------
 // 用途：值特定的 tshark 证据空洞——某值使 tshark 静默吞 IE（无字段、无 malformed、
 // 帧其余部分全对齐），oracle 无从核验该 IE。重映射到有证据的值：采样器在正常取值
@@ -12811,7 +12909,7 @@ function tsharkArtifactMatch({ spec, field, pos, size, frameHex }) {
 // 全版本回环门禁）。采样规则：M 行必采（V 按定长随机字节 / VH 随机半八位组 / TV 按 len-1 /
 // TLV-LV 优先 IE 布局字段采样、否则按 len 区间随机）；C/O 行 p=0.4 随机出现；T 行 p=0.3。
 // 用法：node tools/nassample.mjs --schema <schema.json> --samples <N> --out <file.jsonl>
-//       [--seed 42] [--msgs 正则]
+//       [--seed 42] [--msgs 正则] [--allow-stopped 1]
 
 // mulberry32（与 src/schema/ast.js 同族）
 function rng32(a) {
@@ -13491,7 +13589,7 @@ function lenRangeOf(lenStr, fmt) {
 }
 
 // 采样一个 schema：返回 { lines, skipped, okMsgs }（lines = JSON 对象数组）
-function sampleSchema(schema, N, seed, msgRe = null) {
+function sampleSchema(schema, N, seed, msgRe = null, opts = {}) {
   if (schema.spec === '29274') return sampleGtpcSchema(schema, N, seed, msgRe);
   if (schema.spec === '29060') return sampleGtpv1Schema(schema, N, seed, msgRe);
   // BF 批（v1.62.0）：29.281 GTPv1-U 与 29.060 同头形（PT=1）同行模型——此前走通用
@@ -13557,6 +13655,15 @@ function sampleSchema(schema, N, seed, msgRe = null) {
 
   for (const [msgName, insts] of Object.entries(schema.messages)) {
     if (msgRe && !msgRe.test(msgName)) continue;
+    // BY 批（v1.81.0）：形态面消息采样级停采（SAMPLE_STOP_MSGS，消息名键 quirkRowKey
+    // 归一）——SECURITY PROTECTED 容器消息的 SHT=0 明文采样形无线缆语义（BU/BV 载体侧
+    // KNOWN_FORM_NOTES 跳采的上游根因面）；--allow-stopped 1 保留旧采样行为（回退/诊断
+    // 通道）。停采即消息整体不产帧，skipped 以 `#*` 键如实记账。边界：GTP 专用路径
+    //（sampleGtpc/Gtpv1/Pfcp）不经本表——登记仅 NAS 族，扩展时按 spec 路由对应路径接线。
+    if (!opts.allowStopped) {
+      const stopQ = msgStopHit(spec, msgName);
+      if (stopQ) { skipped[`${msgName}#*`] = `形态面停采（${stopQ.id}）`; continue; }
+    }
     for (let ii = 0; ii < insts.length; ii++) {
       const inst = insts[ii];
       const instKey = `${msgName}#${ii}`;
@@ -14147,7 +14254,7 @@ const args = {};
 for (let i = 2; i < process.argv.length; i += 2) args[process.argv[i].replace(/^--/, '')] = process.argv[i + 1];
 if (args.schema && args.out) {
   const schema = JSON.parse(readFileSync(args.schema, 'utf8'));
-  const { lines, skipped, okMsgs } = sampleSchema(schema, parseInt(args.samples || '3', 10), parseInt(args.seed || '42', 10), args.msgs ? new RegExp(args.msgs) : null);
+  const { lines, skipped, okMsgs } = sampleSchema(schema, parseInt(args.samples || '3', 10), parseInt(args.seed || '42', 10), args.msgs ? new RegExp(args.msgs) : null, args['allow-stopped'] ? { allowStopped: true } : undefined);
   writeFileSync(args.out, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   console.log(`samples: ${lines.length} from ${okMsgs} 实例；跳过: ${JSON.stringify(skipped)}`);
 }
@@ -14214,7 +14321,7 @@ function gtpuKvLine(obj, skip) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, GTPU_IE_GEOMETRY, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutRows, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, quirkRowKey, rowStopHit, valueRemapHit, canonicalizeHit, rowCanonicalizeHit, domainValueHit, rowDomainHit, tsharkArtifactMatch, DTAP_SPECS, MSG_TABLE_SPECS, SAMPLE_STOP_ROWS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, VALUE_DOMAIN_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, GTPU_IE_GEOMETRY, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutRows, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, quirkRowKey, rowStopHit, msgStopHit, valueRemapHit, canonicalizeHit, rowCanonicalizeHit, domainValueHit, rowDomainHit, tsharkArtifactMatch, DTAP_SPECS, MSG_TABLE_SPECS, SAMPLE_STOP_ROWS, SAMPLE_STOP_MSGS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, VALUE_DOMAIN_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
