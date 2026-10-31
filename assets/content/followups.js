@@ -1263,6 +1263,136 @@
         a: 'gap=**请假条**：per-UE gap 期间 UE 不被要求对服务小区收发（RRM 测量信号、PRS、随机接入信号除外）——gap 里掉的拍数就是测量的电费。不支持独立 gap 的 UE 用单一 per-UE pattern 管所有频率层；支持 per-FR 的 FR1/FR2 各排各的班，某 FR 无服务小区时按有效 MGRP 折算（FR2 NR 20ms/FR1 NR 40ms/LTE 40ms）。',
         ref: '38.133#9.1.2' }
     ] },
+    /* ---- 追问链第二梯队补齐（v63 R2：m0/ma/mc/mn/mg/mp/ms/my/ml → 3 题基线；
+          每层只用对应课已审计 narr/failures.deep/quiz.why 压缩改写，ref 沿用本课既有锚——零新锚） ---- */
+    'm0:q2': { levels: [
+      { q: 'T300 从哪一刻起跑、哪一刻停表？取值谁定？',
+        a: '发出 RRCSetupRequest 即起跑（§5.3.3.2 在 initiation 动作里启动它）；收到 RRCSetup 停表、收到 RRCReject 转 T302。取值由 SIB1 的 ue-TimersAndConstants 配置——规范枚举 100/200/300/400/600/1000/1500/2000 ms 八档（§6.3.2），网络按拥塞水平调。',
+        ref: '38.331#5.3.3.2' },
+      { q: '等待期 UE 是静止的吗？',
+        a: '**不静止**——UE 持续做小区重选测量与评估：若重选条件满足，直接转投别的小区，本次建立就地终止（以 cause RRC connection failure 回 IDLE，§5.3.3.6），到新小区一切从头再来。这段等待正是「RRC 建立时延」的直接组成部分。',
+        ref: '38.331#5.3.3.2' }
+    ] },
+    'm0:q3': { levels: [
+      { q: 'T300 超时后 UE 的收尾动作链？',
+        a: '一板一眼三步：**复位 MAC、释放 MAC 配置、为已建立的所有 RB 重建 RLC**（广播 MRB 除外）——把这次尝试的「半成品」配置清干净；然后 **inform upper layers**，自己留在 RRC_IDLE。无状态重来，不留任何残余。',
+        ref: '38.331#5.3.3.7' },
+      { q: '连续失败有惩罚吗？失败还留遗产吗？',
+        a: '双遗产：①同小区连续失败达 SIB1 connEstFailCount → 在 connEstFailOffsetValidity 有效期内把 **connEstFailOffset 当 Qoffsettemp 用**——小区选择/重选给它降权（「这家店总拒客，先降分」）；②失败小区测量存 **VarConnEstFailReport**，下次连接成功经 connEstFailInfoAvailable 告知网络——MRO 分析的原料。',
+        ref: '38.331#5.3.3.7' }
+    ] },
+    'm0:q4': { levels: [
+      { q: 'T302 运行期间到底禁什么？',
+        a: '禁的是**接入尝试**不是驻留：§5.3.14.2——T302 running 期间 UAC 检查**除 access category 2/0 外一律判 barred**（紧急呼叫与寻呼响应永放行）。UE 仍正常驻留、听寻呼、收系统信息。',
+        ref: '38.331#5.3.15.2' },
+      { q: 'T300 超时和收到 RRCReject，排障方向有何不同？',
+        a: '**超时=没人应答**（UE 自己发现，SRB0 是 TM 模式没有否定应答）——查覆盖/调度；**Reject=明确被拒**（gNB 回 waitTime，网络主动告知+冷却期）——查拥塞控制。一个盲等一个明拒，KPI 归因与排障路径完全不同。',
+        ref: '38.331#5.3.15.2' }
+    ] },
+    'ma:q0': { levels: [
+      { q: '为什么说 gNB 是邮差不是收件人？',
+        a: '§8.6.1.2 原话：NAS-PDU **transferred without interpretation**——gNB 对注册请求不拆信不解读，原样装进 INITIAL UE MESSAGE 上交 AMF。NAS 的对话两端是 UE 与 AMF 的 5GMM 层，gNB 全程只是 N1 管道。',
+        ref: '38.413#8.6.1' },
+      { q: 'INITIAL UE MESSAGE 除了捎信还做哪两件事？',
+        a: '①给 UE 分配 **RAN UE NGAP ID**——此后 NG 侧信令的号牌（与 AMF UE NGAP ID 配对）；②报上 **TAI 与用户位置**——AMF 据此选路管辖。没有这条首帧，注册请求永远停在基站。',
+        ref: '38.413#8.6.1' }
+    ] },
+    'ma:q3': { levels: [
+      { q: 'KgNB 由谁派生？AMF 掌握它吗？',
+        a: 'AMF 经 ICS REQUEST 交出 **Security Key（K_AMF 派生材料）**后，**gNB 与 UE 各自派生 KgNB**——密钥分段持有：AMF 只掌握 NAS 域（KAMF→KNASint/KNASenc），AS 域的 KgNB 全程不出 gNB 与 UE 两端。',
+        ref: '38.413#8.3.1' },
+      { q: 'NAS 的安全模式命令为什么能搭 ICS 的车？',
+        a: '§8.3.1.2 原话：NAS-PDU 包含在 ICS REQUEST 中时，NG-RAN 应 **pass it transparently towards the UE**——核心网连保安都搭这条车：NAS SMC 随 ICS 的 NAS-PDU 抵达 gNB，再由 DLInformationTransfer 专线投递给 UE。',
+        ref: '38.413#8.3.1' }
+    ] },
+    'mc:q2': { levels: [
+      { q: '竞争解决成功后，TEMPORARY_C-RNTI 的下场？',
+        a: '两条路（§5.1.5）：**CCCH 分支**——先 set the C-RNTI to the value of the TEMPORARY_C-RNTI（临时工转正）再 discard 临时工牌；**C-RNTI 分支**（Msg3 装 C-RNTI CE 的老熟人）——直接 discard，用完即弃。',
+        ref: '38.321#5.1.5' },
+      { q: '竞争失败时，为什么第一动作是丢弃 TC-RNTI？',
+        a: '假工牌不立刻作废，继续听它的调度就会**干扰真正的赢家**。失败账本（§5.1.5）接着：丢弃已成功解码的 MAC PDU（解得再好也是别人的信）、flush Msg3 的 HARQ 缓存（防旧比特混进下一轮）——然后计数 +1、随机退避、重选资源再来。',
+        ref: '38.321#5.1.5' }
+    ] },
+    'mn:q3': { levels: [
+      { q: '收到 SERVICE REJECT #22 Congestion 后该怎么做？',
+        a: '#22 随信可带 **T3346 冷静期**——到点之前不再向网络发起（立即重发只会加重拥塞并延长退避）。注意拒绝不等于白跑：RRC 连接可能仍保留，UE 按 cause 决定是否回 5GMM-IDLE。',
+        ref: '24.501#5.6.1.5' },
+      { q: 'T3346 和 RRC 的 T302 是什么关系？',
+        a: '**T3346 是 NAS 的 T302**：同为「冷静期」设计，一层管接入（RRCReject→T302）、一层管 NAS 业务（SERVICE REJECT→T3346）——两层都能「让你缓缓再试」，档位与语义各自独立。两表同时跑时 UE 的尝试节奏由更长者约束——排障先问「哪层在退避」。',
+        ref: '24.501#5.6.1.5' }
+    ] },
+    'mg:q2': { levels: [
+      { q: 'PDU 会话建立后，哪个属性还允许改？',
+        a: '只有 **Serving PLMN 的 S-NSSAI**（UE 移到别的 PLMN 时）——§5.6.1 属性表其余全部 No：DNN、PDU Session Type、SSC mode、PDU Session ID 一旦定终身。会话的三件终身大事（SSC/类型/DNN）在建立时拍板。',
+        ref: '23.501#5.6.1' },
+      { q: '为什么 DNN/SSC mode 定了就不能改？要换怎么办？',
+        a: '会话是端到端契约：锚点 UPF、IP 地址、QoS 框架都钉死在建立时刻——中途改契约等于两端账本对不上。真要换锚走 **SSC mode 3**：先建新会话再放旧会话（请求里带 Old PDU Session ID 指名放行），UE 无感断线但 IP 不保。',
+        ref: '23.501#5.6.1' }
+    ] },
+    'mg:q4': { levels: [
+      { q: 'end marker 包到底是什么？',
+        a: '§5.8.2.9：隧道切换时 UPF 在**旧路径最后一个 PDU 之后**补发的界碑包——协助目标 RAN 的重排序功能。它是「乱序治理的路标」，**不是释放命令**。',
+        ref: '23.501#5.8.2.9' },
+      { q: '为什么隧道一换就必须有它？',
+        a: '旧路上还有在途包、新路上先到的包已在处理——不标界碑就**乱序**。目标 gNB 收到 end marker 才知道「旧路的包全到齐了」，放心把前后两段按序重排。一段包尾的路标，成全了 Xn 切换的无缝（N2 切换清算时同款配合）。',
+        ref: '23.501#5.8.2.9' }
+    ] },
+    'mp:q4': { levels: [
+      { q: 'RLC AM 发送侧的优先级顺序？',
+        a: '§5.2.3.1 两条 shall prioritize 原文：**控制 PDU（STATUS）> 已发未确认的重传 > 新数据**——先回话、再补货、最后上新品。三句话记住 AM 发送侧的全部纪律。',
+        ref: '38.322#5.2.3.1' },
+      { q: '为什么 STATUS 永远最优先？',
+        a: '对端正等你的确认滑窗：STATUS 不发，对端发送窗口堵死，你俩一起瘫。重传次之（补洞优先于铺新），新数据殿后——流控骨架与 TCP 同型；对端还有 t-StatusProhibit 节流，回执怕洪水——讨要（P 位）与上报（重组到期）最终都汇入合并发送。',
+        ref: '38.322#5.2.3.1' }
+    ] },
+    'mp:d2': { levels: [
+      { q: 'PDCP 发送侧的动作顺序是什么？',
+        a: '§5.2.1 全套七连：关联 COUNT=TX_NEXT→**ROHC 头压缩→完整性保护→加密**→SN=TX_NEXT mod 2^SN、TX_NEXT+1→交下层——**先压缩后完整性后加密**，顺序写死在原文。',
+        ref: '38.323#5.2.1' },
+      { q: '为什么 ROHC 必须排在完整性保护之前？',
+        a: '完整性保护的对象是**压缩后的 PDU 头+数据**（§5.9）——接收端验章验的必须与发送端盖章的是同一个东西：先压后保，章才对得上货。先加密后压缩更不行——密文压不动。顺序是协议设计，不是风格偏好。',
+        ref: '38.323#5.2.1' }
+    ] },
+    'ms:q4': { levels: [
+      { q: 'AMF 初建连接时不把 NH 发给 gNB，后果是什么？',
+        a: '§6.9.2.1.1：初建时 KgNB 直接从 KAMF 派生、挂 NCC=0 的虚拟 NH，**第一个真 NH 配 NCC=1 且不发**——gNB 置 NCC=0、手里无 NH。NOTE 2 明说后果：**紧接着的第一切换只能横向衍生**（源站自算），纵向要等 AMF 递 {NH,NCC}。',
+        ref: '33.501#6.9.2.1.1' },
+      { q: '横向衍生与纵向衍生各自的意义？',
+        a: '**横向**：源站用旧 KgNB 掺目标小区 PCI/频点自算——快、不惊动 AMF，密钥与「哪根天线」绑死；软肋是链条一环扣一环。**纵向**：AMF 现算全新 {NH,NCC} 递目标站——NH 链单向滚动，攻破当前站推不出过去的 NH，**历史会话不回溯失守**（前向安全）——「破一个站不回溯历史」。',
+        ref: '33.501#6.9.2.1.1' }
+    ] },
+    'my:d6': { levels: [
+      { q: '寻呼公式里的 UE_ID 怎么取？',
+        a: '§7.1：**UE_ID = 5G-S-TMSI mod 1024**（eDRX 时 mod 4096）；没注册、没有 5G-S-TMSI 就用 **UE_ID = 0**。再由（SFN+PF_offset）mod T 定寻呼帧、i_s 定帧内 PO。',
+        ref: '38.304#7.1' },
+      { q: 'UE 和网络各算各的，为什么能对上？',
+        a: '**同一套公开公式、两侧独立计算、结果天然一致**——网络按你的 5G-S-TMSI 算出在哪个 PF/PO 喊话，你按同一公式算出在哪一刻醒来。省掉「通知你几点醒来」这条鸡生蛋信令；周期 T 取 RRC 配置、上层配置与系统广播默认三处最短者。',
+        ref: '38.304#7.1' }
+    ] },
+    'ml:q4': { levels: [
+      { q: '为什么 NR 抓包里看不到 ReestablishmentReject？',
+        a: '**消息表里压根没有**——38.331 §6.2.1 消息清单可证（LTE 的 RRCConnectionReestablishmentReject 被 NR 删了）。网络对重建立失败的处置是发 **RRCSetup 兜底**：§5.3.7.8 全文一句——perform the RRC connection establishment as specified in 5.3.3.4。RRCSetup 跟在重建立请求后面就是「被拒」的 NR 语法。',
+        ref: '38.331#5.3.7.8' },
+      { q: '兜底比拒绝好在哪？重建立有哪三条出口？',
+        a: '省一个往返：网络直接把下一步要走的路递到手上，UE 无感切换到建链流程（丢上下文、从 CCCH 重来）。三条出口：**接受**（Reestablishment）/ **兜底**（RRCSetup）/ **超时**（T301 到期回 idle）——设计哲学：绝不硬撑，从头再来。',
+        ref: '38.331#5.3.7.8' }
+    ] },
+    'ml:d1': { levels: [
+      { q: 'T302 在跑（刚被 Reject），UE 的最优出路是？',
+        a: '§5.3.3.5：**cell selection/reselection 发生时 stop timer T302 并 inform upper layers about barring alleviation**——换小区即解禁。barring 是「本小区冷静期」，不是全网封禁；留在原地干等反而浪费。',
+        ref: '36.331#5.3.3.5' },
+      { q: 'LTE 的 AC barring 和 NR 的 UAC 差在哪？',
+        a: 'LTE **一维**：AC 0–9 位图掷骰子（rand < ac-BarringFactor 才放行），被挡起 **Tbarring=(0.7+0.6·rand)·ac-BarringTime** 随机退避。NR **二维**：Access Category（0–79 按业务）× Access Identity（1/2/11–15 身份）矩阵，高优身份一票通道——拥塞控制从「一刀切」进化到「精准分流」。',
+        ref: '36.331#5.3.3.5' }
+    ] },
+    'ml:d5': { levels: [
+      { q: 'release with suspend 和普通 release 的本质区别？',
+        a: '**挂起存上下文**：UE AS 上下文（安全密钥、C-RNTI、小区身份、PDCP/ROHC 状态，接 5GC 的 LTE 版还存 QoS flow→DRB 映射规则）——这是 resume 快速恢复的本钱；普通 release 一切归零，回来重走全家桶。',
+        ref: '36.331#5.3.8.1' },
+      { q: '「LTE 有没有 INACTIVE」的标准答案？',
+        a: '一句话三个精度台阶：**EPC 版没有**；**Rel-16 起接 5GC 的 LTE 有**（36.331 §4.2.1 括号原文 RRC_INACTIVE (if the UE is connected to 5GC)）；**NR 从第一天就是三态**。说清时代，比背两态三态高一个段位。',
+        ref: '36.331#5.3.8.1' }
+    ] },
   };
   g.RRC_FOLLOWUPS = {
     get: function (qid) { return Object.prototype.hasOwnProperty.call(F, qid) ? F[qid] : null; },

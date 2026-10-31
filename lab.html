@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.83.0";
+const APP_VERSION = "1.85.0";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -8508,6 +8508,51 @@ function csn1Canon(x) {
   }
   return x;
 }
+// CC 批（v1.85.0）：CSN.1 items 级差异树——canonical 归一后的逐节点路径差异（呈现层数据面）。
+// 路径 = 对象键（字典序遍历，与 csn1Canon 同口径——键序差不产节点）/ 数组下标 [i]（数组序
+// 语义保留）；标量差记 {path, old, new}；键增删记 (无)；每 def 节点上限 maxNodes（超出置
+// truncated 如实截断）、深度上限 maxDepth（到顶记 '…' 摘要）。old/new：标量 String 原样、
+// 结构紧凑 JSON。仅呈现层——msg/计数不变（零基线漂移），旧消费者忽略未知字段。
+function csn1DiffPaths(l, r, opts = {}) {
+  const maxNodes = opts.maxNodes ?? 8;
+  const maxDepth = opts.maxDepth ?? 12;
+  const nodes = [];
+  let truncated = false;
+  const j = (v) => (v == null || typeof v !== 'object' ? String(v) : JSON.stringify(v));
+  const walk = (a, b, path, depth) => {
+    if (nodes.length >= maxNodes) { truncated = true; return; }
+    const bothObj = a && b && typeof a === 'object' && typeof b === 'object' && !Array.isArray(a) && !Array.isArray(b);
+    const bothArr = Array.isArray(a) && Array.isArray(b);
+    if (bothObj || bothArr) {
+      if (depth > maxDepth) { nodes.push({ path: path + '…', old: '…', new: '…' }); truncated = true; return; }
+      if (bothObj) {
+        const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort();
+        for (const k of keys) {
+          if (nodes.length >= maxNodes) { truncated = true; return; }
+          const p = path ? `${path}.${k}` : k;
+          const inA = k in a, inB = k in b;
+          if (inA && !inB) nodes.push({ path: p, old: j(a[k]), new: '(无)' });
+          else if (!inA && inB) nodes.push({ path: p, old: '(无)', new: j(b[k]) });
+          else if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) walk(a[k], b[k], p, depth + 1);
+        }
+      } else {
+        const n = Math.max(a.length, b.length);
+        for (let i = 0; i < n; i++) {
+          if (nodes.length >= maxNodes) { truncated = true; return; }
+          const p = `${path}[${i}]`;
+          if (i >= b.length) nodes.push({ path: p, old: j(a[i]), new: '(无)' });
+          else if (i >= a.length) nodes.push({ path: p, old: '(无)', new: j(b[i]) });
+          else if (JSON.stringify(a[i]) !== JSON.stringify(b[i])) walk(a[i], b[i], p, depth + 1);
+        }
+      }
+    } else {
+      nodes.push({ path: path || '(root)', old: j(a), new: j(b) });
+    }
+  };
+  walk(l, r, '', 0);
+  return { nodes, truncated };
+}
+
 function diffNasCsn1(ref, lie, rie, findings) {
   const L = { msg: ref, ref };
   if (!lie.csn1 || !rie.csn1) {
@@ -8535,7 +8580,10 @@ function diffNasCsn1(ref, lie, rie, findings) {
     findings.push({ severity: 'info', kind: 'nas-ie-csn1-def', msg: `${ref}：CSN.1 def 键面变化（${parts.join('；')}）`, loc: L });
   }
   if (changed.length) {
-    findings.push({ severity: 'info', kind: 'nas-ie-csn1-items', msg: `${ref}：CSN.1 items 语义变化 ×${changed.length}（${changed.slice(0, 3).join('、')}${changed.length > 3 ? ' 等' : ''}）`, loc: L });
+    // CC（v1.85.0）：差异树数据面——逐 changed def 的 canonical 路径节点（有界截断），
+    // msg/计数不变（零基线漂移）；nasdiff 门只对拍 cumulative，D 侧报告重产刷新即含 tree。
+    const tree = changed.map((k) => ({ def: k, ...csn1DiffPaths(ld[k], rd[k]) }));
+    findings.push({ severity: 'info', kind: 'nas-ie-csn1-items', msg: `${ref}：CSN.1 items 语义变化 ×${changed.length}（${changed.slice(0, 3).join('、')}${changed.length > 3 ? ' 等' : ''}）`, loc: L, tree });
   }
   if ((lie.csn1.root ?? null) !== (rie.csn1.root ?? null)) {
     findings.push({ severity: 'info', kind: 'nas-ie-csn1-root', msg: `${ref}：CSN.1 root 指向变化「${lie.csn1.root ?? ''}」→「${rie.csn1.root ?? ''}」`, loc: L });
@@ -14321,7 +14369,7 @@ function gtpuKvLine(obj, skip) {
 }
 
 
-window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, GTPU_IE_GEOMETRY, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutRows, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, quirkRowKey, rowStopHit, msgStopHit, valueRemapHit, canonicalizeHit, rowCanonicalizeHit, domainValueHit, rowDomainHit, tsharkArtifactMatch, DTAP_SPECS, MSG_TABLE_SPECS, SAMPLE_STOP_ROWS, SAMPLE_STOP_MSGS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, VALUE_DOMAIN_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
+window.RW = { hexToBits, BitWriter, BitReader, encodeNode, decodeNode, decodeTree, APER, mulberry32, validateNode, validateModule, makeCtx, sampleValue, BUILTINS, BUILTIN_LIST, tokenize, repairDraftText, parseModule, parseToModule, parseAsn1File, SchemaRegistry, bitWidthInt, bitWidthEnum, diffIR, finalizeReport, paragraphsFromXml, extractAsn1, extractFromDocumentXml, runText, normalizeChars, flowFromXml, tableRows, resolveVMerge, parseBitTable, splitNameRef, parseMessageTable, parseSmsElementsTable, parseGtpIeTable, parseGtpMsgRows, parsePfcpMsgRows, parseGtpv1MsgRows, zipIsZip, crc32, zipEntries, zipUnpack, bytesToUtf8, OCT, encHalf, packHalfOctets, encIE, decIE, H, csn1Decode, csn1Encode, Csn1External, csn1NormName, parseGrammar, gtpcHeader, gtpcTli, decGtpcMsg, encGtpcMsg, gtpv1Header, decGtpv1Msg, encGtpv1Msg, pfcpHeader, pfcpIe, pfcpWalk, decPfcpMsg, encPfcpMsg, pfcpSeidHex, pfcpLinkFlow, gtpuHeader, gtpuExtensionChain, gtpuParse, gtpuExtBytes, ipv4Frame, ipv6Frame, ethernetFrame, gtpuEcho, gtpuEchoRecovery, gtpuBuild, pscUnknownKeys, pduSessionInfo, parsePduSessionInfo, pduSetInfo, parsePduSetInfo, GTPU_EXT_TYPES, GTPU_IE_GEOMETRY, PSC_FIELDS, PSC_SETTABLE, PSET_FIELDS, PSET_SETTABLE, rowFormat, fixedLen, rowPresence, rowIei, nasPD, planVhRun, decMsg, encMsg, layoutRows, layoutSample, layoutPack, layoutUnpack, diffGtpSchema, csn1DiffPaths, diffNasSchema, diffChain, shtReadable, decSec, encSec, secSummary, encSecProtected, decipherSec, SHT_DESC, apnEncode, apnDecode, plmnEncode, plmnDecode, bcdDecode, bcdEncode, gsm7Unpack, smsTpUdText, smsAddrDecode, smsSctsDecode, smsMsgSemantics, l2plCheck, sha256, hmacSha256, kdfS, nasKeyDerivation, aesEncryptBlock, aesCmac, cmacBits, snow3gKeystream, zucKeystream, eea0, eea1, snow3gMac, eia1, eea2, eia2, eea3, eia3, iaAlgorithm, eaAlgorithm, macToHex, nasCount32, nasMacInput, nasMac, nasCipher, wsFrames, wsNasCandidates, wsHexToBytes, wsMatchSchema, splitHeading, parseCaption, styleMapFromStylesXml, ingestDocumentXml, parseTypeTables, resolveMsgType, rescueRow, parseValueLayout, extractBitAnchors, walkRow, buildSchema, buildCsn1Descriptors, mergeCsn1IntoIes, parseTypeTables24008, mergeContentRows, compareExtTypes, classifyProblems, parseTypeTables44018, parseTypeTables24011, ingestDocxZip, sampleStopHit, quirkRowKey, rowStopHit, msgStopHit, valueRemapHit, canonicalizeHit, rowCanonicalizeHit, domainValueHit, rowDomainHit, tsharkArtifactMatch, DTAP_SPECS, MSG_TABLE_SPECS, SAMPLE_STOP_ROWS, SAMPLE_STOP_MSGS, VALUE_REMAP_ROWS, VALUE_CANONICALIZE_ROWS, VALUE_DOMAIN_ROWS, TSHARK_ARTIFACTS, resetSemanticHits, semanticGtpValue, semanticPfcpValue, sampleSchema, semanticHitLedger, esc, gtpuHexToBytes, gtpuBytesToHex, gtpuKvParse, gtpuPayloadOf, gtpuKvLine };
 
 // ==== src/ui/app.js ====
 // UI 胶水层（薄）：所有计算走 RW 引擎（同作用域直调）。构建时与其他模块拼进单文件。
@@ -15291,6 +15339,15 @@ function vdSnippet(slot, ln) {
   }
   return `<div style="border:1px solid var(--bd-faint);border-radius:3px;margin-top:4px;overflow-x:auto">${out}</div>`;
 }
+// CC（v1.85.0）：csn1 items 差异树呈现（有界截断，默认折叠）——仅呈现层
+function nasDiffTreeHtml(f) {
+  if (!f.tree || !f.tree.length) return '';
+  const n = f.tree.reduce((a, t) => a + t.nodes.length, 0);
+  const cut = f.tree.some((t) => t.truncated) ? '，截断' : '';
+  return `<details style="margin-top:3px"><summary style="cursor:pointer;font:400 10.5px var(--mono);color:var(--t4)">差异树（${n} 节点${cut}）</summary>
+    <div style="font:400 10.5px/1.6 var(--mono);color:var(--t3);padding:4px 0 0 12px">${f.tree.map((t) => `<div><b>${esc(t.def)}</b>${t.truncated ? '（截断）' : ''}${t.nodes.map((x) => `<div style="padding-left:12px">${esc(x.path)}: ${esc(x.old)} → ${esc(x.new)}</div>`).join('')}</div>`).join('')}</div></details>`;
+}
+
 function vdShowDetail(name) {
   const r = versionStore._rows.find(x => x.name === name);
   const el = $('vdDetail');
@@ -15558,7 +15615,7 @@ function registryAddVersion(label) {
 // 官方 docx/zip → schema/ASN.1 全程本机：NAS 走 ingestDocxZip（与 CLI 同一纯函数，
 // 导出 JSON 与 nasdef 产物逐字节一致）；ASN.1 走 extractFromDocumentXml（ASN1START 块拼接）。
 const ingestState = { results: [], seq: 0 };
-const NAS_SPECS = ['24501', '24301', '24008', '44018', '24080', '24011', '23040', '29274', '29060', '29244'];
+const NAS_SPECS = ['24501', '24301', '24008', '44018', '24080', '24011', '23040', '29274', '29060', '29244', '29281']; // CB（v1.84.0）补 29281（GTPv1-U 消息面 UI 接入；encGtpv1Msg 头参数全默认值可独立编码）
 
 function ingestAutoName(fname) {
   const m = /^(?:[3GPP ]*)?(\d{5})-([0-9a-z]+)\.(?:zip|docx)$/i.exec(fname.trim());
@@ -16120,7 +16177,7 @@ function nasRefreshSelectors() {
   // 33.501/33.401 SHT 安全帧封装仅 LTE/5G NAS 有：GSM RR 的 A5 在 RR 层（44.018 无
   // SHT 帧形态）、SS 消息不加密——这两族隐藏安全卡
   const secCard = $('nasSecCard');
-  if (secCard) secCard.style.display = ['44018', '24080', '24011', '23040', '29274', '29060', '29244'].includes(nasState.spec) ? 'none' : '';
+  if (secCard) secCard.style.display = ['44018', '24080', '24011', '23040', '29274', '29060', '29244', '29281'].includes(nasState.spec) ? 'none' : '';
   $('nasDiffL').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${esc(k)}</option>`).join('');
   $('nasDiffR').innerHTML = Object.keys(nasState.schemas).map((k) => `<option>${esc(k)}</option>`).join('');
   nasSecRefreshAlgos();
@@ -16146,7 +16203,10 @@ function nasRenderForm() {
         : (nasState.spec === '24301' && /^protocol discriminator$/i.test(name)) ? `${nasPD(inst)}（PD）`
         : /extended protocol discriminator/i.test(name) ? (nasState.spec === '24501' ? '0x7E' : '半八位组')
         : '自动';
-      input = `<span class="dim" style="font:11px var(--mono)">${v}</span>`;
+      // CC（v1.85.0）：24.501 头八位组模型注记（呈现层——0xe 为固定半填充，pycrate oracle
+      // 同构，非用户数据；线缆行为由 codec.js EPD 特判决定，本注不改编码）
+      const epdTip = nasState.spec === '24501' ? ' title="24.501 头八位组模型：EPD 占高半、低半为固定半填充 0xe（pycrate oracle 同构）——非用户数据，编码由引擎按 5GMM 0x7E / 5GSM 0x2E 决定"' : '';
+      input = `<span class="dim" style="font:11px var(--mono)"${epdTip}>${v}</span>`;
     } else if (fmt === 'UNK' || (ieiVal == null && (r.iei || '').trim() !== '')) {
       input = `<span class="dim" style="font:11px var(--mono)">占位行（不可编码）</span>`;
     } else if (fmt === 'VH' || fmt === 'TV1') {
@@ -16604,15 +16664,18 @@ function nasDoDiff() {
   $('nasDiffOut').innerHTML = `
     <p style="font:400 12px var(--sans);color:var(--t3);margin-bottom:8px">${esc(lk)} → ${esc(rk)}：break ${counts.break} · warn ${counts.warn} · info ${counts.info} · ok ${counts.ok}　<span class="dim">（点击带定位的条目跳到消息表）</span></p>
     <div style="max-height:420px;overflow:auto">
-    ${findings.map((f) => `<div class="diff-finding" data-loc="${esc(JSON.stringify(f.loc || {}))}" style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--bd-faint);${f.loc && (f.loc.msg || f.loc.ref) ? 'cursor:pointer' : ''}">
+    ${findings.map((f) => `<div class="diff-finding" data-loc="${esc(JSON.stringify(f.loc || {}))}" style="padding:4px 0;border-bottom:1px solid var(--bd-faint);${f.loc && (f.loc.msg || f.loc.ref) ? 'cursor:pointer' : ''}">
+      <div style="display:flex;gap:8px">
       <span style="color:${color[f.severity]};font:600 10px var(--mono);width:40px;flex-shrink:0">${f.severity.toUpperCase()}</span>
-      <span style="font:400 12px/1.5 var(--sans)">${esc(f.msg)}</span></div>`).join('') || '<p class="muted">无差异。</p>'}
+      <span style="font:400 12px/1.5 var(--sans)">${esc(f.msg)}</span></div>${nasDiffTreeHtml(f)}</div>`).join('') || '<p class="muted">无差异。</p>'}
     </div>`;
 }
 
 // Q3：同规范全部已载版本按版本序链式比对（A→B→C…），逐段计数 + 累计趋势。
 function nasDiffFnFor(spec) {
-  return spec === '29060' || spec === '29274' || spec === '29244' ? diffGtpSchema : diffNasSchema;
+  // CB（v1.84.0）补 29281：GTPv1-U 与 29060 同 'gtp' 行模型——误走 diffNasSchema 会拿
+  // MSG_TABLE_SPECS 判定面错判（实例 direction 配对/行级 nas-row-* 语义不适配 GTPv1-U）
+  return spec === '29060' || spec === '29274' || spec === '29244' || spec === '29281' ? diffGtpSchema : diffNasSchema;
 }
 function nasDoDiffChain() {
   const lk = $('nasDiffL').value;
@@ -16643,9 +16706,10 @@ function nasDoDiffChain() {
     </table>
     <div style="max-height:320px;overflow:auto;margin-top:8px">
       ${chain.segments.map((s) => `<details style="margin:4px 0"><summary style="cursor:pointer;font:400 12px var(--sans)">${esc(s.from)} → ${esc(s.to)}：break ${s.counts.break} · warn ${s.counts.warn} · info ${s.counts.info} · ok ${s.counts.ok}</summary>
-        ${s.findings.map((f) => `<div class="diff-finding" data-loc="${esc(JSON.stringify(f.loc || {}))}" data-rk="${esc(spec + ' ' + s.to)}" style="display:flex;gap:8px;padding:3px 0 3px 12px;${f.loc && (f.loc.msg || f.loc.ref) ? 'cursor:pointer' : ''}">
+        ${s.findings.map((f) => `<div class="diff-finding" data-loc="${esc(JSON.stringify(f.loc || {}))}" data-rk="${esc(spec + ' ' + s.to)}" style="padding:3px 0 3px 12px;${f.loc && (f.loc.msg || f.loc.ref) ? 'cursor:pointer' : ''}">
+          <div style="display:flex;gap:8px">
           <span style="color:${color[f.severity]};font:600 10px var(--mono);width:40px;flex-shrink:0">${f.severity.toUpperCase()}</span>
-          <span style="font:400 12px/1.5 var(--sans)">${esc(f.msg)}</span></div>`).join('') || '<p class="muted" style="padding-left:12px">无差异。</p>'}
+          <span style="font:400 12px/1.5 var(--sans)">${esc(f.msg)}</span></div>${nasDiffTreeHtml(f)}</div>`).join('') || '<p class="muted" style="padding-left:12px">无差异。</p>'}
       </details>`).join('')}
     </div>`;
 }
