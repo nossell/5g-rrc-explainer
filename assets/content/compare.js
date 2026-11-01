@@ -51,7 +51,7 @@
     { g: 'recfg', topic: '连接释放',
       lte: { m: 'RRCConnectionRelease', s: '36.331#5.3.8.3', n: '延迟 60ms 执行（等底层确认）；redirectedCarrierInfo 重定向、deprioritisationReq→T325 同款。' },
       nr: { m: 'RRCRelease', s: '38.331#5.3.8.3', n: '同款细节全保留；suspend 语义天生三态——suspendConfig 一带进 RRC_INACTIVE。' },
-      diff: '大分岔在挂起：EPC 版 LTE 无 INACTIVE、接 5GC 的 LTE Rel-16 起有（§4.2.1 括号原文）、NR 从第一天就是三态。' },
+      diff: '大分岔在挂起：EPC 版 LTE 无 INACTIVE、接 5GC 的 LTE Rel-15 起有（§4.2.1 括号原文；附录 H 15.4.0 起修正 CR 在案）、NR 从第一天就是三态。' },
     { g: 'recfg', topic: '挂起恢复失败',
       lte: { m: 'Reject + rrc-SuspendIndication', s: '36.331#5.3.3.8', n: '带开关：保持挂起（SRB1 挂起、上下文还在）；不带：释放全部并丢弃 resumeIdentity——挂起作废。' },
       nr: { m: 'T319 超时 fallback', s: '38.331#5.3.13.5', n: 'resume 窗口 T319 专管；超时记 VarConnEstFailReport 后 fallback 到全新建链（RRCSetupRequest 重走三步）。' },

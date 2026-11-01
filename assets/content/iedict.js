@@ -51,8 +51,8 @@
       refs: ['38.413#8.6.1', '38.413#8.6.2'], seeAlso: ['dedicatedNAS-Message'] },
     /* ---------- 安全 ---------- */
     { k: 'security-key', term: 'Security Key（安全钥匙材料）', spec: 'TS 38.413 / 33.501',
-      brief: 'AMF 交出的钥匙坯（K_AMF 派生物）——gNB 自己开模派生 KgNB，AMF 反而不知道 KgNB。',
-      full: 'INITIAL CONTEXT SETUP REQUEST 携带的核心安全材料：从 K_AMF 派生而来，交给 gNB 后由 gNB（和 UE 各自）进一步派生 KgNB——**密钥分段持有**是 5G 安全架构的关键设计：AMF 不掌握 AS 密钥，gNB 不掌握 NAS 根密钥，任何一段被攻破都不殃及全网。切换场景下配合 NH（Next Hop）链继续派生（nextHopChainingCount 就是链计数）。把它与"钥匙坯/开模"的比喻绑定记忆最牢。',
+      brief: 'AMF 从 K_AMF 生成的 KgNB 本体，经 ICS REQUEST 下发 gNB（33.501 §6.2.2.1）——gNB 收到即派生四把 AS 末端密钥。',
+      full: 'INITIAL CONTEXT SETUP REQUEST 携带的核心安全材料：**Security Key 就是 KgNB 本体**——33.501 §6.2.2.1 原文 AMF shall generate KgNB and transfer it to the gNB，AMF 从 K_AMF 生成后经此下发，UE 侧同算；gNB 收到后从它派生 KRRCint/KRRCenc/KUPint/KUPenc 四把末端密钥。**密钥分段持有**的设计不变：NAS 域（KNASint/KNASenc）留在 AMF/UE，AS 域末端密钥只存在于 gNB/UE，AMF 发完 KgNB 不再使用、gNB 不掌握 NAS 根密钥——任何一段被攻破都不殃及全网。切换场景下配合 NH（Next Hop）链继续派生（nextHopChainingCount 就是链计数）。',
       refs: ['38.413#8.3.1'], seeAlso: ['ue-security-capabilities', 'securityConfigSMC'] },
     { k: 'ue-security-capabilities', term: 'UE Security Capabilities（安全能力）', spec: 'TS 38.413',
       brief: '手机会哪些锁：完整性/加密算法清单，gNB 从中挑一副双方都会的。',

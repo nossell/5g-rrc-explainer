@@ -189,7 +189,7 @@ textarea:focus{border-color:var(--accent);box-shadow:0 0 0 1px var(--ring)}
 
 (function () {
 'use strict';
-const APP_VERSION = "1.85.0";
+const APP_VERSION = "1.88.1";
 // ==== src/per/bits.js ====
 // 位流原语：UPER 引擎的读写底座。MSB 先；octetAlign 是 UPER 长度行列式/开放类型的对齐动作。
 class BitWriter {
@@ -12664,6 +12664,27 @@ function rowCanonicalizeHit(spec, name) {
 // 退役迁入本表；oracle:wide + 四 seed 矩阵全量重验为本表条目的入表证据。
 const VALUE_DOMAIN_ROWS = [
   {
+    id: 'NAS501-UEPOL-MSGTYPE-D',
+    spec: '24501', row: 'ue policy delivery service message type d.', domain: 'modRange', mod: 4,
+    reason: '24.501 附件 D UE policy 消息类型行（MANAGE UE POLICY ×3/UE STATE INDICATION）：规范域 1-4（独立域源=pycrate TS24501_UEPOL FGUEPOLTypeClasses 类字典键）——采样全字节域越域（实测 0x00）致 pycrate 独立核 err97；modRange 派生 1+v%4（零额外 rng、值多样性保留）',
+    evidence: 'tmp/_ce1_probe.py（附件 8 帧 err97 全军）+ tmp/_ce1b_probe.py（头域归位后 err96=内容面拒——LV-E 随机内容非规范结构，内容面为采样域边界非独立核范围）+ pycrate TS24501_UEPOL 类字典',
+    batch: 'CE（v1.87.0）',
+  },
+  {
+    id: 'NAS501-ETHPORT-MSGTYPE-E',
+    spec: '24501', row: 'ethernet port management service message type e.', domain: 'modRange', mod: 6,
+    reason: '24.501 附件 E Ethernet port management 消息类型行（MANAGE ETHERNET PORT ×2/NOTIFY 族 ×3）：规范域 1-6（独立域源=pycrate TS24519_TSNAF FGTSNAFEthPortTypeClasses 类字典键）——同上越域；modRange 派生 1+v%6（pycrate 上游 parse_PortMgmtInfoCont unpack 未索引缺陷，载体侧语义等价复刻绕过）',
+    evidence: 'tmp/_ce1_probe.py + tmp/_ce1b_probe.py + pycrate TS24519_TSNAF 类字典（unpack 缺陷实录：NAS5G.py parse_PortMgmtInfoCont `typ = unpack(\'>B\', buf[:1])` 返回元组未索引）',
+    batch: 'CE（v1.87.0）',
+  },
+  {
+    id: 'NAS501-UEPOL-MSGTYPE-D-RESULT',
+    spec: '24501', row: 'ue policy delivery service message type d.6.1.', domain: 'modRange', mod: 4,
+    reason: '同 NAS501-UEPOL-MSGTYPE-D——MANAGE UE POLICY COMMAND REJECT（D.5.3.1）的类型行名带节号后缀（ingest 行名原样「…message type D.6.1.」），行名键精确匹配需独立条目',
+    evidence: 'tmp/_ce1_probe.py（D.5.3.1 err97）+ schema_24501_g20.json D.5.3.1 行名原文',
+    batch: 'CE（v1.87.0）',
+  },
+  {
     id: 'GTPV1-134-PDP-CONTEXT-MSISDN-TBCD',
     spec: '29060', iei: 134, domain: 'tbcdDigits',
     reason: 'IE 134 PDP Context/MSISDN 行：值=首字节计数域+尾数字域——计数非零小于尾容量触发深挖异常（BC 分诊 9 帧定案），派生形=首 00（计数 0 尾随容忍）+尾 nibble 收敛数字 0-9，多样性保留在尾部，探针+全量 oracle CLEAN',
@@ -13738,7 +13759,17 @@ function sampleSchema(schema, N, seed, msgRe = null, opts = {}) {
             const flen = fixedLenOf(r.len);
             const name = (r.name || '').toLowerCase();
             const mandatory = /^M$/i.test((r.presence || '').trim());
-            if (/extended protocol discriminator|security header type|message (identity|type)/.test(name)) continue; // 头行自动
+            // 头行自动：EPD/SHT 恒自动写；message identity/type 行默认自动写（不采样）——
+            // 唯一例外=24.501 附件 D/E 载荷消息（spec 24501 + section 前缀 D./E. 且
+            // msgType=null：附件规范形而非摄取缺口），其类型行入采并按 modRange 域派生。
+            // 其余 msgType=null 消息维持 v1.86 行为（encMsg 写 msgType??0）——v1.88.1 审计
+            // 勘正：v1.87.0 的 `inst.msgType != null` 单条件把 44.018 两条摄取缺口消息
+            // （HANDOVER TO GERAN Iu MODE COMMAND 9.1.15 / GPRS Information 9.6.1）也放进
+            // 了类型行采样，44018 采样流自 9.1.15 起整段漂移（既有 wide 基线 stale）；
+            // 修复后非附件面零漂移。
+            if (/extended protocol discriminator|security header type/.test(name)) continue; // 头行自动
+            const annexTypeRow = inst.msgType == null && spec === '24501' && /^[DE]\./.test(String(inst.section || ''));
+            if (/message (identity|type)/.test(name) && !annexTypeRow) continue; // 类型值在案/非附件→自动
             if (/^spare half octet$/.test(name) || /^protocol discriminator$/.test(name)) continue; // spare/PD 自动
             // BJ 批（v1.66.0）：行守卫 consult 迁 nas_quirks.mjs SAMPLE_STOP_ROWS 行名键
             //（rowStopHit）——BI 期 24008 四行硬编码 continue（skip indicator 钉 0 §10.3.1 /
@@ -13784,10 +13815,12 @@ function sampleSchema(schema, N, seed, msgRe = null, opts = {}) {
             // 开域通道，病行 wide 归因降级 content='zero'）；CANON 行名键命中 → pattern
             // 平铺（长度不变）。BI 16 语义形（semanticDtapValue）迁 DOMAIN dtapFixed 条目
             //（len 不变、content=random 升级）。后续批次逐行开域（每行 wide 证据为准）。
-            if (dtapSpec && value != null) {
+            // CE（v1.87.0）：DOMAIN consult 放开到全 spec——row 条目原全在 dtap 族（放开
+            // 前后既有条目零漂移），24501 附件 D/E message type 域约束（modRange）由此入表。
+            if (value != null) {
               const dq = rowDomainHit(spec, name);
               if (dq) value = domainDerive(dq.domain, value, dq);
-              else {
+              else if (dtapSpec) {
                 const cq = rowCanonicalizeHit(spec, name);
                 if (cq) {
                   value = typeof value === 'number'
@@ -13875,6 +13908,15 @@ function domainDerive(domain, v, q = null) {
       return out;
     }
     return v;
+  }
+  // CE 批（v1.87.0）：modRange——1..mod 循环域（24.501 附件 D/E message type 规范域
+  // 1-4/1-6，独立域源=pycrate FGUEPOLTypeClasses/FGTSNAFEthPortTypeClasses 类字典；
+  // 零额外 rng、值多样性保留）。返回 Uint8Array（V 行 parts 值形态与 rbytes 同——encMsg
+  // V 行取 val[0]，数值形态会静默写 undefined）。
+  if (domain === 'modRange') {
+    const m = (q && q.mod) || 4;
+    const n = typeof v === 'number' ? v : (v && v.length ? v[0] : 0);
+    return Uint8Array.from([1 + (Number(n) % m)]);
   }
   // BJ 批（v1.66.0）：24008 dtapFixed 域形（BI semanticDtapValue 迁 nas_quirks 行名键
   // 条目）——q.len = 探针 CLEAN 档定形值长（tmp/_bi_probe15.mjs 行×值长矩阵）；

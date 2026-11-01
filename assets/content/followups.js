@@ -1299,7 +1299,7 @@
     ] },
     'ma:q3': { levels: [
       { q: 'KgNB 由谁派生？AMF 掌握它吗？',
-        a: 'AMF 经 ICS REQUEST 交出 **Security Key（K_AMF 派生材料）**后，**gNB 与 UE 各自派生 KgNB**——密钥分段持有：AMF 只掌握 NAS 域（KAMF→KNASint/KNASenc），AS 域的 KgNB 全程不出 gNB 与 UE 两端。',
+        a: '33.501 §6.2.2.1 原话：**AMF shall generate KgNB and transfer it to the gNB**——KgNB 由 AMF 从 K_AMF 生成、经 Security Key 下发（UE 侧同算），gNB 收到即从它派生 KRRCint/KRRCenc/KUPint/KUPenc。分段持有的正确说法：NAS 域（KNASint/KNASenc）留在 AMF，AS 末端密钥只在 gNB/UE——AMF 发完 KgNB 不再使用，「gNB 自己派生、AMF 毫不知情」是讹传。',
         ref: '38.413#8.3.1' },
       { q: 'NAS 的安全模式命令为什么能搭 ICS 的车？',
         a: '§8.3.1.2 原话：NAS-PDU 包含在 ICS REQUEST 中时，NG-RAN 应 **pass it transparently towards the UE**——核心网连保安都搭这条车：NAS SMC 随 ICS 的 NAS-PDU 抵达 gNB，再由 DLInformationTransfer 专线投递给 UE。',
@@ -1390,7 +1390,7 @@
         a: '**挂起存上下文**：UE AS 上下文（安全密钥、C-RNTI、小区身份、PDCP/ROHC 状态，接 5GC 的 LTE 版还存 QoS flow→DRB 映射规则）——这是 resume 快速恢复的本钱；普通 release 一切归零，回来重走全家桶。',
         ref: '36.331#5.3.8.1' },
       { q: '「LTE 有没有 INACTIVE」的标准答案？',
-        a: '一句话三个精度台阶：**EPC 版没有**；**Rel-16 起接 5GC 的 LTE 有**（36.331 §4.2.1 括号原文 RRC_INACTIVE (if the UE is connected to 5GC)）；**NR 从第一天就是三态**。说清时代，比背两态三态高一个段位。',
+        a: '一句话三个精度台阶：**EPC 版没有**；**Rel-15 起接 5GC 的 LTE 有**（36.331 §4.2.1 括号原文 RRC_INACTIVE (if the UE is connected to 5GC)）；**NR 从第一天就是三态**。说清时代，比背两态三态高一个段位。',
         ref: '36.331#5.3.8.1' }
     ] },
   };

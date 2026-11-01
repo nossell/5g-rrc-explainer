@@ -201,7 +201,7 @@ ies: [
       maa7: {
         title: 'AMF 验身：取鉴权向量（5G-AKA）', dir: 'int', from: 2, to: 2,
         label: 'AMF · SBA 取鉴权向量', chan: '核心网内部 · AUSF/UDM（33.501 地界）',
-        narr: '**为什么有它**：能发 Msg3 的不一定是真卡——克隆卡/伪终端都能喊一嗓子。AMF 收到注册请求后第一件事是验身：经服务化接口（SBA）找 **AUSF/UDM** 取鉴权向量（5G-AKA 或 EAP-AKA\'），产出根密钥材料 **K_AMF**——它不出核心网，后续 AS 安全的 KgNB 由 gNB 从它派生。鉴权本体的算法与流程在 TS 33.501/29.50x 地界，本图画到"AMF 拿到结果"为止。',
+        narr: '**为什么有它**：能发 Msg3 的不一定是真卡——克隆卡/伪终端都能喊一嗓子。AMF 收到注册请求后第一件事是验身：经服务化接口（SBA）找 **AUSF/UDM** 取鉴权向量（5G-AKA 或 EAP-AKA\'），产出根密钥材料 **K_AMF**——它不出核心网；AS 根密钥 KgNB 由 AMF 与 UE 各自从它派生，AMF 再把 KgNB 经 NGAP 交 gNB（33.501 §6.2.2.1：AMF shall generate KgNB and transfer it to the gNB）。鉴权本体的算法与流程在 TS 33.501/29.50x 地界，本图画到"AMF 拿到结果"为止。',
         plain: '登记台不轻信来客——万一敲门的是克隆卡呢？它先去后台验证部门调一套出题材料，准备考一考这张卡是真是假，顺便拿到后续加密要用的根钥匙材料。',
         refs: ['38.413#8.6.1', '33.501#6.1.3'],
         ies: [],
@@ -310,7 +310,7 @@ ies: [
       maa12: {
         title: 'INITIAL CONTEXT SETUP REQUEST ★交钥匙', dir: 'nas', from: 2, to: 1,
         label: 'INITIAL CONTEXT SETUP REQ', chan: 'NG-C（38.413 §8.3.1/§9.2.2.1）· AMF→gNB · 档案整包交接',
-        narr: '**为什么有它**：到目前为止 gNB 只是"邮差"——不认识这个 UE。这条消息让 gNB 从邮差变成管家：安全钥匙（派生 KgNB 的材料）、安全能力、速率闸门（UE-AMBR）、（有会话时）待建资源清单、还捎着 **NAS 的安全命令**（§8.3.1.2："pass it transparently towards the UE"——核心网连保安都搭这条车）。**本流程最厚的一条消息（原表 50+ 信元一字未并，全部在此）**：字段树默认亮重点，点"展开全部字段"看全量；PDU 会话清单里还有对 AMF 透明的传输容器（UPF 隧道/QoS 流配置，逐层展开四层）。\n\n**读树心法（为什么第一层是"平"的）**：NGAP 每条消息在 ASN.1 里就是一个信元容器（ProtocolIE-Container），57 个信元**平级排队**，每项自带三张标签——信元号 / 关键度（reject·ignore）/ **在场性 Presence（mandatory·optional·conditional）**。你在解码工具里看到的"另一层包裹"，是每个信元外面统一套的 ProtocolIE-Field{id, criticality, value} 外壳，不是信元本身的层级；真正的层级只存在于复合信元内部（如本条的 PDU 会话清单→传输容器→QoS 流清单，已逐层展开）。所以这张表第一层长、子孙少——**长得平是协议的真实形状**。对比：RRC 消息（如本流程第 ③④⑤ 帧）没有这层容器，信纸直接是 ASN.1 结构体，criticalExtensions 版格外壳下层层嵌套，树形自然更深。',
+        narr: '**为什么有它**：到目前为止 gNB 只是"邮差"——不认识这个 UE。这条消息让 gNB 从邮差变成管家：安全钥匙（KgNB 本体——AMF 从 K_AMF 生成后下发）、安全能力、速率闸门（UE-AMBR）、（有会话时）待建资源清单、还捎着 **NAS 的安全命令**（§8.3.1.2："pass it transparently towards the UE"——核心网连保安都搭这条车）。**本流程最厚的一条消息（原表 50+ 信元一字未并，全部在此）**：字段树默认亮重点，点"展开全部字段"看全量；PDU 会话清单里还有对 AMF 透明的传输容器（UPF 隧道/QoS 流配置，逐层展开四层）。\n\n**读树心法（为什么第一层是"平"的）**：NGAP 每条消息在 ASN.1 里就是一个信元容器（ProtocolIE-Container），57 个信元**平级排队**，每项自带三张标签——信元号 / 关键度（reject·ignore）/ **在场性 Presence（mandatory·optional·conditional）**。你在解码工具里看到的"另一层包裹"，是每个信元外面统一套的 ProtocolIE-Field{id, criticality, value} 外壳，不是信元本身的层级；真正的层级只存在于复合信元内部（如本条的 PDU 会话清单→传输容器→QoS 流清单，已逐层展开）。所以这张表第一层长、子孙少——**长得平是协议的真实形状**。对比：RRC 消息（如本流程第 ③④⑤ 帧）没有这层容器，信纸直接是 ASN.1 结构体，criticalExtensions 版格外壳下层层嵌套，树形自然更深。',
         plain: '验身通过，核心网把整包开张材料交给基站：安全钥匙、限速额度、该建的资源清单一应俱全——基站从只管传信的邮差，升级成掌管这台手机事务的管家。',
         refs: ['38.413#8.3.1', '38.413#9.2.2.1', '38.413#9.3.4.1'],
         ies: [
@@ -325,7 +325,7 @@ ies: [
           {"name": "Allowed NSSAI", "type": "9.3.1.31", "pres": "M", "meta": "贵宾厅通行证——允许进的切片集合", "sem": "允许的 S-NSSAI 列表", "ref": "38.413#9.2.2.1", "focus": "core", "dict": "snssai"},
           {"name": "Partially Allowed NSSAI", "type": "9.3.1.261", "pres": "O", "meta": "部分许可的贵宾厅——只放行部分切片成员", "sem": "部分允许的 S-NSSAI", "ref": "38.413#9.2.2.1", "focus": "extra"},
           {"name": "UE Security Capabilities", "type": "9.3.1.86", "pres": "M", "meta": "手机会哪些锁——完整性/加密算法清单，gNB 从中挑一副", "sem": "UE 安全能力（NR/E-UTRA 各一组算法）", "ref": "38.413#9.2.2.1", "focus": "core", "dict": "ue-security-capabilities"},
-          {"name": "Security Key", "type": "9.3.1.87", "pres": "M", "meta": "钥匙坯——gNB 自己开模派生 KgNB，AMF 反而不知道 KgNB", "sem": "安全密钥（K_AMF 派生物）", "ref": "38.413#9.2.2.1", "focus": "core", "dict": "security-key"},
+          {"name": "Security Key", "type": "9.3.1.87", "pres": "M", "meta": "KgNB 本体——AMF 从 K_AMF 生成并经此下发，gNB 收到即用", "sem": "安全密钥（KgNB，33.501 §6.2.2.1）", "ref": "38.413#9.2.2.1", "focus": "core", "dict": "security-key"},
           {"name": "Trace Activation", "type": "9.3.1.14", "pres": "O", "meta": "跟踪工单——按会话/小区采样上报", "sem": "跟踪激活", "ref": "38.413#9.2.2.1", "focus": "extra"},
           {"name": "Mobility Restriction List", "type": "9.3.1.85", "pres": "O", "meta": "禁入区域清单——哪不能去、哪些频点禁用", "sem": "移动性限制", "ref": "38.413#9.2.2.1", "focus": "extra"},
           {"name": "UE Radio Capability", "type": "9.3.1.74", "pres": "O", "meta": "能力档案存档——带了它 gNB 可跳过能力问询", "sem": "无线能力容器（核心网存档版）", "ref": "38.413#9.2.2.1", "focus": "core", "dict": "ue-radio-capability"},
@@ -372,7 +372,7 @@ ies: [
           {"name": "Extended Old AMF", "type": "Extended AMF Name（9.3.3.51）", "pres": "O", "meta": "前任管家名帖（加长版）——有它则 Old AMF 作废", "sem": "扩展旧 AMF 标识", "ref": "38.413#9.2.2.1", "focus": "extra"},
           {"name": "AMF UE NGAP ID 2", "type": "AMF UE NGAP ID", "pres": "O", "meta": "第二档案号——跨 AMF Set 场景的备用关联", "sem": "AMF 侧第二关联标识", "ref": "38.413#9.2.2.1", "focus": "extra"}
         ],
-        exam: '三连问：① KgNB 谁算——gNB（UE 同算），AMF 只交 K_AMF 材料；② NAS SMC 走哪条——本消息的 NAS-PDU 透传；③ 这条之后 gNB 有了什么——安全根/闸门/待建清单。全量信元逐个点开：每个都有比喻与白话。'
+        exam: '三连问：① KgNB 谁算——AMF 从 K_AMF 生成并经 NGAP 下发（UE 同算，33.501 §6.2.2.1），gNB 收到即派生四把末端密钥；② NAS SMC 走哪条——本消息的 NAS-PDU 透传；③ 这条之后 gNB 有了什么——安全根/闸门/待建清单。全量信元逐个点开：每个都有比喻与白话。'
       },
       maa13: {
         title: 'SecurityModeCommand（AS 安全激活）', dir: 'dl', from: 1, to: 0,
@@ -676,7 +676,7 @@ ies: [
         ref: '38.413#8.6.2' },
       { at: 12, q: 'KgNB（AS 安全的根密钥）由谁派生？',
         options: ['AMF 算好发给 gNB', 'gNB 用 AMF 交来的 K_AMF 派生材料自己派生（UE 侧同样算）', 'UE 算好上报', 'gNB 与 AMF 各算一半拼起来'],
-        correct: 1, why: 'ICS REQUEST 交的是 Security Key（K_AMF 派生材料）；KgNB 由 gNB（和 UE）各自派生——密钥分段持有，AMF 不掌握 AS 密钥。',
+        correct: 0, why: '33.501 §6.2.2.1 原文：AMF shall generate KgNB and transfer it to the gNB——KgNB 由 AMF 从 K_AMF 生成并经 Security Key 下发，UE 侧同算；gNB 收到后派生 KRRCint/KRRCenc/KUPint/KUPenc 四把末端密钥。AMF 保留 NAS 域密钥（KNASint/KNASenc），发完 KgNB 不再使用 AS 密钥。',
         ref: '38.413#8.3.1' },
       { at: 13, q: 'NAS 的安全模式命令（NAS SMC）通过哪条消息到达 UE？',
         options: ['单独的 RRC 消息', '藏在 INITIAL CONTEXT SETUP REQUEST 的 NAS-PDU 里，经 gNB 透传', '经 SIB1 广播', '经 XnAP 转发'],
@@ -712,8 +712,8 @@ ies: [
       },
       {
         q: 'AS 安全激活中，KgNB 的派生发生在哪里？',
-        o: ['AMF', 'gNB 与 UE 各自用 K_AMF 派生材料计算', '只在 UE', 'AUSF'], a: 1,
-        why: 'AMF 交出 Security Key 后，gNB 与 UE 各自派生 KgNB——密钥分段持有。',
+        o: ['AMF', 'gNB 与 UE 各自用 K_AMF 派生材料计算', '只在 UE', 'AUSF'], a: 0,
+        why: '33.501 §6.2.2.1：AMF shall generate KgNB and transfer it to the gNB——AMF 生成并经 NGAP 下发，UE 同算；gNB 据此派生四把 AS 末端密钥。',
         ref: '38.413#8.3.1'
       },
       {
